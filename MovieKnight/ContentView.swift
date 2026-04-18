@@ -159,7 +159,7 @@ struct AuthView: View {
                 .padding(.bottom, 40)
             }
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .if16_4 { $0.scrollBounceBehavior(.basedOnSize) }
     }
 
     func authenticate() async {
@@ -851,4 +851,13 @@ struct ScaleButtonStyle: ButtonStyle {
 
 #Preview {
     ContentView()
+}
+
+// MARK: - View Helpers
+
+extension View {
+    @ViewBuilder
+    func if16_4<Content: View>(@ViewBuilder transform: (Self) -> Content) -> some View {
+        if #available(iOS 16.4, *) { transform(self) } else { self }
+    }
 }
