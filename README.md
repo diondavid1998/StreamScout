@@ -9,12 +9,32 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 - **Streaming service picker** — select from Netflix, Hulu, Prime Video, Disney+, Paramount+, Peacock, Max, and Crunchyroll
 - **Movies & TV Shows** — browse a live catalog pulled from TMDB and enriched with OMDB ratings
 - **Multi-source ratings** — IMDb, Rotten Tomatoes, Metacritic, and TMDb scores shown per title
-- **Language filter** — filter catalog by original language (English, Spanish, French, Japanese, and more)
+- **Genre filter** — multi-select genre filtering including Anime
+- **Language filter** — filter catalog by original language
 - **Sort & filter** — sort by rating, release date, or alphabetically; filter by media type
 - **Pagination** — smooth page-based browsing with a background sync indicator
-- **Progressive Web App (PWA)** — installable on mobile, works offline via service worker
+- **Progressive Web App (PWA)** — installable on iPhone via Safari, works offline via service worker
 - **User accounts** — JWT-based auth with register/login; preferences saved per user
 - **iOS app** — native Swift/SwiftUI companion app (Xcode project included)
+
+---
+
+## 📱 Install on iPhone (PWA)
+
+StreamScore is a Progressive Web App — you can add it to your iPhone Home Screen and it will run like a native app (full screen, no browser chrome).
+
+**Requirements:** iPhone running iOS 16.4 or later, Safari browser.
+
+**Steps:**
+
+1. Open **Safari** on your iPhone (must be Safari — Chrome/Firefox won't show the install option)
+2. Navigate to the StreamScore web app URL
+3. Tap the **Share** button (the box with an arrow pointing up) in the bottom toolbar
+4. Scroll down in the share sheet and tap **"Add to Home Screen"**
+5. Edit the name if you like (it defaults to "StreamScore"), then tap **Add**
+6. The StreamScore icon will appear on your Home Screen — tap it to launch
+
+> ℹ️ The app runs in standalone mode (no Safari address bar), caches content for offline use, and behaves like a native app.
 
 ---
 
@@ -39,17 +59,16 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 | Rate limiting | `express-rate-limit` (20 req / 15 min on auth) |
 | Caching | Daily catalog cache in SQLite with background hydration |
 
-### iOS (`StreamScore/`)
+### iOS (`MovieKnight/`)
 - Swift / SwiftUI
-- Core Data
-- Companion to the web app
+- Native companion app — same backend, same account
 
 ---
 
 ## Project Structure
 
 ```
-StreamScore/
+MovieKnight/
 ├── backend/              # Node/Express API server
 │   ├── index.js          # Express app, routes, auth
 │   ├── catalogCache.js   # SQLite catalog caching & rating hydration
@@ -61,8 +80,8 @@ StreamScore/
 │   │   └── logos/        # Rating & platform logo assets
 │   └── package.json
 ├── logo/                 # Source logo assets
-├── StreamScore/          # iOS Swift app
-├── StreamScore.xcodeproj/
+├── MovieKnight/          # iOS Swift app (displays as "StreamScore")
+├── MovieKnight.xcodeproj/
 └── README.md
 ```
 
