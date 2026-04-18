@@ -63,7 +63,12 @@ struct ContentView: View {
 struct LoadingView: View {
     var body: some View {
         VStack(spacing: 16) {
-            Text("🎬").font(.system(size: 64))
+            Image("StreamScoreLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 100, height: 100)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .shadow(color: .mkAccent.opacity(0.4), radius: 12, x: 0, y: 4)
             Text("StreamScore")
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing))
@@ -89,8 +94,12 @@ struct AuthView: View {
             VStack(spacing: 0) {
                 // Hero
                 VStack(spacing: 10) {
-                    Text("🎬")
-                        .font(.system(size: 68))
+                    Image("StreamScoreLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 90, height: 90)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .mkAccent.opacity(0.45), radius: 14, x: 0, y: 6)
                         .padding(.top, 60)
                     Text("StreamScore")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
