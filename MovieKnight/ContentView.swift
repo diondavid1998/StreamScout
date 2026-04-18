@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - App State
 
@@ -159,7 +160,7 @@ struct AuthView: View {
                 .padding(.bottom, 40)
             }
         }
-        .if16_4 { $0.scrollBounceBehavior(.basedOnSize) }
+        .scrollBounceBasedOnSize()
     }
 
     func authenticate() async {
@@ -781,7 +782,7 @@ struct MKTextField: View {
                 SecureField(placeholder, text: $text).focused($focused)
             } else {
                 TextField(placeholder, text: $text)
-                    .autocapitalization(.none).autocorrectionDisabled().focused($focused)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().focused($focused)
             }
         }
         .foregroundColor(.mkText)
@@ -856,6 +857,15 @@ struct ScaleButtonStyle: ButtonStyle {
 // MARK: - View Helpers
 
 extension View {
+    @ViewBuilder
+    func scrollBounceBasedOnSize() -> some View {
+        if #available(iOS 16.4, *) {
+            self.scrollBounceBehavior(.basedOnSize)
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder
     func if16_4<Content: View>(@ViewBuilder transform: (Self) -> Content) -> some View {
         if #available(iOS 16.4, *) { transform(self) } else { self }
