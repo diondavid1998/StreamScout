@@ -375,6 +375,7 @@ struct CatalogView: View {
     @State private var showSettings = false
     @State private var showGenrePicker = false
     @State private var genreFilters: Set<String> = []
+    @State private var pollingTask: Task<Void, Never>?
 
     static let allGenres: [(key: String, label: String)] = [
         ("Action","Action"), ("Adventure","Adventure"), ("Animation","Animation"),
@@ -425,10 +426,12 @@ struct CatalogView: View {
         .task {
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
             await fetch()
+            startPollingIfNeeded()
         }
         .onChange(of: showSettings) { open in
             if !open { Task { await fetch() } }
         }
+        .onDisappear { pollingTask?.cancel() }
     }
 
     // MARK: Sub-views
@@ -598,6 +601,19 @@ struct CatalogView: View {
         }
         isLoading = false
     }
+
+    func startPollingIfNeeded() {
+        guard meta?.refreshing == true else { return }
+        pollingTask?.cancel()
+        pollingTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { break }
+                await fetch()
+                if meta?.refreshing != true { break }
+            }
+        }
+    }
 }
 
 // MARK: - Movie Card
@@ -702,6 +718,12 @@ struct MovieCardView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
                     ForEach(ratings, id: \.label) { r in RatingChip(entry: r) }
+                    // Show loading indicator if only TMDb is present (OMDB ratings pending)
+                    if ratings.count == 1 && ratings[0].label == "TMDb" {
+                        Text("⏳ Ratings loading…")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.mkMuted)
+                    }
                 }
             }
             .padding(.top, 2)

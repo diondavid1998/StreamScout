@@ -3,8 +3,11 @@ import Foundation
 // MARK: - API Config
 
 struct API {
-    // For Simulator use localhost. For a physical device, replace with your Mac's LAN IP, e.g. "http://192.168.1.100:4000"
+    #if targetEnvironment(simulator)
     static let baseURL = "http://localhost:4000"
+    #else
+    static let baseURL = "https://streamscore-backend.onrender.com"
+    #endif
     static let appName = "StreamScore"
 }
 
