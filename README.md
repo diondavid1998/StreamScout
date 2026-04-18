@@ -4,6 +4,44 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 
 ---
 
+## 🚀 One-Click Deploy (Free Hosting)
+
+Deploy the backend to Render and the frontend to Netlify — both are free tiers, no credit card required.
+
+### Step 1 — Deploy the backend on Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/diondavid1998/MovieKnight)
+
+1. Click the button above and sign in / create a free [Render](https://render.com) account.
+2. Render will detect `render.yaml` and pre-fill the service settings.
+3. Fill in the required environment variables when prompted:
+   - `TMDB_API_KEY` → get a free key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+   - `OMDB_API_KEY` → get a free key at [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx)
+   - `FRONTEND_URL` → leave blank for now; update it after Step 2
+   - `JWT_SECRET` → auto-generated for you ✅
+4. Click **Apply** — Render builds and starts the backend. Copy the URL it gives you (e.g. `https://streamscore-backend.onrender.com`).
+
+### Step 2 — Deploy the frontend on Netlify
+
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/diondavid1998/MovieKnight)
+
+1. Click the button above and sign in / create a free [Netlify](https://netlify.com) account.
+2. Netlify will detect `netlify.toml` and use `web-frontend/` as the build root automatically.
+3. After the deploy finishes, go to **Site configuration → Environment variables** and add:
+   - Key: `REACT_APP_API_BASE` → Value: the Render backend URL from Step 1 (e.g. `https://streamscore-backend.onrender.com`)
+4. Go to **Deploys → Trigger deploy → Deploy site** to rebuild with the new variable.
+5. Copy your Netlify site URL (e.g. `https://streamscore-xyz.netlify.app`).
+
+### Step 3 — Connect frontend ↔ backend
+
+1. Back on the Render dashboard, open the `streamscore-backend` service → **Environment**.
+2. Set `FRONTEND_URL` to your Netlify URL from Step 2 (e.g. `https://streamscore-xyz.netlify.app`).
+3. Render will redeploy automatically.
+
+> ✅ Both services are now live and talking to each other. Use your Netlify URL to open the app in Safari and install it as a PWA (see section below).
+
+---
+
 ## Features
 
 - **Streaming service picker** — select from Netflix, Hulu, Prime Video, Disney+, Paramount+, Peacock, Max, and Crunchyroll
@@ -28,7 +66,7 @@ StreamScore is a Progressive Web App — you can add it to your iPhone Home Scre
 **Steps:**
 
 1. Open **Safari** on your iPhone (must be Safari — Chrome/Firefox won't show the install option)
-2. Navigate to the StreamScore web app URL
+2. Navigate to your StreamScore Netlify URL — e.g. **`https://your-site-name.netlify.app`** (replace with the URL you got after deploying above)
 3. Tap the **Share** button (the box with an arrow pointing up) in the bottom toolbar
 4. Scroll down in the share sheet and tap **"Add to Home Screen"**
 5. Edit the name if you like (it defaults to "StreamScore"), then tap **Add**

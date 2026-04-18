@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: streamscore-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node index.js
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: FRONTEND_URL
+        sync: false        # Set this to your Netlify URL after deploying the frontend
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TMDB_API_KEY
+        sync: false        # Get your key at https://www.themoviedb.org/settings/api
+      - key: OMDB_API_KEY
+        sync: false        # Get your key at https://www.omdbapi.com/apikey.aspx

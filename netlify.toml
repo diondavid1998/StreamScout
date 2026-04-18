@@ -1,0 +1,14 @@
+[build]
+  base    = "web-frontend"
+  command = "npm run build"
+  publish = "build"
+
+[build.environment]
+  # Set REACT_APP_API_BASE to your Render backend URL in the Netlify dashboard
+  # under Site configuration → Environment variables
+  # Example: https://streamscore-backend.onrender.com
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
