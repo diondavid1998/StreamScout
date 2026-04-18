@@ -22,16 +22,18 @@ function createApp(db, { disableRateLimit = false } = {}) {
   const app = express();
 
   // Support comma-separated list so both Netlify and localhost can be allowed at once
-  // e.g. FRONTEND_URL="https://screescoretest.netlify.app,http://localhost:3000"
+  // e.g. FRONTEND_URL="https://screenscoretest.netlify.app,http://localhost:3000"
+  // Trailing slashes are stripped so accidental misconfiguration on Render/Railway still works
   const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/+$/, ''))  // strip trailing slashes
     .filter(Boolean);
   app.use(
     cors({
       origin: (origin, callback) => {
         // Allow server-to-server (no origin) and listed origins
-        if (!origin || allowedOrigins.includes(origin)) {
+        const normalised = (origin || '').replace(/\/+$/, '');
+        if (!origin || allowedOrigins.includes(normalised)) {
           callback(null, true);
         } else {
           callback(new Error(`CORS: origin ${origin} not allowed`));
