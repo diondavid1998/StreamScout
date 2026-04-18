@@ -667,6 +667,8 @@ function App() {
   const [languageFilters, setLanguageFilters] = useState([]);
   const [genreFilters, setGenreFilters] = useState([]);
   const [catalogPage, setCatalogPage] = useState(1);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showIosTip, setShowIosTip] = useState(false);
   const abortRef = useRef(null);
 
   const buildApiErrorMessage = (data, fallbackMessage) => {
@@ -1047,6 +1049,31 @@ function App() {
     setLanguageFilters((current) => current.filter((key) => languages.includes(key)));
   }, [languages]);
 
+  useEffect(() => {
+    const handler = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isInStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (isIos && !isInStandaloneMode) {
+      setShowIosTip(true);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setInstallPrompt(null);
+    }
+  };
+
   const handleAuth = async (event) => {
     event.preventDefault();
     clearFeedback();
@@ -1408,6 +1435,16 @@ function App() {
                 >
                   ⚙ Settings
                 </button>
+                {installPrompt && (
+                  <button
+                    style={{ ...styles.button, ...styles.buttonSmall }}
+                    className="btn-tap"
+                    onClick={handleInstall}
+                    type="button"
+                  >
+                    ⬇ Install App
+                  </button>
+                )}
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
                   className="btn-tap"
@@ -1418,6 +1455,20 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {showIosTip && (
+              <div style={{ ...styles.info, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span>📲 To install on iPhone: tap the <strong>Share</strong> button in Safari, then <strong>"Add to Home Screen"</strong>.</span>
+                <button
+                  type="button"
+                  onClick={() => setShowIosTip(false)}
+                  style={{ ...styles.inlineButton, fontSize: 18, lineHeight: 1, flexShrink: 0 }}
+                  aria-label="Dismiss"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             <div style={styles.controlRow} className="control-row-wrap">
               <div style={styles.controlGroup}>
