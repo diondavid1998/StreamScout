@@ -153,20 +153,39 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
       snapshotMode: true,
     });
 
+    const syncStartTime = new Date().toISOString();
+
     await enqueueWrite(async () => {
       await run(db, 'BEGIN IMMEDIATE TRANSACTION');
       try {
-        await run(db, 'DELETE FROM catalog_cache_entries WHERE scope_key = ?', [scopeKey]);
-
         for (const item of catalog.items) {
           await run(
             db,
-            `INSERT OR REPLACE INTO catalog_cache_entries (
+            // Upsert catalog metadata but leave existing hydrated ratings untouched.
+            // rating_imdb*, rating_rt*, rating_meta* are intentionally absent from the
+            // SET clause so a re-sync never wipes ratings that were already fetched.
+            `INSERT INTO catalog_cache_entries (
               scope_key, media_type, tmdb_id, title, overview, release_date, year, poster_url, backdrop_path,
               tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id, rating_imdb,
               rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num, available_on_json,
               available_on_keys_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(scope_key, media_type, tmdb_id) DO UPDATE SET
+              title                = excluded.title,
+              overview             = excluded.overview,
+              release_date         = excluded.release_date,
+              year                 = excluded.year,
+              poster_url           = excluded.poster_url,
+              backdrop_path        = excluded.backdrop_path,
+              tmdb_rating          = excluded.tmdb_rating,
+              tmdb_vote_count      = excluded.tmdb_vote_count,
+              popularity           = excluded.popularity,
+              original_language    = excluded.original_language,
+              genres_json          = excluded.genres_json,
+              imdb_id              = COALESCE(excluded.imdb_id, imdb_id),
+              available_on_json    = excluded.available_on_json,
+              available_on_keys_json = excluded.available_on_keys_json,
+              updated_at           = excluded.updated_at`,
             [
               scopeKey,
               item.mediaType,
@@ -191,10 +210,17 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
               item.sortableRatings?.metacritic || null,
               JSON.stringify(item.availableOn || []),
               JSON.stringify(item.availableOnKeys || []),
-              new Date().toISOString(),
+              syncStartTime,
             ]
           );
         }
+
+        // Remove titles that are no longer in the catalog (updated_at not touched by this sync)
+        await run(
+          db,
+          `DELETE FROM catalog_cache_entries WHERE scope_key = ? AND updated_at < ?`,
+          [scopeKey, syncStartTime]
+        );
 
         await run(
           db,
@@ -273,9 +299,9 @@ async function hydrateScopeRatings(db, scopeKey) {
            AND imdb_id IS NOT NULL
            AND imdb_id != ''
            AND (
-             rating_imdb IS NULL OR rating_imdb = '' OR
-             rating_rt   IS NULL OR rating_rt   = '' OR
-             rating_meta IS NULL OR rating_meta = ''
+             rating_imdb IS NULL OR
+             rating_rt   IS NULL OR
+             rating_meta IS NULL
            )
          LIMIT ?`,
         [scopeKey, HYDRATION_BATCH_SIZE]
@@ -623,9 +649,9 @@ async function readCachedCatalog(
   }));
 
   if (rows.some((row) => row.imdb_id && (
-    row.rating_imdb == null || row.rating_imdb === '' ||
-    row.rating_rt   == null || row.rating_rt   === '' ||
-    row.rating_meta == null || row.rating_meta === ''
+    row.rating_imdb == null ||
+    row.rating_rt   == null ||
+    row.rating_meta == null
   ))) {
     hydrateScopeRatings(db, scopeKey).catch((error) => {
       console.error(`Deferred rating hydration failed for ${scopeKey}:`, error);

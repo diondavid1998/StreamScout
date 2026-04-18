@@ -1013,6 +1013,13 @@ function App() {
     }
   }, [page, fetchMovies]);
 
+  // Auto-retry when the backend is still warming up the catalog cache
+  useEffect(() => {
+    if (!catalogMeta?.refreshing || page !== 'movies' || loadingMovies) return;
+    const timer = setTimeout(() => fetchMovies(), 8000);
+    return () => clearTimeout(timer);
+  }, [catalogMeta, page, loadingMovies, fetchMovies]);
+
   useEffect(() => {
     setServiceFilters((current) => current.filter((key) => selected.includes(key)));
   }, [selected]);
@@ -1597,10 +1604,25 @@ function App() {
                   return (
                     <div key={movie.id} style={styles.movieCard} className="movie-card-wrap" data-media={movie.mediaType}>
                       {movie.posterUrl ? (
-                        <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster} className="movie-poster-el" loading="lazy" />
-                      ) : (
-                        <div style={styles.moviePosterPlaceholder} className="movie-poster-ph">🎬</div>
-                      )}
+                        <img
+                          src={movie.posterUrl}
+                          alt={movie.title}
+                          style={styles.moviePoster}
+                          className="movie-poster-el"
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const ph = e.currentTarget.nextSibling;
+                            if (ph) ph.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <div
+                        style={{ ...styles.moviePosterPlaceholder, display: movie.posterUrl ? 'none' : 'flex' }}
+                        className="movie-poster-ph"
+                      >
+                        🎬
+                      </div>
                       <div style={styles.movieBody}>
                         <div style={styles.movieTitle} className="movie-title-el">
                           {movie.title}
@@ -1653,7 +1675,13 @@ function App() {
               </div>
             )}
 
-            {!movies.length && !loadingMovies ? <div style={styles.emptyState}>No catalog titles match the current filters.</div> : null}
+            {!movies.length && !loadingMovies ? (
+              <div style={styles.emptyState}>
+                {catalogMeta?.refreshing
+                  ? '⏳ Building your catalog… Hang tight, this takes a moment on first load. The page will refresh automatically.'
+                  : 'No catalog titles match the current filters.'}
+              </div>
+            ) : null}
             {totalPages > 1 ? (
               <div style={styles.paginationRow}>
                 <span style={styles.paginationSummary}>Page {catalogPage} of {totalPages}</span>

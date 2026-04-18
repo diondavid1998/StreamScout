@@ -67,7 +67,7 @@ struct CatalogItem: Identifiable {
     var metacriticAudience: String?
 }
 
-extension CatalogItem: Codable {
+extension CatalogItem: Decodable {
     enum CodingKeys: String, CodingKey {
         case id, title, mediaType, year, overview, posterUrl, genres, availableOn
         case popularity, tmdbRating, tmdbVotes
@@ -135,7 +135,7 @@ struct CatalogMeta: Codable {
     let languages: [String]?
 }
 
-struct CatalogResponse: Codable {
+struct CatalogResponse: Decodable {
     let items: [CatalogItem]?   // backend returns "items"
     let movies: [CatalogItem]?  // fallback key
     let meta: CatalogMeta?
