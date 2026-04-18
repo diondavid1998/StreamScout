@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 // MARK: - App State
 
@@ -306,17 +305,11 @@ struct PlatformTile: View {
                                 .stroke(isSelected ? platform.accentColor : Color.mkBorder, lineWidth: isSelected ? 1.8 : 1)
                         )
 
-                    if UIImage(named: platform.logoAsset) != nil {
-                        Image(platform.logoAsset)
+                    Image(platform.logoAsset)
                             .resizable()
                             .scaledToFit()
                             .frame(width: 46, height: 46)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else {
-                        Text(String(platform.name.prefix(2)))
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .foregroundColor(platform.accentColor)
-                    }
 
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
@@ -728,7 +721,7 @@ struct ProviderChip: View {
     }
     var body: some View {
         HStack(spacing: 3) {
-            if let p = platform, UIImage(named: p.logoAsset) != nil {
+            if let p = platform {
                 Image(p.logoAsset).resizable().scaledToFit()
                     .frame(width: 12, height: 12)
                     .clipShape(RoundedRectangle(cornerRadius: 2))
@@ -746,7 +739,7 @@ struct RatingChip: View {
     let entry: MovieCardView.RatingEntry
     var body: some View {
         HStack(spacing: 5) {
-            if let asset = entry.logoAsset, UIImage(named: asset) != nil {
+            if let asset = entry.logoAsset {
                 Image(asset).resizable().scaledToFit().frame(width: 14, height: 14)
             } else {
                 Circle().fill(entry.color).frame(width: 7, height: 7)
