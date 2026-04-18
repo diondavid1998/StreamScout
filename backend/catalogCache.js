@@ -141,6 +141,17 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
   }
 
   const syncPromise = (async () => {
+    // On a cold start (no cached entries yet for this scope), fetch OMDB ratings inline
+    // so they're available the moment the catalog is first written — no separate hydration lag.
+    // On subsequent re-syncs the UPSERT preserves existing ratings, so includeRatings: false
+    // avoids burning OMDB quota every 24 h.
+    const existingRow = await get(
+      db,
+      'SELECT COUNT(*) AS count FROM catalog_cache_entries WHERE scope_key = ?',
+      [scopeKey]
+    );
+    const isColdStart = (existingRow?.count || 0) === 0;
+
     const catalog = await fetchCatalogByPlatforms(platforms, {
       mediaType: 'all',
       sortBy: 'popularity',
@@ -148,7 +159,7 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
       page: 1,
       pageCount: 6,
       region,
-      includeRatings: false,
+      includeRatings: isColdStart,
       includeExternalIds: true,
       snapshotMode: true,
     });
@@ -161,9 +172,9 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
         for (const item of catalog.items) {
           await run(
             db,
-            // Upsert catalog metadata but leave existing hydrated ratings untouched.
-            // rating_imdb*, rating_rt*, rating_meta* are intentionally absent from the
-            // SET clause so a re-sync never wipes ratings that were already fetched.
+            // On cold start, excluded.rating_* are real OMDB values → COALESCE takes them.
+            // On re-sync (includeRatings: false), excluded.rating_* are null → COALESCE
+            // keeps the existing hydrated values, so ratings never regress to null.
             `INSERT INTO catalog_cache_entries (
               scope_key, media_type, tmdb_id, title, overview, release_date, year, poster_url, backdrop_path,
               tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id, rating_imdb,
@@ -183,6 +194,12 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
               original_language    = excluded.original_language,
               genres_json          = excluded.genres_json,
               imdb_id              = COALESCE(excluded.imdb_id, imdb_id),
+              rating_imdb          = COALESCE(excluded.rating_imdb, rating_imdb),
+              rating_imdb_num      = COALESCE(excluded.rating_imdb_num, rating_imdb_num),
+              rating_rt            = COALESCE(excluded.rating_rt, rating_rt),
+              rating_rt_num        = COALESCE(excluded.rating_rt_num, rating_rt_num),
+              rating_meta          = COALESCE(excluded.rating_meta, rating_meta),
+              rating_meta_num      = COALESCE(excluded.rating_meta_num, rating_meta_num),
               available_on_json    = excluded.available_on_json,
               available_on_keys_json = excluded.available_on_keys_json,
               updated_at           = excluded.updated_at`,
