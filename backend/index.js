@@ -6,7 +6,7 @@ const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 4000;
 
-const db = new sqlite3.Database('./db.sqlite', (err) => {
+const db = new sqlite3.Database(process.env.DB_PATH || './db.sqlite', (err) => {
   if (err) {
     console.error('Could not connect to database', err);
   } else {
