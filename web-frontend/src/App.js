@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css';
 import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenTomatoesType } from './utils';
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend.onrender.com';
+const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend-production.up.railway.app';
 const AUTH_TOKEN_KEY = 'movieKnight.authToken';
 const AUTH_USERNAME_KEY = 'movieKnight.username';
 const BYPASS_MODE_KEY = 'movieKnight.bypassMode';
