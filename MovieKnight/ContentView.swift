@@ -642,8 +642,7 @@ struct CatalogView: View {
             movies = resp.catalog
             meta   = resp.meta
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
-            // If catalog is syncing for first time, start polling until it populates
-            if movies.isEmpty && meta?.refreshing == true {
+            if meta?.refreshing == true {
                 startPollingIfNeeded()
             }
         } catch APIError.unauthorized {

@@ -73,7 +73,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
     if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
       return res.status(400).json({ error: 'Password must be 6–128 characters' });
     }
-    const cleanUsername = username.trim();
+    const cleanUsername = username.trim().toLowerCase();
     const hash = await bcrypt.hash(password, 10);
     db.run(
       'INSERT INTO users (username, password) VALUES (?, ?)',
@@ -101,7 +101,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
     if (typeof username !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ error: 'Invalid credentials' });
     }
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+    db.get('SELECT * FROM users WHERE username = ?', [username.trim().toLowerCase()], async (err, user) => {
       if (err || !user) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
