@@ -1508,7 +1508,7 @@ struct DetailSheet: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.mkBackground.ignoresSafeArea()
                 ScrollView {
@@ -1668,7 +1668,7 @@ struct DetailSheet: View {
         .disabled(isTogglingWatched)
     }
 
-    func loadDetails() async {
+    @MainActor func loadDetails() async {
         isLoading = true
         do {
             let d: TitleDetails = try await APIService.shared.get(
@@ -1679,7 +1679,7 @@ struct DetailSheet: View {
         isLoading = false
     }
 
-    func loadWatched() async {
+    @MainActor func loadWatched() async {
         guard app.watchedIds.isEmpty else { return }
         do {
             let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
@@ -1687,7 +1687,7 @@ struct DetailSheet: View {
         } catch { }
     }
 
-    func toggleWatched() async {
+    @MainActor func toggleWatched() async {
         isTogglingWatched = true
         do {
             if isWatched {
@@ -1777,18 +1777,20 @@ struct SettingsView: View {
     @State private var tab: Tab = .services
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.mkBackground.ignoresSafeArea()
                 VStack(spacing: 0) {
                     tabPicker.padding(.horizontal, 16).padding(.vertical, 10)
                     Divider().overlay(Color.mkBorder)
-                    TabView(selection: $tab) {
-                        ServicesTabView().environmentObject(app).tag(Tab.services)
-                        ProfileTabView().environmentObject(app).tag(Tab.profile)
-                        WatchlistTabView().environmentObject(app).tag(Tab.watchlist)
+                    Group {
+                        switch tab {
+                        case .services:  ServicesTabView().environmentObject(app)
+                        case .profile:   ProfileTabView().environmentObject(app)
+                        case .watchlist: WatchlistTabView().environmentObject(app)
+                        }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .animation(.easeInOut(duration: 0.2), value: tab)
                 }
             }
@@ -1875,7 +1877,7 @@ struct ServicesTabView: View {
         }
     }
 
-    func saveServices() async {
+    @MainActor func saveServices() async {
         isSaving = true
         do {
             let body: [String: Any] = [
@@ -2006,7 +2008,7 @@ struct ProfileTabView: View {
         .padding(.top, 8)
     }
 
-    func loadAccount() async {
+    @MainActor func loadAccount() async {
         isLoadingAccount = true
         do {
             let info: AccountInfo = try await APIService.shared.get("/account", token: app.token)
@@ -2021,7 +2023,7 @@ struct ProfileTabView: View {
         isLoadingAccount = false
     }
 
-    func loadAvatar(from item: PhotosPickerItem?) async {
+    @MainActor func loadAvatar(from item: PhotosPickerItem?) async {
         guard let item else { return }
         guard let data = try? await item.loadTransferable(type: Data.self),
               let srcImg = UIImage(data: data) else { return }
@@ -2034,7 +2036,7 @@ struct ProfileTabView: View {
         }
     }
 
-    func saveProfile() async {
+    @MainActor func saveProfile() async {
         isSaving = true; message = ""; messageIsError = false
         var body: [String: String] = [:]
         let trimUser = username.trimmingCharacters(in: .whitespaces)
@@ -2111,7 +2113,7 @@ struct WatchlistTabView: View {
         .task { await loadWatched() }
     }
 
-    func loadWatched() async {
+    @MainActor func loadWatched() async {
         isLoading = true
         do {
             let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
@@ -2121,7 +2123,7 @@ struct WatchlistTabView: View {
         isLoading = false
     }
 
-    func removeItems(at offsets: IndexSet) async {
+    @MainActor func removeItems(at offsets: IndexSet) async {
         for i in offsets {
             let item = watchedItems[i]
             do {
