@@ -764,8 +764,8 @@ struct CatalogView: View {
     }
 
     var emptyState: some View {
-        Spacer()
-        return VStack(spacing: 14) {
+        VStack(spacing: 14) {
+            Spacer()
             if app.selectedPlatforms.isEmpty {
                 Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 44)).foregroundColor(.mkMuted)
                 Text("No services selected").font(.title3).bold().foregroundColor(.mkMuted)
@@ -783,6 +783,7 @@ struct CatalogView: View {
                 MKButton(label: "Edit Services", icon: "gearshape.fill") { showSettingsView = true }
                     .frame(maxWidth: 220).padding(.top, 4)
             }
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
