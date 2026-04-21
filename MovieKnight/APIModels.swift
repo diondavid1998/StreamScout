@@ -36,6 +36,7 @@ struct AuthResponse: Codable {
 
 struct PlatformResponse: Codable {
     let platforms: [String]
+    let languages: [String]?
 }
 
 struct GenericResponse: Codable {

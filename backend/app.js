@@ -85,7 +85,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
         const token = jwt.sign(
           { id: this.lastID, username: cleanUsername },
           JWT_SECRET,
-          { expiresIn: '7d' }
+          { expiresIn: '30d' }
         );
         res.json({ token });
       }
@@ -109,7 +109,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
       if (!match) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
-      const token = jwt.sign({ id: user.id, username }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ id: user.id, username }, JWT_SECRET, { expiresIn: '30d' });
       res.json({ token });
     });
   });

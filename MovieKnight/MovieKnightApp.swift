@@ -41,6 +41,33 @@ struct StreamingPlatform: Identifiable {
     let accentColor: Color
 }
 
+// MARK: - Languages
+
+struct AppLanguage: Identifiable {
+    let id: String
+    let key: String
+    let label: String
+}
+
+let allLanguages: [AppLanguage] = [
+    .init(id: "en", key: "en", label: "English"),
+    .init(id: "es", key: "es", label: "Spanish"),
+    .init(id: "fr", key: "fr", label: "French"),
+    .init(id: "de", key: "de", label: "German"),
+    .init(id: "it", key: "it", label: "Italian"),
+    .init(id: "pt", key: "pt", label: "Portuguese"),
+    .init(id: "ja", key: "ja", label: "Japanese"),
+    .init(id: "ko", key: "ko", label: "Korean"),
+    .init(id: "hi", key: "hi", label: "Hindi"),
+    .init(id: "zh", key: "zh", label: "Mandarin"),
+    .init(id: "cn", key: "cn", label: "Cantonese"),
+    .init(id: "ta", key: "ta", label: "Tamil"),
+    .init(id: "te", key: "te", label: "Telugu"),
+    .init(id: "ml", key: "ml", label: "Malayalam"),
+]
+
+// MARK: - Streaming Platforms
+
 let allPlatforms: [StreamingPlatform] = [
     .init(id: "netflix",     key: "netflix",     name: "Netflix",     logoAsset: "netflix",     accentColor: Color(red: 0.898, green: 0.031, blue: 0.078)),
     .init(id: "hulu",        key: "hulu",        name: "Hulu",        logoAsset: "hulu",        accentColor: Color(red: 0.110, green: 0.910, blue: 0.514)),

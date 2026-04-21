@@ -17,15 +17,18 @@ final class AppState: ObservableObject {
     @Published var token: String = ""
     @Published var username: String = ""
     @Published var selectedPlatforms: [String] = []
+    @Published var selectedLanguages: [String] = []
 
     private let tokenKey    = "mk_token"
     private let usernameKey = "mk_username"
     private let platformsKey = "mk_platforms"
+    private let languagesKey = "mk_languages"
 
     init() {
         token    = UserDefaults.standard.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
         username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
         selectedPlatforms = UserDefaults.standard.stringArray(forKey: platformsKey) ?? []
+        selectedLanguages = UserDefaults.standard.stringArray(forKey: languagesKey) ?? []
         page = token.isEmpty ? .auth : .catalog
     }
 
@@ -43,11 +46,17 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(platforms, forKey: platformsKey)
     }
 
+    func saveLanguages(_ languages: [String]) {
+        selectedLanguages = languages
+        UserDefaults.standard.set(languages, forKey: languagesKey)
+    }
+
     func logout() {
-        token = ""; username = ""; selectedPlatforms = []
+        token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: platformsKey)
+        UserDefaults.standard.removeObject(forKey: languagesKey)
         page = .auth
     }
 }
@@ -207,6 +216,7 @@ struct PlatformsView: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var selected: Set<String> = []
+    @State private var selectedLangs: Set<String> = []
     @State private var isLoading = true
     @State private var isSaving  = false
     @State private var errorMsg: String?
@@ -261,6 +271,49 @@ struct PlatformsView: View {
                         }
                         .padding(.horizontal, 16)
 
+                        // Language selection
+                        VStack(alignment: .leading, spacing: 12) {
+                            Divider().overlay(Color.mkBorder).padding(.horizontal, 16)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("LANGUAGES")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.mkAccent)
+                                    .kerning(1.4)
+                                Text("Include titles in these languages (optional)")
+                                    .font(.caption)
+                                    .foregroundColor(.mkMuted)
+                            }
+                            .padding(.horizontal, 16)
+                            let langCols = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+                            LazyVGrid(columns: langCols, spacing: 10) {
+                                ForEach(allLanguages) { lang in
+                                    let isOn = selectedLangs.contains(lang.key)
+                                    Button {
+                                        withAnimation(.spring(duration: 0.2)) {
+                                            if isOn { selectedLangs.remove(lang.key) }
+                                            else    { selectedLangs.insert(lang.key) }
+                                        }
+                                    } label: {
+                                        Text(lang.label)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .lineLimit(1).minimumScaleFactor(0.8)
+                                            .frame(maxWidth: .infinity, minHeight: 38)
+                                            .foregroundColor(isOn ? .mkAccent : .mkMuted)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 10)
+                                                    .fill(isOn ? Color.mkAccent.opacity(0.12) : Color.mkSurface)
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 10)
+                                                    .stroke(isOn ? Color.mkAccent.opacity(0.5) : Color.mkBorder, lineWidth: 1)
+                                            )
+                                    }
+                                    .buttonStyle(ScaleButtonStyle())
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+
                         if let err = errorMsg {
                             Text(err).font(.caption).foregroundColor(.mkAccent)
                         }
@@ -285,11 +338,14 @@ struct PlatformsView: View {
         do {
             let resp: PlatformResponse = try await APIService.shared.get("/platforms", token: app.token)
             selected = Set(resp.platforms)
+            selectedLangs = Set(resp.languages ?? [])
             app.savePlatforms(resp.platforms)
+            app.saveLanguages(resp.languages ?? [])
         } catch {
             // Pre-fill with locally cached platforms if network fails
             if !app.selectedPlatforms.isEmpty {
                 selected = Set(app.selectedPlatforms)
+                selectedLangs = Set(app.selectedLanguages)
             } else {
                 errorMsg = "Couldn't load saved services. Select yours below."
             }
@@ -301,10 +357,12 @@ struct PlatformsView: View {
         guard !selected.isEmpty else { errorMsg = "Select at least one service."; return }
         isSaving = true; errorMsg = nil
         let platforms = Array(selected)
+        let languages = Array(selectedLangs)
         app.savePlatforms(platforms)
+        app.saveLanguages(languages)
         _ = try? await APIService.shared.put(
             "/platforms",
-            body: ["platforms": platforms],
+            body: ["platforms": platforms, "languages": languages],
             token: app.token
         ) as GenericResponse
         isSaving = false
@@ -374,7 +432,9 @@ struct CatalogView: View {
     @State private var totalPages   = 1
     @State private var showSettings = false
     @State private var showGenrePicker = false
+    @State private var showLanguagePicker = false
     @State private var genreFilters: Set<String> = []
+    @State private var languageFilters: Set<String> = []
     @State private var pollingTask: Task<Void, Never>?
 
     static let allGenres: [(key: String, label: String)] = [
@@ -451,6 +511,11 @@ struct CatalogView: View {
                 page = 1; Task { await fetch() }
             }
         }
+        .sheet(isPresented: $showLanguagePicker) {
+            LanguagePickerSheet(selected: $languageFilters, available: app.selectedLanguages) {
+                page = 1; Task { await fetch() }
+            }
+        }
         .task {
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
             // If still no platforms after syncing with server, send user to setup
@@ -509,6 +574,16 @@ struct CatalogView: View {
                         icon: "theatermasks",
                         active: !genreFilters.isEmpty
                     )
+                }
+                // Language filter (only shown when user has languages set up)
+                if !app.selectedLanguages.isEmpty {
+                    Button { showLanguagePicker = true } label: {
+                        FilterChip(
+                            label: languageFilters.isEmpty ? "Language" : "\(languageFilters.count) Lang\(languageFilters.count == 1 ? "" : "s")",
+                            icon: "globe",
+                            active: !languageFilters.isEmpty
+                        )
+                    }
                 }
                 // Services badge
                 if !app.selectedPlatforms.isEmpty {
@@ -630,6 +705,9 @@ struct CatalogView: View {
         }
         if !genreFilters.isEmpty {
             params["genreFilters"] = genreFilters.joined(separator: ",")
+        }
+        if !languageFilters.isEmpty {
+            params["languageFilters"] = languageFilters.joined(separator: ",")
         }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
@@ -979,6 +1057,103 @@ struct GenrePickerSheet: View {
                 }
             }
             .navigationTitle("Filter by Genre")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(.mkMuted)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply") {
+                        onApply()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundColor(.mkAccent)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Language Picker Sheet
+
+struct LanguagePickerSheet: View {
+    @Binding var selected: Set<String>
+    let available: [String]   // languages the user has set up
+    @Environment(\.dismiss) private var dismiss
+    let onApply: () -> Void
+
+    // Show only languages the user has configured; fall back to all if none set
+    var displayLanguages: [AppLanguage] {
+        available.isEmpty
+            ? allLanguages
+            : allLanguages.filter { available.contains($0.key) }
+    }
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Filter titles to show only selected languages.")
+                            .font(.subheadline)
+                            .foregroundColor(.mkMuted)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 4)
+
+                        LazyVGrid(columns: columns, spacing: 10) {
+                            ForEach(displayLanguages) { lang in
+                                let isOn = selected.contains(lang.key)
+                                Button {
+                                    withAnimation(.spring(duration: 0.2)) {
+                                        if isOn { selected.remove(lang.key) }
+                                        else    { selected.insert(lang.key) }
+                                    }
+                                } label: {
+                                    Text(lang.label)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(2).minimumScaleFactor(0.8)
+                                        .frame(maxWidth: .infinity, minHeight: 48)
+                                        .foregroundColor(isOn ? .white : .mkMuted)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(isOn
+                                                    ? Color.mkAccent.opacity(0.28)
+                                                    : Color.mkSurface)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(isOn
+                                                    ? Color.mkAccent.opacity(0.6)
+                                                    : Color.mkBorder, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(ScaleButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, 16)
+
+                        if !selected.isEmpty {
+                            Button(role: .destructive) {
+                                selected.removeAll()
+                            } label: {
+                                Label("Clear Language Filter", systemImage: "xmark.circle")
+                                    .font(.subheadline)
+                                    .foregroundColor(.mkAccent)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
+            }
+            .navigationTitle("Filter by Language")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
