@@ -1611,15 +1611,26 @@ struct DetailSheet: View {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let img):
-                        img.resizable().scaledToFill()
-                            .frame(maxWidth: .infinity).frame(height: 220)
-                            .clipped()
-                            .overlay(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [.clear, Color.mkBackground.opacity(0.85), Color.mkBackground]),
-                                    startPoint: .top, endPoint: .bottom
-                                )
+                        ZStack {
+                            // Blurred background fills letterbox gaps for portrait posters
+                            img.resizable().scaledToFill()
+                                .frame(maxWidth: .infinity).frame(height: 220)
+                                .clipped()
+                                .blur(radius: 16)
+                                .opacity(0.4)
+                            // Sharp centered image
+                            img.resizable().scaledToFit()
+                                .frame(maxHeight: 210)
+                                .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
+                        }
+                        .frame(maxWidth: .infinity).frame(height: 220)
+                        .clipped()
+                        .overlay(
+                            LinearGradient(
+                                gradient: Gradient(colors: [.clear, Color.mkBackground.opacity(0.85), Color.mkBackground]),
+                                startPoint: .top, endPoint: .bottom
                             )
+                        )
                     default:
                         Color.mkSurface.frame(height: 180)
                     }
