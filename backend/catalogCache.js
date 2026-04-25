@@ -111,9 +111,15 @@ async function ensureCatalogTables(db) {
       available_on_json TEXT DEFAULT '[]',
       available_on_keys_json TEXT DEFAULT '[]',
       updated_at TEXT NOT NULL,
+      first_seen_at TEXT,
       PRIMARY KEY (scope_key, media_type, tmdb_id)
     )`
   );
+
+  // Migrate: add first_seen_at to existing tables that predate this column
+  try {
+    await run(db, `ALTER TABLE catalog_cache_entries ADD COLUMN first_seen_at TEXT`);
+  } catch { /* column already exists */ }
 
   await run(
     db,
@@ -214,8 +220,8 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
               scope_key, media_type, tmdb_id, title, overview, release_date, year, poster_url, backdrop_path,
               tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id, rating_imdb,
               rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num, available_on_json,
-              available_on_keys_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              available_on_keys_json, updated_at, first_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(scope_key, media_type, tmdb_id) DO UPDATE SET
               title                = excluded.title,
               overview             = excluded.overview,
@@ -237,7 +243,8 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
               rating_meta_num      = COALESCE(excluded.rating_meta_num, rating_meta_num),
               available_on_json    = excluded.available_on_json,
               available_on_keys_json = excluded.available_on_keys_json,
-              updated_at           = excluded.updated_at`,
+              updated_at           = excluded.updated_at,
+              first_seen_at        = COALESCE(first_seen_at, excluded.first_seen_at)`,
             [
               scopeKey,
               item.mediaType,
@@ -263,6 +270,7 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
               JSON.stringify(item.availableOn || []),
               JSON.stringify(item.availableOnKeys || []),
               syncStartTime,
+              syncStartTime, // first_seen_at — COALESCE keeps original on re-sync
             ]
           );
         }
@@ -570,6 +578,10 @@ function buildSortExpression(sortBy) {
       return 'title COLLATE NOCASE ASC';
     case 'release_date':
       return 'release_date DESC';
+    case 'release_date_asc':
+      return "CASE WHEN release_date IS NULL OR release_date = '' THEN 1 ELSE 0 END ASC, release_date ASC";
+    case 'recently_added':
+      return 'first_seen_at DESC, updated_at DESC';
     case 'tmdb':
       return 'tmdb_rating DESC, popularity DESC';
     case 'imdb':

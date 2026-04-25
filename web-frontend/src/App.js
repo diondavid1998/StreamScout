@@ -2024,11 +2024,13 @@ function App() {
                 <select style={styles.select} className="mk-select" value={sortBy}
                   onChange={(e) => { setSortBy(e.target.value); setCatalogPage(1); }}>
                   <option value="popularity">Popularity</option>
+                  <option value="recently_added">Recently Added</option>
+                  <option value="release_date">Release Date (Newest)</option>
+                  <option value="release_date_asc">Release Date (Oldest)</option>
                   <option value="tmdb">TMDb Rating</option>
                   <option value="imdb">IMDb Rating</option>
                   <option value="rotten_tomatoes">Rotten Tomatoes</option>
                   <option value="metacritic">Metacritic</option>
-                  <option value="release_date">Release Date</option>
                   <option value="title">Title A–Z</option>
                 </select>
               </div>
