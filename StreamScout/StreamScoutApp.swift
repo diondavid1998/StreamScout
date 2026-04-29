@@ -69,13 +69,14 @@ let allLanguages: [AppLanguage] = [
 // MARK: - Streaming Platforms
 
 let allPlatforms: [StreamingPlatform] = [
-    .init(id: "netflix",     key: "netflix",     name: "Netflix",     logoAsset: "netflix",     accentColor: Color(red: 0.898, green: 0.031, blue: 0.078)),
-    .init(id: "hulu",        key: "hulu",        name: "Hulu",        logoAsset: "hulu",        accentColor: Color(red: 0.110, green: 0.910, blue: 0.514)),
-    .init(id: "prime",       key: "prime",       name: "Prime Video", logoAsset: "prime",       accentColor: Color(red: 0.000, green: 0.659, blue: 0.882)),
-    .init(id: "disney",      key: "disney",      name: "Disney+",     logoAsset: "disneyplus",     accentColor: Color(red: 0.067, green: 0.235, blue: 0.812)),
-    .init(id: "appletv",     key: "appletv",     name: "Apple TV+",   logoAsset: "appletv",     accentColor: Color(red: 0.800, green: 0.800, blue: 0.800)),
-    .init(id: "max",         key: "max",         name: "Max",         logoAsset: "max",         accentColor: Color(red: 0.000, green: 0.169, blue: 0.906)),
-    .init(id: "peacock",     key: "peacock",     name: "Peacock",     logoAsset: "peacock",     accentColor: Color(red: 0.000, green: 0.784, blue: 1.000)),
-    .init(id: "paramount",   key: "paramount",   name: "Paramount+",  logoAsset: "paramountplus",  accentColor: Color(red: 0.000, green: 0.392, blue: 1.000)),
-    .init(id: "crunchyroll", key: "crunchyroll", name: "Crunchyroll", logoAsset: "crunchyroll", accentColor: Color(red: 0.957, green: 0.459, blue: 0.129)),
+    .init(id: "netflix",     key: "netflix",     name: "Netflix",     logoAsset: "netflix",      accentColor: Color(red: 0.898, green: 0.031, blue: 0.078)),
+    .init(id: "hulu",        key: "hulu",        name: "Hulu",        logoAsset: "hulu",         accentColor: Color(red: 0.110, green: 0.910, blue: 0.514)),
+    .init(id: "prime",       key: "prime",       name: "Prime Video", logoAsset: "prime",        accentColor: Color(red: 0.000, green: 0.659, blue: 0.882)),
+    .init(id: "disney",      key: "disney",      name: "Disney+",     logoAsset: "disneyplus",   accentColor: Color(red: 0.067, green: 0.235, blue: 0.812)),
+    .init(id: "apple",       key: "apple",       name: "Apple TV+",   logoAsset: "appletv",      accentColor: Color(red: 0.800, green: 0.800, blue: 0.800)),
+    .init(id: "max",         key: "max",         name: "Max",         logoAsset: "max",          accentColor: Color(red: 0.000, green: 0.169, blue: 0.906)),
+    .init(id: "peacock",     key: "peacock",     name: "Peacock",     logoAsset: "peacock",      accentColor: Color(red: 0.000, green: 0.784, blue: 1.000)),
+    .init(id: "paramount",   key: "paramount",   name: "Paramount+",  logoAsset: "paramountplus", accentColor: Color(red: 0.000, green: 0.392, blue: 1.000)),
+    .init(id: "crunchyroll", key: "crunchyroll", name: "Crunchyroll", logoAsset: "crunchyroll",  accentColor: Color(red: 0.957, green: 0.459, blue: 0.129)),
+    .init(id: "tubi",        key: "tubi",        name: "Tubi",        logoAsset: "tubi",         accentColor: Color(red: 0.949, green: 0.318, blue: 0.071)),
 ]

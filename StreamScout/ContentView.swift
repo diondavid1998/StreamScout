@@ -942,8 +942,14 @@ struct MovieCardView: View {
     let movie: CatalogItem
     var onTap: () -> Void = {}
     @EnvironmentObject var app: AppState
+    @State private var isTogglingWatched = false
     var isTV: Bool { movie.mediaType == "tv" }
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
+    var mediaType: String { movie.mediaType ?? "movie" }
+    var tmdbId: String {
+        let parts = movie.id.split(separator: "-")
+        return parts.count >= 2 ? String(parts.last!) : movie.id
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -956,21 +962,49 @@ struct MovieCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.mkBorder, lineWidth: 1))
             .overlay(accentBar)
-            .overlay(watchedBadge, alignment: .topTrailing)
+            .overlay(watchedToggleButton, alignment: .topTrailing)
         }
         .buttonStyle(.plain)
     }
 
-    var watchedBadge: some View {
-        Group {
-            if isWatched {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.green)
-                    .background(Circle().fill(Color.mkCard).padding(2))
-                    .padding(8)
+    var watchedToggleButton: some View {
+        Button { Task { await toggleWatched() } } label: {
+            Group {
+                if isTogglingWatched {
+                    ProgressView().scaleEffect(0.65).tint(.green)
+                        .frame(width: 22, height: 22)
+                } else {
+                    Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(isWatched ? .green : .mkMuted.opacity(0.6))
+                }
             }
+            .background(Circle().fill(Color.mkCard).padding(2))
+            .padding(8)
         }
+        .buttonStyle(.plain)
+        .disabled(isTogglingWatched)
+    }
+
+    @MainActor func toggleWatched() async {
+        isTogglingWatched = true
+        do {
+            if isWatched {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/watched/\(movie.id)", token: app.token
+                )
+                app.setWatched(movie.id, watched: false)
+            } else {
+                let body: [String: String] = ["itemId": movie.id, "title": movie.title,
+                                               "mediaType": mediaType, "tmdbId": tmdbId,
+                                               "posterUrl": movie.posterUrl ?? ""]
+                let _: ToggleWatchedResponse = try await APIService.shared.post(
+                    "/watched", body: body, token: app.token
+                )
+                app.setWatched(movie.id, watched: true)
+            }
+        } catch { }
+        isTogglingWatched = false
     }
 
     // Left accent bar — blue for TV, red for movies
@@ -2284,7 +2318,7 @@ struct ProfileTabView: View {
         do {
             let resp: LetterboxdPreviewResult = try await APIService.shared.post(
                 "/import/letterboxd/preview",
-                body: ["csvText": text],
+                body: ["csvText": text, "fileName": url.lastPathComponent],
                 token: app.token
             )
             lbxImportType = resp.importType ?? "watched"

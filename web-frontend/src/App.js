@@ -674,14 +674,16 @@ const styles = {
 };
 
 const streamingPlatforms = [
-  { key: 'netflix', name: 'Netflix', logo: require('./logos/netflix.png') },
-  { key: 'hulu', name: 'Hulu', logo: require('./logos/hulu.jpeg') },
-  { key: 'prime', name: 'Prime Video', logo: require('./logos/prime.png') },
-  { key: 'disney', name: 'Disney+', logo: require('./logos/disney+.png') },
-  { key: 'paramount', name: 'Paramount+', logo: require('./logos/paramount+.png') },
-  { key: 'peacock', name: 'Peacock', logo: require('./logos/peacock.png') },
-  { key: 'max', name: 'Max', logo: require('./logos/max.png') },
+  { key: 'netflix',     name: 'Netflix',     logo: require('./logos/netflix.png') },
+  { key: 'hulu',        name: 'Hulu',        logo: require('./logos/hulu.jpeg') },
+  { key: 'prime',       name: 'Prime Video', logo: require('./logos/prime.png') },
+  { key: 'disney',      name: 'Disney+',     logo: require('./logos/disney+.png') },
+  { key: 'apple',       name: 'Apple TV+',   logo: require('./logos/appletv.png') },
+  { key: 'paramount',   name: 'Paramount+',  logo: require('./logos/paramount+.png') },
+  { key: 'peacock',     name: 'Peacock',     logo: require('./logos/peacock.png') },
+  { key: 'max',         name: 'Max',         logo: require('./logos/max.png') },
   { key: 'crunchyroll', name: 'Crunchyroll', logo: require('./logos/crunchyroll.png') },
+  { key: 'tubi',        name: 'Tubi',        logo: require('./logos/tubi.jpeg') },
 ];
 
 const ratingLogos = {
