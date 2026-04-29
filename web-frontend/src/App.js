@@ -810,6 +810,9 @@ function App() {
     setGenreFilters([]);
     setSortBy('popularity');
     setMediaTypeFilter('all');
+    setEditUsername('');
+    setEditEmail('');
+    setEditPassword('');
     setResetStep(0);
     setOpenFilters({ service: false, language: false, genre: false, year: false });
   };
@@ -1452,9 +1455,8 @@ function App() {
     if (!installPrompt) return;
     await installPrompt.prompt();
     const { outcome } = await installPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setInstallPrompt(null);
-    }
+    setInstallPrompt(null);
+    if (outcome !== 'accepted') return;
   };
 
   const handleAuth = async (event) => {

@@ -1177,16 +1177,15 @@ struct TypeChip: View {
 // Genre chips — distinct purple tint so they stand out from provider chips
 struct PillChip: View {
     let text: String; let color: Color
-    static let genreTint = Color(red: 0.56, green: 0.38, blue: 1.0)
     var body: some View {
         Text(text)
             .font(.system(size: 10, weight: .semibold))
             .kerning(0.2)
             .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(Self.genreTint.opacity(0.13))
-            .foregroundColor(Self.genreTint)
+            .background(color.opacity(0.13))
+            .foregroundColor(color)
             .clipShape(Capsule())
-            .overlay(Capsule().stroke(Self.genreTint.opacity(0.25), lineWidth: 1))
+            .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 1))
     }
 }
 
@@ -1515,11 +1514,11 @@ struct YearFilterSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onApply: () -> Void
 
-    private let minYear: Double = 1970
-    private let maxYear: Double = 2026
+    private let minYear: Double = 1900
+    private let maxYear: Double = Double(Calendar.current.component(.year, from: Date()) + 1)
 
-    @State private var sliderMin: Double = 1970
-    @State private var sliderMax: Double = 2026
+    @State private var sliderMin: Double = 1900
+    @State private var sliderMax: Double = Double(Calendar.current.component(.year, from: Date()) + 1)
 
     var body: some View {
         NavigationView {
@@ -1616,6 +1615,7 @@ struct DetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var details: TitleDetails?
     @State private var isLoadingExtras = true
+    @State private var detailsError: String? = nil
     @State private var isTogglingWatched = false
 
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
@@ -1686,6 +1686,8 @@ struct DetailSheet: View {
                                 }
                             } else if let d = details {
                                 extrasSection(d)
+                            } else if let err = detailsError {
+                                Text(err).font(.caption).foregroundColor(.mkMuted).frame(maxWidth: .infinity)
                             }
                         }
                         .padding(.horizontal, 20)
@@ -1836,7 +1838,9 @@ struct DetailSheet: View {
                 "/titles/\(mediaType)/\(tmdbId)/details", token: app.token
             )
             details = d
-        } catch { }
+        } catch {
+            detailsError = "Could not load cast & details."
+        }
         isLoadingExtras = false
     }
 
@@ -2147,8 +2151,6 @@ struct ServicesTabView: View {
                 "languages": app.selectedLanguages
             ]
             let _: GenericResponse = try await APIService.shared.put("/platforms", body: body, token: app.token)
-            UserDefaults.standard.set(app.selectedPlatforms, forKey: "mk_platforms")
-            UserDefaults.standard.set(app.selectedLanguages, forKey: "mk_languages")
             savedMsg = "Saved ✓"
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedMsg = "" }
         } catch { savedMsg = "Save failed" }
@@ -2228,6 +2230,9 @@ struct ProfileTabView: View {
 
     var body: some View {
         ScrollView {
+            if isLoadingAccount {
+                ProgressView().padding(.top, 60).frame(maxWidth: .infinity)
+            } else {
             VStack(spacing: 20) {
                 avatarSection
                 VStack(spacing: 14) {
@@ -2281,6 +2286,7 @@ struct ProfileTabView: View {
                 .padding(.bottom, 24)
             }
             .padding(.horizontal, 16).padding(.top, 12)
+            } // end else
         }
         .task { await loadAccount() }
         .onChange(of: avatarItem) { item in

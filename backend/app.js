@@ -435,7 +435,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
     if (!email || !code || !newPassword) {
       return res.status(400).json({ error: 'Email, code, and new password are required' });
     }
-    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+    if (typeof newPassword !== 'string' || newPassword.length < 6 || newPassword.length > 128) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
     try {
