@@ -505,7 +505,7 @@ async function backfillScopeIdentifiers(db, scopeKey) {
         `SELECT scope_key, media_type, tmdb_id
          FROM catalog_cache_entries
          WHERE scope_key = ?
-           AND COALESCE(imdb_id, '') = ''
+           AND imdb_id IS NULL
          LIMIT ?`,
         [scopeKey, HYDRATION_BATCH_SIZE]
       );
@@ -523,7 +523,7 @@ async function backfillScopeIdentifiers(db, scopeKey) {
 
           return {
             ...row,
-            imdbId: details.external_ids?.imdb_id || '',
+            imdbId: details.external_ids?.imdb_id || null,
           };
         })).filter(Boolean);
         consecutiveErrors = 0;

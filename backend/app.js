@@ -19,7 +19,10 @@ const {
 } = require('./catalogCache');
 const { fetchTitleWithCredits, searchTitleOnTmdb, fetchTitlesByPerson } = require('./movieService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('FATAL: JWT_SECRET environment variable must be set');
+}
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 function createEmailTransporter() {
@@ -109,7 +112,10 @@ function createApp(db, { disableRateLimit = false } = {}) {
       [cleanUsername, hash, cleanEmail],
       function (err) {
         if (err) {
-          return res.status(400).json({ error: 'Username already exists' });
+          if (err.message && err.message.includes('UNIQUE')) {
+            return res.status(400).json({ error: 'Username already exists' });
+          }
+          return res.status(500).json({ error: 'Registration failed' });
         }
         const token = jwt.sign(
           { id: this.lastID, username: cleanUsername },
@@ -133,11 +139,11 @@ function createApp(db, { disableRateLimit = false } = {}) {
     db.get('SELECT * FROM users WHERE username = ?', [username.trim().toLowerCase()], async (err, user) => {
       if (err) return res.status(500).json({ error: 'Database error' });
       if (!user) {
-        return res.status(401).json({ error: 'No account found with that username. Please sign up.' });
+        return res.status(401).json({ error: 'Invalid credentials' });
       }
       const match = await bcrypt.compare(password, user.password);
       if (!match) {
-        return res.status(401).json({ error: 'Incorrect password. Please try again.' });
+        return res.status(401).json({ error: 'Invalid credentials' });
       }
       const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
       res.json({ token });
@@ -466,14 +472,20 @@ function createApp(db, { disableRateLimit = false } = {}) {
       const codeMatch = await bcrypt.compare(String(code), tokenRow.token_hash);
       if (!codeMatch) return res.status(400).json({ error: 'Invalid or expired reset code' });
 
+      // Atomically mark token as used BEFORE updating the password to prevent
+      // race conditions where two concurrent requests both succeed.
+      const claimed = await new Promise((resolve, reject) =>
+        db.run(
+          `UPDATE reset_tokens SET used = 1 WHERE id = ? AND used = 0`,
+          [tokenRow.id],
+          function (err) { err ? reject(err) : resolve(this.changes); }
+        )
+      );
+      if (claimed === 0) return res.status(400).json({ error: 'Invalid or expired reset code' });
+
       const hash = await bcrypt.hash(newPassword, 10);
       await new Promise((resolve, reject) =>
         db.run('UPDATE users SET password = ? WHERE id = ?', [hash, user.id], (err) =>
-          err ? reject(err) : resolve()
-        )
-      );
-      await new Promise((resolve, reject) =>
-        db.run('UPDATE reset_tokens SET used = 1 WHERE id = ?', [tokenRow.id], (err) =>
           err ? reject(err) : resolve()
         )
       );
@@ -586,6 +598,22 @@ function createApp(db, { disableRateLimit = false } = {}) {
     );
   });
 
+  // ── Watchlist POST ────────────────────────────────────────────────────────
+  app.post('/watchlist', authenticateToken, (req, res) => {
+    const { itemId, mediaType, title, posterUrl } = req.body || {};
+    if (!itemId || typeof itemId !== 'string') {
+      return res.status(400).json({ error: 'itemId required' });
+    }
+    db.run(
+      `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url) VALUES (?, ?, ?, ?, ?)`,
+      [req.user.id, itemId, mediaType || null, title || null, posterUrl || null],
+      function (err) {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ success: true, added: this.changes > 0 });
+      }
+    );
+  });
+
   // ── Watchlist DELETE ──────────────────────────────────────────────────────
   app.delete('/watchlist/:item_id', authenticateToken, (req, res) => {
     const itemId = decodeURIComponent(req.params.item_id);
@@ -685,14 +713,18 @@ function createApp(db, { disableRateLimit = false } = {}) {
       const result = await searchTitleOnTmdb(name, year);
       if (!result) { notFound++; continue; }
 
-      await new Promise((resolve) =>
-        db.run(
-          `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol}) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl],
-          () => resolve()
-        )
-      );
-      matched++;
+      try {
+        const changes = await new Promise((resolve, reject) =>
+          db.run(
+            `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol}) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+            [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl],
+            function (err) { err ? reject(err) : resolve(this.changes); }
+          )
+        );
+        if (changes > 0) matched++;
+      } catch {
+        notFound++;
+      }
 
       // Throttle to respect TMDB rate limits (~8 req/sec)
       await new Promise((r) => setTimeout(r, 125));
