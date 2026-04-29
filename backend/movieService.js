@@ -31,36 +31,37 @@ function tripOmdbRateLimit() {
 function isOmdbRateLimited() { return omdbRateLimited; }
 
 const PLATFORM_CONFIG = {
-  netflix: { id: 8, name: 'Netflix' },
-  hulu: { id: 15, name: 'Hulu' },
-  prime: { id: 9, name: 'Prime Video' },
-  disney: { id: 337, name: 'Disney+' },
-  paramount: { id: 531, name: 'Paramount+' },
-  apple: { id: 2, name: 'Apple TV+' },
-  peacock: { id: 386, name: 'Peacock' },
-  max: { id: 384, name: 'Max' },
-  crunchyroll: { id: 105, name: 'Crunchyroll' },
-  starz: { id: 318, name: 'Starz' },
-  showtime: { id: 320, name: 'Showtime' },
-  amc: { id: 174, name: 'AMC+' },
-  tubi: { id: 219, name: 'Tubi' },
-  pluto: { id: 300, name: 'Pluto TV' },
-  roku: { id: 432, name: 'The Roku Channel' },
-  youtube: { id: 192, name: 'YouTube Premium' },
-  mubi: { id: 11, name: 'MUBI' },
-  britbox: { id: 370, name: 'BritBox' },
-  hayu: { id: 555, name: 'Hayu' },
-  shudder: { id: 67, name: 'Shudder' },
-  acorn: { id: 1, name: 'Acorn TV' },
-  curiosity: { id: 179, name: 'Curiosity Stream' },
-  sling: { id: 405, name: 'Sling TV' },
-  philo: { id: 342, name: 'Philo' },
-  fubo: { id: 283, name: 'fuboTV' },
-  viu: { id: 270, name: 'Viu' },
-  kanopy: { id: 221, name: 'Kanopy' },
-  crave: { id: 131, name: 'Crave' },
-  ifc: { id: 34, name: 'IFC Films Unlimited' },
-  criterion: { id: 31, name: 'The Criterion Channel' },
+  netflix:    { id: 8,    name: 'Netflix' },
+  hulu:       { id: 15,   name: 'Hulu' },
+  prime:      { id: 9,    name: 'Prime Video' },
+  disney:     { id: 337,  name: 'Disney+' },
+  paramount:  { ids: [2303, 2616], name: 'Paramount+' },  // Premium + Essential
+  apple:      { id: 350,  name: 'Apple TV+' },            // was 2 (Apple TV Store = rentals)
+  peacock:    { id: 386,  name: 'Peacock' },
+  max:        { id: 1899, name: 'Max' },                  // was 384 (nonexistent)
+  crunchyroll:{ id: 283,  name: 'Crunchyroll' },          // was 105 (nonexistent)
+  starz:      { id: 43,   name: 'Starz' },                // was 318 (Adult Swim)
+  showtime:   { id: 37,   name: 'Showtime' },
+  amc:        { id: 526,  name: 'AMC+' },                 // was 174 (nonexistent)
+  tubi:       { id: 73,   name: 'Tubi' },                 // was 219 (nonexistent)
+  pluto:      { id: 300,  name: 'Pluto TV' },
+  roku:       { id: 207,  name: 'The Roku Channel' },     // was 432 (Flix Premiere)
+  youtube:    { id: 188,  name: 'YouTube Premium' },      // was 192 (plain YouTube)
+  mubi:       { id: 11,   name: 'MUBI' },
+  britbox:    { id: 151,  name: 'BritBox' },              // was 370 (nonexistent)
+  hayu:       { id: 223,  name: 'Hayu' },
+  shudder:    { id: 99,   name: 'Shudder' },              // was 67 (nonexistent)
+  acorn:      { id: 87,   name: 'Acorn TV' },             // was 1 (nonexistent)
+  curiosity:  { id: 190,  name: 'Curiosity Stream' },     // was 179 (nonexistent)
+  sling:      { id: 299,  name: 'Sling TV' },             // was 405 (nonexistent)
+  philo:      { id: 2383, name: 'Philo' },                // was 342 (nonexistent)
+  fubo:       { id: 257,  name: 'fuboTV' },               // was 283 (= Crunchyroll!)
+  viu:        { id: 270,  name: 'Viu' },
+  kanopy:     { id: 191,  name: 'Kanopy' },               // was 221 (nonexistent)
+  crave:      { id: 230,  name: 'Crave' },
+  ifc:        { id: 338,  name: 'IFC Films Unlimited' },
+  criterion:  { id: 258,  name: 'Criterion Channel' },    // was 31 (nonexistent)
+  hidive:     { id: 430,  name: 'HiDive' },
 };
 
 const tmdbCache = new Map();
@@ -251,12 +252,18 @@ function toSortableRating(value) {
 function buildProviderSelection(platformKeys) {
   const selectedProviders = platformKeys
     .map((key) => ({ key, ...PLATFORM_CONFIG[key] }))
-    .filter((provider) => provider.id);
+    .filter((p) => p.id || p.ids);
 
-  return {
-    providerIds: selectedProviders.map((provider) => provider.id),
-    providerMapById: new Map(selectedProviders.map((provider) => [provider.id, provider])),
-  };
+  const providerIds = selectedProviders.flatMap((p) => (p.ids ? p.ids : [p.id]));
+
+  const providerMapById = new Map(
+    selectedProviders.flatMap((p) => {
+      const ids = p.ids ? p.ids : [p.id];
+      return ids.map((id) => [id, p]);
+    })
+  );
+
+  return { providerIds, providerMapById };
 }
 
 async function discoverTitles(mediaType, providerIds, page, region = DEFAULT_REGION, extraParams = {}) {

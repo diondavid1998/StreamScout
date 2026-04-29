@@ -5,6 +5,8 @@ const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
 const DEFAULT_REGION = 'US';
 // Ratings rarely change — cache them for 30 days before re-fetching from OMDB
 const RATINGS_CACHE_TTL_DAYS = Number(process.env.RATINGS_CACHE_TTL_DAYS) || 30;
+// Increment this whenever PLATFORM_CONFIG provider IDs change so stale caches are invalidated
+const PROVIDER_CONFIG_VERSION = 2;
 const syncLocks = new Map();
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
@@ -149,6 +151,25 @@ async function ensureCatalogTables(db) {
       fetched_at      TEXT NOT NULL
     )`
   );
+
+  // Key-value store for app-level settings (e.g. provider config version)
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`
+  );
+
+  // Invalidate catalog cache if provider IDs have changed since last deploy
+  const versionRow = await get(db, `SELECT value FROM app_settings WHERE key = 'provider_config_version'`);
+  const storedVersion = versionRow ? Number(versionRow.value) : 0;
+  if (storedVersion !== PROVIDER_CONFIG_VERSION) {
+    await run(db, `DELETE FROM catalog_cache_state`);
+    await run(
+      db,
+      `INSERT OR REPLACE INTO app_settings (key, value) VALUES ('provider_config_version', ?)`,
+      [String(PROVIDER_CONFIG_VERSION)]
+    );
+    console.log(`[cache] Provider config updated to v${PROVIDER_CONFIG_VERSION} — catalog cache cleared`);
+  }
 }
 
 function isScopeStale(stateRow) {
