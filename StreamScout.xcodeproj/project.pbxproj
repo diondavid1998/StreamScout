@@ -7,16 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		8A852EFE2F85DB4A0063D17E /* MovieKnightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* MovieKnightApp.swift */; };
+		8A852EFE2F85DB4A0063D17E /* StreamScoutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */; };
 		8A852F002F85DB4A0063D17E /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFF2F85DB4A0063D17E /* Persistence.swift */; };
-		8A852F032F85DB4A0063D17E /* MovieKnight.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F012F85DB4A0063D17E /* MovieKnight.xcdatamodeld */; };
+		8A852F032F85DB4A0063D17E /* StreamScout.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F012F85DB4A0063D17E /* StreamScout.xcdatamodeld */; };
 		8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F042F85DB4A0063D17E /* ContentView.swift */; };
 		8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F612F85DB4A0063D17E /* APIModels.swift */; };
 		8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F062F85DB4C0063D17E /* Assets.xcassets */; };
 		8A852F0B2F85DB4C0063D17E /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F0A2F85DB4C0063D17E /* Preview Assets.xcassets */; };
-		8A852F152F85DB4C0063D17E /* MovieKnightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F142F85DB4C0063D17E /* MovieKnightTests.swift */; };
-		8A852F1F2F85DB4C0063D17E /* MovieKnightUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F1E2F85DB4C0063D17E /* MovieKnightUITests.swift */; };
-		8A852F212F85DB4C0063D17E /* MovieKnightUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F202F85DB4C0063D17E /* MovieKnightUITestsLaunchTests.swift */; };
+		8A852F152F85DB4C0063D17E /* StreamScoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */; };
+		8A852F1F2F85DB4C0063D17E /* StreamScoutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */; };
+		8A852F212F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,31 +25,31 @@
 			containerPortal = 8A852EF22F85DB4A0063D17E /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 8A852EF92F85DB4A0063D17E;
-			remoteInfo = MovieKnight;
+			remoteInfo = StreamScout;
 		};
 		8A852F1B2F85DB4C0063D17E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 8A852EF22F85DB4A0063D17E /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 8A852EF92F85DB4A0063D17E;
-			remoteInfo = MovieKnight;
+			remoteInfo = StreamScout;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		8A852EFA2F85DB4A0063D17E /* MovieKnight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MovieKnight.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		8A852EFD2F85DB4A0063D17E /* MovieKnightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieKnightApp.swift; sourceTree = "<group>"; };
+		8A852EFA2F85DB4A0063D17E /* StreamScout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamScout.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutApp.swift; sourceTree = "<group>"; };
 		8A852EFF2F85DB4A0063D17E /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
-		8A852F022F85DB4A0063D17E /* MovieKnight.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = MovieKnight.xcdatamodel; sourceTree = "<group>"; };
+		8A852F022F85DB4A0063D17E /* StreamScout.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamScout.xcdatamodel; sourceTree = "<group>"; };
 		8A852F042F85DB4A0063D17E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8A852F062F85DB4C0063D17E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		8A852F082F85DB4C0063D17E /* MovieKnight.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovieKnight.entitlements; sourceTree = "<group>"; };
+		8A852F082F85DB4C0063D17E /* StreamScout.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamScout.entitlements; sourceTree = "<group>"; };
 		8A852F0A2F85DB4C0063D17E /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		8A852F102F85DB4C0063D17E /* MovieKnightTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovieKnightTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		8A852F142F85DB4C0063D17E /* MovieKnightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieKnightTests.swift; sourceTree = "<group>"; };
-		8A852F1A2F85DB4C0063D17E /* MovieKnightUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MovieKnightUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		8A852F1E2F85DB4C0063D17E /* MovieKnightUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieKnightUITests.swift; sourceTree = "<group>"; };
-		8A852F202F85DB4C0063D17E /* MovieKnightUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieKnightUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		8A852F102F85DB4C0063D17E /* StreamScoutTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreamScoutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutTests.swift; sourceTree = "<group>"; };
+		8A852F1A2F85DB4C0063D17E /* StreamScoutUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreamScoutUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutUITests.swift; sourceTree = "<group>"; };
+		8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		8A852F612F85DB4A0063D17E /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -81,9 +81,9 @@
 		8A852EF12F85DB4A0063D17E = {
 			isa = PBXGroup;
 			children = (
-				8A852EFC2F85DB4A0063D17E /* MovieKnight */,
-				8A852F132F85DB4C0063D17E /* MovieKnightTests */,
-				8A852F1D2F85DB4C0063D17E /* MovieKnightUITests */,
+				8A852EFC2F85DB4A0063D17E /* StreamScout */,
+				8A852F132F85DB4C0063D17E /* StreamScoutTests */,
+				8A852F1D2F85DB4C0063D17E /* StreamScoutUITests */,
 				8A852EFB2F85DB4A0063D17E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -91,26 +91,26 @@
 		8A852EFB2F85DB4A0063D17E /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				8A852EFA2F85DB4A0063D17E /* MovieKnight.app */,
-				8A852F102F85DB4C0063D17E /* MovieKnightTests.xctest */,
-				8A852F1A2F85DB4C0063D17E /* MovieKnightUITests.xctest */,
+				8A852EFA2F85DB4A0063D17E /* StreamScout.app */,
+				8A852F102F85DB4C0063D17E /* StreamScoutTests.xctest */,
+				8A852F1A2F85DB4C0063D17E /* StreamScoutUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		8A852EFC2F85DB4A0063D17E /* MovieKnight */ = {
+		8A852EFC2F85DB4A0063D17E /* StreamScout */ = {
 			isa = PBXGroup;
 			children = (
-				8A852EFD2F85DB4A0063D17E /* MovieKnightApp.swift */,
+				8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */,
 				8A852EFF2F85DB4A0063D17E /* Persistence.swift */,
 				8A852F042F85DB4A0063D17E /* ContentView.swift */,
 				8A852F612F85DB4A0063D17E /* APIModels.swift */,
 				8A852F062F85DB4C0063D17E /* Assets.xcassets */,
-				8A852F082F85DB4C0063D17E /* MovieKnight.entitlements */,
-				8A852F012F85DB4A0063D17E /* MovieKnight.xcdatamodeld */,
+				8A852F082F85DB4C0063D17E /* StreamScout.entitlements */,
+				8A852F012F85DB4A0063D17E /* StreamScout.xcdatamodeld */,
 				8A852F092F85DB4C0063D17E /* Preview Content */,
 			);
-			path = MovieKnight;
+			path = StreamScout;
 			sourceTree = "<group>";
 		};
 		8A852F092F85DB4C0063D17E /* Preview Content */ = {
@@ -121,29 +121,29 @@
 			path = "Preview Content";
 			sourceTree = "<group>";
 		};
-		8A852F132F85DB4C0063D17E /* MovieKnightTests */ = {
+		8A852F132F85DB4C0063D17E /* StreamScoutTests */ = {
 			isa = PBXGroup;
 			children = (
-				8A852F142F85DB4C0063D17E /* MovieKnightTests.swift */,
+				8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */,
 			);
-			path = MovieKnightTests;
+			path = StreamScoutTests;
 			sourceTree = "<group>";
 		};
-		8A852F1D2F85DB4C0063D17E /* MovieKnightUITests */ = {
+		8A852F1D2F85DB4C0063D17E /* StreamScoutUITests */ = {
 			isa = PBXGroup;
 			children = (
-				8A852F1E2F85DB4C0063D17E /* MovieKnightUITests.swift */,
-				8A852F202F85DB4C0063D17E /* MovieKnightUITestsLaunchTests.swift */,
+				8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */,
+				8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */,
 			);
-			path = MovieKnightUITests;
+			path = StreamScoutUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		8A852EF92F85DB4A0063D17E /* MovieKnight */ = {
+		8A852EF92F85DB4A0063D17E /* StreamScout */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "MovieKnight" */;
+			buildConfigurationList = 8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScout" */;
 			buildPhases = (
 				8A852EF62F85DB4A0063D17E /* Sources */,
 				8A852EF72F85DB4A0063D17E /* Frameworks */,
@@ -153,14 +153,14 @@
 			);
 			dependencies = (
 			);
-			name = MovieKnight;
-			productName = MovieKnight;
-			productReference = 8A852EFA2F85DB4A0063D17E /* MovieKnight.app */;
+			name = StreamScout;
+			productName = StreamScout;
+			productReference = 8A852EFA2F85DB4A0063D17E /* StreamScout.app */;
 			productType = "com.apple.product-type.application";
 		};
-		8A852F0F2F85DB4C0063D17E /* MovieKnightTests */ = {
+		8A852F0F2F85DB4C0063D17E /* StreamScoutTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "MovieKnightTests" */;
+			buildConfigurationList = 8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutTests" */;
 			buildPhases = (
 				8A852F0C2F85DB4C0063D17E /* Sources */,
 				8A852F0D2F85DB4C0063D17E /* Frameworks */,
@@ -171,14 +171,14 @@
 			dependencies = (
 				8A852F122F85DB4C0063D17E /* PBXTargetDependency */,
 			);
-			name = MovieKnightTests;
-			productName = MovieKnightTests;
-			productReference = 8A852F102F85DB4C0063D17E /* MovieKnightTests.xctest */;
+			name = StreamScoutTests;
+			productName = StreamScoutTests;
+			productReference = 8A852F102F85DB4C0063D17E /* StreamScoutTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		8A852F192F85DB4C0063D17E /* MovieKnightUITests */ = {
+		8A852F192F85DB4C0063D17E /* StreamScoutUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "MovieKnightUITests" */;
+			buildConfigurationList = 8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutUITests" */;
 			buildPhases = (
 				8A852F162F85DB4C0063D17E /* Sources */,
 				8A852F172F85DB4C0063D17E /* Frameworks */,
@@ -189,9 +189,9 @@
 			dependencies = (
 				8A852F1C2F85DB4C0063D17E /* PBXTargetDependency */,
 			);
-			name = MovieKnightUITests;
-			productName = MovieKnightUITests;
-			productReference = 8A852F1A2F85DB4C0063D17E /* MovieKnightUITests.xctest */;
+			name = StreamScoutUITests;
+			productName = StreamScoutUITests;
+			productReference = 8A852F1A2F85DB4C0063D17E /* StreamScoutUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -202,7 +202,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1420;
-				LastUpgradeCheck = 1420;
+				LastUpgradeCheck = 1640;
 				TargetAttributes = {
 					8A852EF92F85DB4A0063D17E = {
 						CreatedOnToolsVersion = 14.2;
@@ -217,7 +217,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "MovieKnight" */;
+			buildConfigurationList = 8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "StreamScout" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -230,9 +230,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				8A852EF92F85DB4A0063D17E /* MovieKnight */,
-				8A852F0F2F85DB4C0063D17E /* MovieKnightTests */,
-				8A852F192F85DB4C0063D17E /* MovieKnightUITests */,
+				8A852EF92F85DB4A0063D17E /* StreamScout */,
+				8A852F0F2F85DB4C0063D17E /* StreamScoutTests */,
+				8A852F192F85DB4C0063D17E /* StreamScoutUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -268,11 +268,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8A852EFE2F85DB4A0063D17E /* MovieKnightApp.swift in Sources */,
+				8A852EFE2F85DB4A0063D17E /* StreamScoutApp.swift in Sources */,
 				8A852F002F85DB4A0063D17E /* Persistence.swift in Sources */,
 				8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */,
 				8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */,
-				8A852F032F85DB4A0063D17E /* MovieKnight.xcdatamodeld in Sources */,
+				8A852F032F85DB4A0063D17E /* StreamScout.xcdatamodeld in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -280,7 +280,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8A852F152F85DB4C0063D17E /* MovieKnightTests.swift in Sources */,
+				8A852F152F85DB4C0063D17E /* StreamScoutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,8 +288,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8A852F212F85DB4C0063D17E /* MovieKnightUITestsLaunchTests.swift in Sources */,
-				8A852F1F2F85DB4C0063D17E /* MovieKnightUITests.swift in Sources */,
+				8A852F212F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift in Sources */,
+				8A852F1F2F85DB4C0063D17E /* StreamScoutUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -298,12 +298,12 @@
 /* Begin PBXTargetDependency section */
 		8A852F122F85DB4C0063D17E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 8A852EF92F85DB4A0063D17E /* MovieKnight */;
+			target = 8A852EF92F85DB4A0063D17E /* StreamScout */;
 			targetProxy = 8A852F112F85DB4C0063D17E /* PBXContainerItemProxy */;
 		};
 		8A852F1C2F85DB4C0063D17E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 8A852EF92F85DB4A0063D17E /* MovieKnight */;
+			target = 8A852EF92F85DB4A0063D17E /* StreamScout */;
 			targetProxy = 8A852F1B2F85DB4C0063D17E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -313,6 +313,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -342,9 +343,11 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -371,6 +374,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -400,9 +404,11 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -423,11 +429,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = MovieKnight/MovieKnight.entitlements;
+				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"MovieKnight/Preview Content\"";
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"StreamScout/Preview Content\"";
 				DEVELOPMENT_TEAM = 4DKL5S4CND;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -446,7 +453,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.MovieKnight;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.diondavid.streamscout;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -461,11 +468,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = MovieKnight/MovieKnight.entitlements;
+				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"MovieKnight/Preview Content\"";
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"StreamScout/Preview Content\"";
 				DEVELOPMENT_TEAM = 4DKL5S4CND;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -484,7 +492,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.MovieKnight;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = com.diondavid.streamscout;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -497,93 +505,93 @@
 		8A852F282F85DB4C0063D17E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.MovieKnightTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MovieKnight.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MovieKnight";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamScout.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreamScout";
 			};
 			name = Debug;
 		};
 		8A852F292F85DB4C0063D17E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.MovieKnightTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MovieKnight.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MovieKnight";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamScout.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreamScout";
 			};
 			name = Release;
 		};
 		8A852F2B2F85DB4C0063D17E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.MovieKnightUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = MovieKnight;
+				TEST_TARGET_NAME = StreamScout;
 			};
 			name = Debug;
 		};
 		8A852F2C2F85DB4C0063D17E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.MovieKnightUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = MovieKnight;
+				TEST_TARGET_NAME = StreamScout;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "MovieKnight" */ = {
+		8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "StreamScout" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F222F85DB4C0063D17E /* Debug */,
@@ -592,7 +600,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "MovieKnight" */ = {
+		8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScout" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F252F85DB4C0063D17E /* Debug */,
@@ -601,7 +609,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "MovieKnightTests" */ = {
+		8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F282F85DB4C0063D17E /* Debug */,
@@ -610,7 +618,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "MovieKnightUITests" */ = {
+		8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F2B2F85DB4C0063D17E /* Debug */,
@@ -622,13 +630,13 @@
 /* End XCConfigurationList section */
 
 /* Begin XCVersionGroup section */
-		8A852F012F85DB4A0063D17E /* MovieKnight.xcdatamodeld */ = {
+		8A852F012F85DB4A0063D17E /* StreamScout.xcdatamodeld */ = {
 			isa = XCVersionGroup;
 			children = (
-				8A852F022F85DB4A0063D17E /* MovieKnight.xcdatamodel */,
+				8A852F022F85DB4A0063D17E /* StreamScout.xcdatamodel */,
 			);
-			currentVersion = 8A852F022F85DB4A0063D17E /* MovieKnight.xcdatamodel */;
-			path = MovieKnight.xcdatamodeld;
+			currentVersion = 8A852F022F85DB4A0063D17E /* StreamScout.xcdatamodel */;
+			path = StreamScout.xcdatamodeld;
 			sourceTree = "<group>";
 			versionGroupType = wrapper.xcdatamodel;
 		};

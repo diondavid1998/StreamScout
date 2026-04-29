@@ -567,6 +567,34 @@ async function searchTitleOnTmdb(name, year) {
   return null;
 }
 
+async function fetchTitlesByPerson(personId, platforms) {
+  const { providerIds, providerMapById } = buildProviderSelection(platforms);
+  if (!providerIds.length) return [];
+
+  const [movieResults, tvResults] = await Promise.all([
+    discoverTitles('movie', providerIds, 1, DEFAULT_REGION, { with_cast: String(personId) }),
+    discoverTitles('tv', providerIds, 1, DEFAULT_REGION, { with_cast: String(personId) }),
+  ]);
+
+  const allItems = dedupeCatalog([
+    ...movieResults.map((item) => ({ ...item, media_type: 'movie' })),
+    ...tvResults.map((item) => ({ ...item, media_type: 'tv' })),
+  ]).slice(0, 24);
+
+  const enriched = await mapWithConcurrency(allItems, 4, async (item) => {
+    try {
+      const details = await fetchTmdb(`/${item.media_type}/${item.id}`, {
+        append_to_response: 'watch/providers',
+        language: 'en-US',
+      });
+      const providers = normalizeProviders(details, providerMapById);
+      return normalizeCatalogItem(item, details, null, providers, item.media_type);
+    } catch { return null; }
+  });
+
+  return enriched.filter(Boolean);
+}
+
 module.exports = {
   PLATFORM_CONFIG,
   fetchOmdbRatings,
@@ -575,6 +603,7 @@ module.exports = {
   fetchTitleWithCredits,
   isOmdbRateLimited,
   searchTitleOnTmdb,
+  fetchTitlesByPerson,
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,

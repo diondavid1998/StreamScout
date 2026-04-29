@@ -178,8 +178,8 @@ describe('Auth page', () => {
 
 describe('Logged-in catalog view', () => {
   function setupLoggedInSession() {
-    localStorage.setItem('movieKnight.authToken', 'mock-jwt');
-    localStorage.setItem('movieKnight.username', 'testuser');
+    localStorage.setItem('streamScout.authToken', 'mock-jwt');
+    localStorage.setItem('streamScout.username', 'testuser');
   }
 
   /**

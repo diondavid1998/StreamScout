@@ -23,7 +23,7 @@ npm-debug.log*
 yarn-debug.log*
 
 # iOS build artifacts
-MovieKnight/build/
-MovieKnight.xcodeproj/xcuserdata/
+StreamScout/build/
+StreamScout.xcodeproj/xcuserdata/
 *.xcuserstate
 DerivedData/

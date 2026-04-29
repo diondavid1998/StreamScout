@@ -24,7 +24,7 @@ Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on *
 
 ### Step 2 — Deploy the frontend on Netlify
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/diondavid1998/MovieKnight)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/diondavid1998/StreamScout)
 
 1. Click the button above and sign in / create a free [Netlify](https://netlify.com) account.
 2. Netlify will detect `netlify.toml` and use `web-frontend/` as the build root automatically.
@@ -98,7 +98,7 @@ StreamScore is a Progressive Web App — you can add it to your iPhone Home Scre
 | Rate limiting | `express-rate-limit` (20 req / 15 min on auth) |
 | Caching | Daily catalog cache in SQLite with background hydration |
 
-### iOS (`MovieKnight/`)
+### iOS (`StreamScout/`)
 - Swift / SwiftUI
 - Native companion app — same backend, same account
 
@@ -107,7 +107,7 @@ StreamScore is a Progressive Web App — you can add it to your iPhone Home Scre
 ## Project Structure
 
 ```
-MovieKnight/
+StreamScout/
 ├── backend/              # Node/Express API server
 │   ├── index.js          # Express app, routes, auth
 │   ├── catalogCache.js   # SQLite catalog caching & rating hydration
@@ -119,8 +119,8 @@ MovieKnight/
 │   │   └── logos/        # Rating & platform logo assets
 │   └── package.json
 ├── logo/                 # Source logo assets
-├── MovieKnight/          # iOS Swift app (displays as "StreamScore")
-├── MovieKnight.xcodeproj/
+├── StreamScout/          # iOS Swift app (displays as "StreamScore")
+├── StreamScout.xcodeproj/
 └── README.md
 ```
 

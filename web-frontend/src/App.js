@@ -4,9 +4,9 @@ import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenToma
 import streamscoutLogo from './logos/streamscout.png';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend-production.up.railway.app';
-const AUTH_TOKEN_KEY = 'movieKnight.authToken';
-const AUTH_USERNAME_KEY = 'movieKnight.username';
-const BYPASS_MODE_KEY = 'movieKnight.bypassMode';
+const AUTH_TOKEN_KEY = 'streamScout.authToken';
+const AUTH_USERNAME_KEY = 'streamScout.username';
+const BYPASS_MODE_KEY = 'streamScout.bypassMode';
 const PAGE_SIZE = 24;
 const YEAR_RANGE_MIN = 1900;
 const YEAR_RANGE_MAX = new Date().getFullYear();

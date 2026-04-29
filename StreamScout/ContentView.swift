@@ -1476,46 +1476,74 @@ struct YearFilterSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onApply: () -> Void
 
+    private let minYear: Double = 1970
+    private let maxYear: Double = 2026
+
+    @State private var sliderMin: Double = 1970
+    @State private var sliderMax: Double = 2026
+
     var body: some View {
         NavigationView {
             ZStack {
                 Color.mkBackground.ignoresSafeArea()
-                VStack(spacing: 24) {
-                    Text("Filter titles released within a year range. Leave either field blank to use no lower or upper bound.")
-                        .font(.subheadline).foregroundColor(.mkMuted)
-                        .multilineTextAlignment(.center).padding(.horizontal, 24).padding(.top, 8)
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("From Year").font(.caption).foregroundColor(.mkMuted)
-                            TextField("e.g. 2010", text: $yearMin)
-                                .keyboardType(.numberPad)
-                                .padding(12).background(Color.mkSurface)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.mkBorder, lineWidth: 1))
-                                .foregroundColor(.mkText)
+                VStack(spacing: 32) {
+                    // Year range label
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("From").font(.caption).foregroundColor(.mkMuted)
+                            Text(String(Int(sliderMin)))
+                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .foregroundColor(.mkAccent)
                         }
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("To Year").font(.caption).foregroundColor(.mkMuted)
-                            TextField("e.g. 2024", text: $yearMax)
-                                .keyboardType(.numberPad)
-                                .padding(12).background(Color.mkSurface)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.mkBorder, lineWidth: 1))
-                                .foregroundColor(.mkText)
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("To").font(.caption).foregroundColor(.mkMuted)
+                            Text(String(Int(sliderMax)))
+                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .foregroundColor(.mkAccent)
                         }
                     }
                     .padding(.horizontal, 24)
-                    if !yearMin.isEmpty || !yearMax.isEmpty {
-                        Button {
-                            yearMin = ""; yearMax = ""
-                        } label: {
-                            Label("Clear Year Filter", systemImage: "xmark.circle")
-                                .font(.subheadline).foregroundColor(.mkAccent)
+                    .padding(.top, 16)
+
+                    // Min year slider
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Earliest year: \(Int(sliderMin))")
+                            .font(.caption).foregroundColor(.mkMuted).padding(.horizontal, 24)
+                        Slider(value: $sliderMin, in: minYear...maxYear, step: 1) {
+                            Text("From")
                         }
+                        .onChange(of: sliderMin) { val in
+                            if val > sliderMax { sliderMax = val }
+                        }
+                        .accentColor(.mkAccent)
+                        .padding(.horizontal, 24)
                     }
+
+                    // Max year slider
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Latest year: \(Int(sliderMax))")
+                            .font(.caption).foregroundColor(.mkMuted).padding(.horizontal, 24)
+                        Slider(value: $sliderMax, in: minYear...maxYear, step: 1) {
+                            Text("To")
+                        }
+                        .onChange(of: sliderMax) { val in
+                            if val < sliderMin { sliderMin = val }
+                        }
+                        .accentColor(.mkAccent)
+                        .padding(.horizontal, 24)
+                    }
+
+                    Button {
+                        sliderMin = minYear; sliderMax = maxYear
+                        yearMin = ""; yearMax = ""
+                    } label: {
+                        Label("Reset to All Years", systemImage: "arrow.counterclockwise")
+                            .font(.subheadline).foregroundColor(.mkAccent)
+                    }
+
                     Spacer()
                 }
-                .padding(.top, 8)
             }
             .navigationTitle("Filter by Year")
             .navigationBarTitleDisplayMode(.inline)
@@ -1524,9 +1552,18 @@ struct YearFilterSheet: View {
                     Button("Cancel") { dismiss() }.foregroundColor(.mkMuted)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Apply") { onApply(); dismiss() }
-                        .fontWeight(.semibold).foregroundColor(.mkAccent)
+                    Button("Apply") {
+                        // Only set if not full range
+                        yearMin = sliderMin > minYear ? String(Int(sliderMin)) : ""
+                        yearMax = sliderMax < maxYear ? String(Int(sliderMax)) : ""
+                        onApply(); dismiss()
+                    }
+                    .fontWeight(.semibold).foregroundColor(.mkAccent)
                 }
+            }
+            .onAppear {
+                sliderMin = Double(yearMin) ?? minYear
+                sliderMax = Double(yearMax) ?? maxYear
             }
         }
     }
@@ -1820,35 +1857,136 @@ struct DetailSheet: View {
 
 struct CastCell: View {
     let member: CastMember
+    @State private var showPersonMovies = false
+
     var body: some View {
-        VStack(spacing: 5) {
-            Group {
-                if let urlStr = member.profileUrl, let url = URL(string: urlStr) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img): img.resizable().scaledToFill()
-                        default: placeholderPerson
+        Button { showPersonMovies = true } label: {
+            VStack(spacing: 5) {
+                Group {
+                    if let urlStr = member.profileUrl, let url = URL(string: urlStr) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let img): img.resizable().scaledToFill()
+                            default: placeholderPerson
+                            }
                         }
-                    }
-                } else { placeholderPerson }
+                    } else { placeholderPerson }
+                }
+                .frame(width: 64, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.mkBorder, lineWidth: 1))
+                Text(member.name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.mkText).lineLimit(2).multilineTextAlignment(.center)
+                    .frame(width: 64)
+                if !member.character.isEmpty {
+                    Text(member.character).font(.system(size: 10)).foregroundColor(.mkMuted)
+                        .lineLimit(1).frame(width: 64)
+                }
             }
-            .frame(width: 64, height: 80)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.mkBorder, lineWidth: 1))
-            Text(member.name)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.mkText).lineLimit(2).multilineTextAlignment(.center)
-                .frame(width: 64)
-            if !member.character.isEmpty {
-                Text(member.character).font(.system(size: 10)).foregroundColor(.mkMuted)
-                    .lineLimit(1).frame(width: 64)
-            }
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .sheet(isPresented: $showPersonMovies) {
+            PersonMoviesSheet(person: member)
         }
     }
     var placeholderPerson: some View {
         ZStack {
             Color.mkSurface
             Image(systemName: "person.fill").foregroundColor(.mkMuted.opacity(0.4))
+        }
+    }
+}
+
+// MARK: - Person Movies Sheet
+
+struct PersonMoviesSheet: View {
+    let person: CastMember
+    @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [CatalogItem] = []
+    @State private var isLoading = true
+    @State private var errorMsg: String?
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                content
+            }
+            .navigationTitle(person.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.foregroundColor(.mkAccent)
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isLoading {
+            ProgressView("Loading…").tint(.mkAccent)
+        } else if let err = errorMsg {
+            Text(err).foregroundColor(.mkMuted).padding()
+        } else if items.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "film.slash").font(.system(size: 44)).foregroundColor(.mkMuted)
+                Text("No titles found on your streaming services.")
+                    .font(.subheadline).foregroundColor(.mkMuted).multilineTextAlignment(.center)
+            }.padding()
+        } else {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 12)], spacing: 14) {
+                    ForEach(items) { item in
+                        PersonMovieCell(item: item)
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    @MainActor
+    func load() async {
+        isLoading = true
+        do {
+            let response: PersonMoviesResponse = try await APIService.shared.get(
+                "/titles/person/\(person.id)", token: app.token
+            )
+            items = response.items
+        } catch {
+            errorMsg = "Could not load titles."
+        }
+        isLoading = false
+    }
+}
+
+private struct PersonMovieCell: View {
+    let item: CatalogItem
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AsyncImage(url: URL(string: item.posterUrl ?? "")) { phase in
+                switch phase {
+                case .success(let img): img.resizable().scaledToFill()
+                default:
+                    ZStack {
+                        Color.mkSurface
+                        Image(systemName: "film").foregroundColor(.mkMuted.opacity(0.4))
+                    }
+                }
+            }
+            .frame(width: 110, height: 160)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            Text(item.title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.mkText).lineLimit(2)
+                .frame(width: 110, alignment: .leading)
+            if let year = item.year {
+                Text(String(year)).font(.system(size: 10)).foregroundColor(.mkMuted)
+            }
         }
     }
 }
@@ -1987,14 +2125,17 @@ struct PlatformToggle: View {
         Button(action: action) {
             VStack(spacing: 6) {
                 Image(platform.logoAsset).resizable().scaledToFit()
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10)
                         .stroke(isSelected ? Color.mkAccent : Color.clear, lineWidth: 2))
                 Text(platform.name).font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isSelected ? .mkAccent : .mkMuted).lineLimit(1)
+                    .foregroundColor(isSelected ? .mkAccent : .mkMuted)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity)
             }
             .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 80)
             .background(isSelected ? Color.mkAccent.opacity(0.1) : Color.mkSurface)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(

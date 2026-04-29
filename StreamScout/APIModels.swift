@@ -262,6 +262,12 @@ struct SimpleResponse: Decodable {
     let error: String?
 }
 
+// MARK: - Person Filmography
+
+struct PersonMoviesResponse: Decodable {
+    let items: [CatalogItem]
+}
+
 // MARK: - Password Reset
 
 struct ForgotPasswordResponse: Decodable {
