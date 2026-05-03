@@ -1506,6 +1506,76 @@ struct ScaleButtonStyle: ButtonStyle {
     }
 }
 
+// MARK: - Range Slider
+
+struct RangeSlider: View {
+    @Binding var low: Double
+    @Binding var high: Double
+    let bounds: ClosedRange<Double>
+    let step: Double
+
+    private let thumbDiameter: CGFloat = 26
+
+    var body: some View {
+        GeometryReader { geo in
+            let trackWidth = geo.size.width - thumbDiameter
+            let lowOffset  = CGFloat((low  - bounds.lowerBound) / (bounds.upperBound - bounds.lowerBound)) * trackWidth
+            let highOffset = CGFloat((high - bounds.lowerBound) / (bounds.upperBound - bounds.lowerBound)) * trackWidth
+
+            ZStack(alignment: .leading) {
+                // Background track
+                Capsule()
+                    .fill(Color.mkBorder)
+                    .frame(height: 4)
+                    .padding(.horizontal, thumbDiameter / 2)
+
+                // Active range fill
+                Capsule()
+                    .fill(Color.mkAccent)
+                    .frame(width: max(0, highOffset - lowOffset), height: 4)
+                    .padding(.leading, thumbDiameter / 2 + lowOffset)
+
+                // Low thumb
+                Circle()
+                    .fill(Color.mkAccent)
+                    .frame(width: thumbDiameter, height: thumbDiameter)
+                    .shadow(color: Color.mkAccent.opacity(0.4), radius: 5)
+                    .offset(x: lowOffset)
+                    .gesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .named("rangeTrack"))
+                            .onChanged { drag in
+                                let val = snapValue(x: drag.location.x, trackWidth: trackWidth)
+                                low = min(max(val, bounds.lowerBound), high - step)
+                            }
+                    )
+                    .zIndex(lowOffset >= highOffset - 1 ? 1 : 0)
+
+                // High thumb
+                Circle()
+                    .fill(Color.mkAccent)
+                    .frame(width: thumbDiameter, height: thumbDiameter)
+                    .shadow(color: Color.mkAccent.opacity(0.4), radius: 5)
+                    .offset(x: highOffset)
+                    .gesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .named("rangeTrack"))
+                            .onChanged { drag in
+                                let val = snapValue(x: drag.location.x, trackWidth: trackWidth)
+                                high = max(min(val, bounds.upperBound), low + step)
+                            }
+                    )
+            }
+            .coordinateSpace(name: "rangeTrack")
+        }
+        .frame(height: thumbDiameter)
+    }
+
+    private func snapValue(x: CGFloat, trackWidth: CGFloat) -> Double {
+        let pct = Double(max(0, min(x - thumbDiameter / 2, trackWidth)) / trackWidth)
+        let raw = bounds.lowerBound + pct * (bounds.upperBound - bounds.lowerBound)
+        return (raw / step).rounded() * step
+    }
+}
+
 // MARK: - Year Filter Sheet
 
 struct YearFilterSheet: View {
@@ -1515,62 +1585,39 @@ struct YearFilterSheet: View {
     let onApply: () -> Void
 
     private let minYear: Double = 1900
-    private let maxYear: Double = Double(Calendar.current.component(.year, from: Date()) + 1)
+    private let maxYear: Double = Double(Calendar.current.component(.year, from: Date()))
 
     @State private var sliderMin: Double = 1900
-    @State private var sliderMax: Double = Double(Calendar.current.component(.year, from: Date()) + 1)
+    @State private var sliderMax: Double = Double(Calendar.current.component(.year, from: Date()))
 
     var body: some View {
         NavigationView {
             ZStack {
                 Color.mkBackground.ignoresSafeArea()
                 VStack(spacing: 32) {
-                    // Year range label
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("From").font(.caption).foregroundColor(.mkMuted)
                             Text(String(Int(sliderMin)))
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundColor(.mkAccent)
                         }
+                        Spacer()
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 14)).foregroundColor(.mkMuted)
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("To").font(.caption).foregroundColor(.mkMuted)
                             Text(String(Int(sliderMax)))
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundColor(.mkAccent)
                         }
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
 
-                    // Min year slider
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Earliest year: \(Int(sliderMin))")
-                            .font(.caption).foregroundColor(.mkMuted).padding(.horizontal, 24)
-                        Slider(value: $sliderMin, in: minYear...maxYear, step: 1) {
-                            Text("From")
-                        }
-                        .onChange(of: sliderMin) { val in
-                            if val > sliderMax { sliderMax = val }
-                        }
-                        .accentColor(.mkAccent)
+                    RangeSlider(low: $sliderMin, high: $sliderMax, bounds: minYear...maxYear, step: 1)
                         .padding(.horizontal, 24)
-                    }
-
-                    // Max year slider
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Latest year: \(Int(sliderMax))")
-                            .font(.caption).foregroundColor(.mkMuted).padding(.horizontal, 24)
-                        Slider(value: $sliderMax, in: minYear...maxYear, step: 1) {
-                            Text("To")
-                        }
-                        .onChange(of: sliderMax) { val in
-                            if val < sliderMin { sliderMin = val }
-                        }
-                        .accentColor(.mkAccent)
-                        .padding(.horizontal, 24)
-                    }
 
                     Button {
                         sliderMin = minYear; sliderMax = maxYear
@@ -1591,7 +1638,6 @@ struct YearFilterSheet: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Apply") {
-                        // Only set if not full range
                         yearMin = sliderMin > minYear ? String(Int(sliderMin)) : ""
                         yearMax = sliderMax < maxYear ? String(Int(sliderMax)) : ""
                         onApply(); dismiss()
