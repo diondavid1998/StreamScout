@@ -70,9 +70,19 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(Array(watchedIds), forKey: watchedKey)
     }
 
+    func replaceWatchedIds(_ ids: [String]) {
+        watchedIds = Set(ids)
+        UserDefaults.standard.set(ids, forKey: watchedKey)
+    }
+
     func setWatchlisted(_ id: String, on: Bool) {
         if on { watchlistIds.insert(id) } else { watchlistIds.remove(id) }
         UserDefaults.standard.set(Array(watchlistIds), forKey: watchlistKey)
+    }
+
+    func replaceWatchlistIds(_ ids: [String]) {
+        watchlistIds = Set(ids)
+        UserDefaults.standard.set(ids, forKey: watchlistKey)
     }
 
     func logout() {
@@ -781,15 +791,13 @@ struct CatalogView: View {
                         )
                     }
                 }
-                if !app.watchlistIds.isEmpty {
-                    Button {
-                        watchlistOnly.toggle(); page = 1; Task { await fetch() }
-                    } label: {
-                        FilterChip(
-                            label: "Streaming Watchlist",
-                            icon: "play.rectangle.on.rectangle.fill", active: watchlistOnly
-                        )
-                    }
+                Button {
+                    watchlistOnly.toggle(); page = 1; Task { await fetch() }
+                } label: {
+                    FilterChip(
+                        label: "From Watchlist",
+                        icon: "bookmark.fill", active: watchlistOnly
+                    )
                 }
                 if !app.selectedPlatforms.isEmpty {
                     HStack(spacing: 5) {
@@ -908,7 +916,7 @@ struct CatalogView: View {
         if !yearMin.isEmpty               { params["yearMin"] = yearMin }
         if !yearMax.isEmpty               { params["yearMax"] = yearMax }
         if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "true" }
-        if watchlistOnly && !app.watchlistIds.isEmpty { params["watchlistOnly"] = "true" }
+        if watchlistOnly { params["watchlistOnly"] = "true" }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
             if let serverError = resp.error, resp.catalog.isEmpty {
@@ -2085,7 +2093,7 @@ private struct PersonMovieCell: View {
 // MARK: - Settings View
 
 struct SettingsView: View {
-    enum Tab: String { case services, profile, watchlist }
+    enum Tab: String { case services, profile, watched, watchlistTab }
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .services
@@ -2099,9 +2107,10 @@ struct SettingsView: View {
                     Divider().overlay(Color.mkBorder)
                     Group {
                         switch tab {
-                        case .services:  ServicesTabView().environmentObject(app)
-                        case .profile:   ProfileTabView().environmentObject(app)
-                        case .watchlist: WatchlistTabView().environmentObject(app)
+                        case .services:    ServicesTabView().environmentObject(app)
+                        case .profile:     ProfileTabView().environmentObject(app)
+                        case .watched:     WatchedOnlyTabView().environmentObject(app)
+                        case .watchlistTab: WatchlistOnlyTabView().environmentObject(app)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2122,7 +2131,8 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             ForEach([(Tab.services, "play.rectangle.on.rectangle", "Services"),
                      (Tab.profile, "person.crop.circle", "Profile"),
-                     (Tab.watchlist, "checkmark.circle", "Watched")], id: \.0.rawValue) { t, icon, label in
+                     (Tab.watched, "checkmark.circle", "Watched"),
+                     (Tab.watchlistTab, "bookmark.circle", "Watchlist")], id: \.0.rawValue) { t, icon, label in
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { tab = t }
                 } label: {
@@ -2275,6 +2285,9 @@ struct ProfileTabView: View {
     @State private var showLbxMismatch = false
     @State private var lbxImportProgress: String? = nil
     @State private var lbxImportDone: String? = nil
+    // Catalog refresh
+    @State private var showRefreshConfirm = false
+    @State private var isRefreshing = false
 
     var body: some View {
         ScrollView {
@@ -2338,6 +2351,37 @@ struct ProfileTabView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 8)
+
+                Divider().overlay(Color.mkBorder)
+
+                // ── Catalog Refresh ────────────────────────────────────────
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .foregroundColor(.mkAccent)
+                        Text("Catalog Refresh")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.mkText)
+                    }
+                    Text("Re-fetch all streaming content from the API. Use this if your catalog looks out of date. It may take a few minutes.")
+                        .font(.caption)
+                        .foregroundColor(.mkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    MKButton(
+                        label: isRefreshing ? "Starting…" : "Refresh Catalog",
+                        icon: "arrow.clockwise.circle.fill",
+                        isLoading: isRefreshing
+                    ) {
+                        showRefreshConfirm = true
+                    }
+                    .disabled(app.selectedPlatforms.isEmpty)
+                    if app.selectedPlatforms.isEmpty {
+                        Text("Add streaming services first.")
+                            .font(.caption).foregroundColor(.mkMuted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 24)
             }
             .padding(.horizontal, 16).padding(.top, 12)
@@ -2373,6 +2417,12 @@ struct ProfileTabView: View {
             Button("Cancel", role: .cancel) { lbxItems = [] }
         } message: {
             Text("This file looks like a \(lbxImportType == "watched" ? "watchlist" : "watched history") CSV. Are you sure you want to import it as \(lbxImportType == "watched" ? "watched movies" : "your watchlist")?")
+        }
+        .alert("Refresh Catalog?", isPresented: $showRefreshConfirm) {
+            Button("Refresh", role: .destructive) { Task { await refreshCatalog() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will re-fetch all streaming content from the API. It may take a few minutes.")
         }
     }
 
@@ -2535,58 +2585,56 @@ struct ProfileTabView: View {
         }
         isSaving = false
     }
+
+    @MainActor func refreshCatalog() async {
+        isRefreshing = true
+        do {
+            let _: SimpleResponse = try await APIService.shared.post("/catalog/refresh", body: [:], token: app.token)
+            message = "Catalog refresh started. It may take a few minutes."; messageIsError = false
+        } catch {
+            message = (error as? APIError)?.errorDescription ?? "Refresh failed"; messageIsError = true
+        }
+        isRefreshing = false
+    }
 }
 
-// MARK: Watchlist Tab
+// MARK: Watched Tab
 
-struct WatchlistTabView: View {
+struct WatchedOnlyTabView: View {
     @EnvironmentObject var app: AppState
-    @State private var watchedItems: [WatchedItem] = []
-    @State private var watchlistItems: [WatchlistItem] = []
+    @State private var items: [WatchedItem] = []
     @State private var isLoading = true
 
     var body: some View {
         Group {
             if isLoading {
                 VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
-            } else if watchedItems.isEmpty && watchlistItems.isEmpty {
+            } else if items.isEmpty {
                 VStack(spacing: 12) {
                     Spacer()
                     Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundColor(.mkMuted)
-                    Text("Nothing here yet").font(.title3).bold().foregroundColor(.mkMuted)
-                    Text("Mark titles as watched from the catalog, or import your Letterboxd data in Profile.")
+                    Text("Nothing watched yet").font(.title3).bold().foregroundColor(.mkMuted)
+                    Text("Mark titles as watched from the catalog, or import your Letterboxd watched.csv in Profile.")
                         .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
                     Spacer()
                 }
             } else {
                 List {
-                    if !watchedItems.isEmpty {
-                        Section(header: Text("Watched").foregroundColor(.mkMuted)) {
-                            ForEach(watchedItems) { item in
-                                watchRow(item.itemId, title: item.title, mediaType: item.mediaType, icon: "checkmark.circle.fill", iconColor: .green)
-                            }
-                            .onDelete { offsets in Task { await removeWatched(at: offsets) } }
-                        }
+                    ForEach(items) { item in
+                        watchRow(item.itemId, title: item.title, mediaType: item.mediaType)
                     }
-                    if !watchlistItems.isEmpty {
-                        Section(header: Text("Letterboxd Watchlist").foregroundColor(.mkMuted)) {
-                            ForEach(watchlistItems) { item in
-                                watchRow(item.itemId, title: item.title, mediaType: item.mediaType, icon: "bookmark.fill", iconColor: .mkAccent)
-                            }
-                            .onDelete { offsets in Task { await removeWatchlist(at: offsets) } }
-                        }
-                    }
+                    .onDelete { offsets in Task { await removeItem(at: offsets) } }
                 }
                 .listStyle(.plain)
                 .background(Color.mkBackground)
             }
         }
-        .task { await loadAll() }
+        .task { await load() }
     }
 
     @ViewBuilder
-    func watchRow(_ itemId: String, title: String?, mediaType: String?, icon: String, iconColor: Color) -> some View {
+    func watchRow(_ itemId: String, title: String?, mediaType: String?) -> some View {
         HStack(spacing: 12) {
             Image(systemName: (mediaType ?? "movie") == "tv" ? "tv" : "film")
                 .foregroundColor(.mkAccent).frame(width: 24)
@@ -2596,39 +2644,97 @@ struct WatchlistTabView: View {
                     .font(.caption).foregroundColor(.mkMuted)
             }
             Spacer()
-            Image(systemName: icon).foregroundColor(iconColor)
+            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
         }
         .listRowBackground(Color.mkSurface)
     }
 
-    @MainActor func loadAll() async {
+    @MainActor func load() async {
         isLoading = true
-        async let watchedResp: WatchedListResponse? = try? APIService.shared.get("/watched", token: app.token)
-        async let watchlistResp: WatchlistResponse? = try? APIService.shared.get("/watchlist", token: app.token)
-        let (w, wl) = await (watchedResp, watchlistResp)
-        watchedItems = w?.items ?? []
-        watchlistItems = wl?.items ?? []
-        for item in watchedItems { app.setWatched(item.itemId, watched: true) }
-        for item in watchlistItems { app.setWatchlisted(item.itemId, on: true) }
+        if let resp: WatchedListResponse = try? await APIService.shared.get("/watched", token: app.token) {
+            items = resp.items
+            app.replaceWatchedIds(resp.items.map { $0.itemId })
+        }
         isLoading = false
     }
 
-    @MainActor func removeWatched(at offsets: IndexSet) async {
+    @MainActor func removeItem(at offsets: IndexSet) async {
         for i in offsets {
-            let item = watchedItems[i]
+            let item = items[i]
             _ = try? await APIService.shared.delete("/watched/\(item.itemId)", token: app.token) as ToggleWatchedResponse
             app.setWatched(item.itemId, watched: false)
         }
-        watchedItems.remove(atOffsets: offsets)
+        items.remove(atOffsets: offsets)
+    }
+}
+
+// MARK: Watchlist Tab
+
+struct WatchlistOnlyTabView: View {
+    @EnvironmentObject var app: AppState
+    @State private var items: [WatchlistItem] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        Group {
+            if isLoading {
+                VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
+            } else if items.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "bookmark.circle").font(.system(size: 44)).foregroundColor(.mkMuted)
+                    Text("Watchlist is empty").font(.title3).bold().foregroundColor(.mkMuted)
+                    Text("Import your Letterboxd watchlist.csv in Profile, or add titles from the catalog.")
+                        .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
+                        .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    Spacer()
+                }
+            } else {
+                List {
+                    ForEach(items) { item in
+                        watchRow(item.itemId, title: item.title, mediaType: item.mediaType)
+                    }
+                    .onDelete { offsets in Task { await removeItem(at: offsets) } }
+                }
+                .listStyle(.plain)
+                .background(Color.mkBackground)
+            }
+        }
+        .task { await load() }
     }
 
-    @MainActor func removeWatchlist(at offsets: IndexSet) async {
+    @ViewBuilder
+    func watchRow(_ itemId: String, title: String?, mediaType: String?) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: (mediaType ?? "movie") == "tv" ? "tv" : "film")
+                .foregroundColor(.mkAccent).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title ?? "Unknown Title").font(.system(size: 15, weight: .semibold)).foregroundColor(.mkText)
+                Text((mediaType ?? "movie") == "tv" ? "TV Show" : "Movie")
+                    .font(.caption).foregroundColor(.mkMuted)
+            }
+            Spacer()
+            Image(systemName: "bookmark.fill").foregroundColor(.mkAccent)
+        }
+        .listRowBackground(Color.mkSurface)
+    }
+
+    @MainActor func load() async {
+        isLoading = true
+        if let resp: WatchlistResponse = try? await APIService.shared.get("/watchlist", token: app.token) {
+            items = resp.items
+            app.replaceWatchlistIds(resp.items.map { $0.itemId })
+        }
+        isLoading = false
+    }
+
+    @MainActor func removeItem(at offsets: IndexSet) async {
         for i in offsets {
-            let item = watchlistItems[i]
+            let item = items[i]
             _ = try? await APIService.shared.delete("/watchlist/\(item.itemId)", token: app.token) as SimpleResponse
             app.setWatchlisted(item.itemId, on: false)
         }
-        watchlistItems.remove(atOffsets: offsets)
+        items.remove(atOffsets: offsets)
     }
 }
 

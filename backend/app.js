@@ -16,6 +16,7 @@ const {
   ensureScopeSynced,
   readCachedCatalog,
   buildScopeKey,
+  syncScope,
 } = require('./catalogCache');
 const { fetchTitleWithCredits, searchTitleOnTmdb, fetchTitlesByPerson } = require('./movieService');
 
@@ -357,6 +358,32 @@ function createApp(db, { disableRateLimit = false } = {}) {
             lastSyncedAt: state?.last_synced_at || null,
             itemCount: state?.item_count || 0,
           });
+        }
+      );
+    });
+  });
+
+  // ── Catalog force-refresh ─────────────────────────────────────────────────
+  app.post('/catalog/refresh', authenticateToken, (req, res) => {
+    db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
+      if (err || !row) return res.status(500).json({ error: 'Database error' });
+      let platforms = [], languages = [];
+      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
+      try { languages = JSON.parse(row.languages || '[]'); } catch { /* ignore */ }
+      if (platforms.length === 0) {
+        return res.status(400).json({ error: 'No streaming services configured. Add services first.' });
+      }
+      const scopeKey = buildScopeKey(platforms);
+      // Invalidate cache so syncScope treats it as stale, then fire in background
+      db.run(
+        'UPDATE catalog_cache_state SET last_synced_at = NULL WHERE scope_key = ?',
+        [scopeKey],
+        (err2) => {
+          if (err2) return res.status(500).json({ error: 'Database error' });
+          syncScope(db, { platforms, languages, region: 'US' }).catch((e) =>
+            console.error('[catalog/refresh] background sync failed:', e)
+          );
+          res.json({ success: true, message: 'Catalog refresh started' });
         }
       );
     });
