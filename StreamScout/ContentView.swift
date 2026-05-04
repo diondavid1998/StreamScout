@@ -2652,8 +2652,9 @@ struct WatchedOnlyTabView: View {
     @MainActor func load() async {
         isLoading = true
         if let resp: WatchedListResponse = try? await APIService.shared.get("/watched", token: app.token) {
-            items = resp.items
-            app.replaceWatchedIds(resp.items.map { $0.itemId })
+            let loaded = resp.items ?? []
+            items = loaded
+            app.replaceWatchedIds(loaded.map { $0.itemId })
         }
         isLoading = false
     }
@@ -2722,8 +2723,9 @@ struct WatchlistOnlyTabView: View {
     @MainActor func load() async {
         isLoading = true
         if let resp: WatchlistResponse = try? await APIService.shared.get("/watchlist", token: app.token) {
-            items = resp.items
-            app.replaceWatchlistIds(resp.items.map { $0.itemId })
+            let loaded = resp.items ?? []
+            items = loaded
+            app.replaceWatchlistIds(loaded.map { $0.itemId })
         }
         isLoading = false
     }
