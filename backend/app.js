@@ -15,6 +15,7 @@ const nodemailer = require('nodemailer');
 const {
   ensureScopeSynced,
   readCachedCatalog,
+  getStreamableWatchlistItems,
   buildScopeKey,
   syncScope,
 } = require('./catalogCache');
@@ -570,13 +571,100 @@ function createApp(db, { disableRateLimit = false } = {}) {
               );
             }
 
-            let watchlistItemIds = [];
+            // watchlistOnly: bypass the shared catalog and query TMDB directly for
+            // each watchlist item, with a per-user 24-hour streaming-availability cache.
+            // This ensures obscure titles (not in the top-300 popular snapshot) are found.
             if (watchlistOnly) {
-              watchlistItemIds = await new Promise((resolve) =>
-                db.all('SELECT item_id FROM watchlist_items WHERE user_id = ?', [req.user.id], (e, rows) =>
-                  resolve(rows ? rows.map((r) => r.item_id) : [])
+              const watchlistDetailRows = await new Promise((resolve) =>
+                db.all(
+                  'SELECT item_id, title, poster_url FROM watchlist_items WHERE user_id = ?',
+                  [req.user.id],
+                  (e, rows) => resolve(rows || [])
                 )
               );
+
+              if (!watchlistDetailRows.length) {
+                return res.json({
+                  items: [],
+                  meta: {
+                    mediaType, sortBy, region,
+                    page: 1, pageSize: Number(limit), resultCount: 0, visibleCount: 0,
+                    totalPages: 1, hasMore: false, cacheMode: 'watchlist',
+                  },
+                });
+              }
+
+              try {
+                let streamable = await getStreamableWatchlistItems(
+                  db, req.user.id, watchlistDetailRows, scopePlatforms, region
+                );
+
+                // In-memory filters
+                if (serviceFiltersFromQuery.length) {
+                  streamable = streamable.filter((item) =>
+                    item.availableOnKeys.some((k) => serviceFiltersFromQuery.includes(k))
+                  );
+                }
+                if (genreFilters.length) {
+                  streamable = streamable.filter((item) =>
+                    genreFilters.some((g) => item.genres.includes(g))
+                  );
+                }
+                if (languageFilters.length) {
+                  streamable = streamable.filter((item) =>
+                    languageFilters.includes(item.originalLanguage)
+                  );
+                }
+                if (yearMin) {
+                  streamable = streamable.filter((item) =>
+                    item.year && parseInt(item.year, 10) >= yearMin
+                  );
+                }
+                if (yearMax) {
+                  streamable = streamable.filter((item) =>
+                    item.year && parseInt(item.year, 10) <= yearMax
+                  );
+                }
+                if (hideWatched && excludeItemIds.length) {
+                  const excludeSet = new Set(excludeItemIds);
+                  streamable = streamable.filter((item) => !excludeSet.has(item.id));
+                }
+
+                // Sort
+                streamable = [...streamable].sort((a, b) => {
+                  switch (sortBy) {
+                    case 'title': return a.title.localeCompare(b.title);
+                    case 'release_date':
+                      return String(b.releaseDate || '').localeCompare(String(a.releaseDate || ''));
+                    case 'tmdb':
+                      return (b.sortableRatings.tmdb || 0) - (a.sortableRatings.tmdb || 0);
+                    default: return (b.popularity || 0) - (a.popularity || 0);
+                  }
+                });
+
+                // Paginate
+                const pageNum = Math.max(1, Number(page));
+                const pageSize = Math.min(Math.max(1, Number(limit)), 100);
+                const totalCount = streamable.length;
+                const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+                const currentPage = Math.min(pageNum, totalPages);
+                const paged = streamable.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+                return res.json({
+                  items: paged,
+                  meta: {
+                    mediaType, sortBy, region,
+                    page: currentPage, pageSize,
+                    resultCount: totalCount,
+                    visibleCount: paged.length,
+                    totalPages,
+                    hasMore: currentPage < totalPages,
+                    cacheMode: 'watchlist',
+                  },
+                });
+              } catch (e) {
+                return res.status(500).json({ error: 'Failed to load watchlist', details: e.message });
+              }
             }
 
             try {
@@ -593,7 +681,6 @@ function createApp(db, { disableRateLimit = false } = {}) {
                 yearMin,
                 yearMax,
                 excludeItemIds,
-                watchlistItemIds,
               });
               res.json(catalog);
             } catch (e) {

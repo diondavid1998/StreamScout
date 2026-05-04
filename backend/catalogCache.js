@@ -1,7 +1,8 @@
-const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails, isOmdbRateLimited } = require('./movieService');
+const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails, isOmdbRateLimited, PLATFORM_CONFIG } = require('./movieService');
 
 const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24, 1);
 const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
+const WATCHLIST_STREAMING_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DEFAULT_REGION = 'US';
 // Ratings rarely change — cache them for 30 days before re-fetching from OMDB
 const RATINGS_CACHE_TTL_DAYS = Number(process.env.RATINGS_CACHE_TTL_DAYS) || 30;
@@ -156,6 +157,31 @@ async function ensureCatalogTables(db) {
   await run(
     db,
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`
+  );
+
+  // Per-user streaming availability cache for watchlist items.
+  // Keyed by (user_id, item_id) so it never pollutes the shared scope catalog.
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS watchlist_streaming_cache (
+      user_id              TEXT NOT NULL,
+      item_id              TEXT NOT NULL,
+      title                TEXT,
+      poster_url           TEXT,
+      overview             TEXT,
+      release_date         TEXT,
+      year                 TEXT,
+      tmdb_rating          REAL,
+      tmdb_vote_count      INTEGER,
+      popularity           REAL,
+      original_language    TEXT,
+      genres_json          TEXT DEFAULT '[]',
+      imdb_id              TEXT,
+      available_on_json    TEXT DEFAULT '[]',
+      available_on_keys_json TEXT DEFAULT '[]',
+      checked_at           TEXT NOT NULL,
+      PRIMARY KEY (user_id, item_id)
+    )`
   );
 
   // Invalidate catalog cache if provider IDs have changed since last deploy
@@ -872,11 +898,157 @@ function startDailyCatalogRefresh(db) {
   scheduleNext();
 }
 
+// ── Watchlist streaming availability ─────────────────────────────────────────
+// Build a provider ID → { key, name } map from PLATFORM_CONFIG for the given
+// set of platform keys. Supports both single `id` and multi-`ids` entries.
+function buildProviderLookupMap(platforms) {
+  const map = new Map();
+  for (const key of platforms) {
+    const config = PLATFORM_CONFIG[key];
+    if (!config) continue;
+    const ids = config.ids || (config.id ? [config.id] : []);
+    for (const id of ids) {
+      map.set(id, { key, name: config.name });
+    }
+  }
+  return map;
+}
+
+// Extract provider names+keys from a TMDB watch/providers response.
+function extractAvailability(watchProviders, providerMap, region) {
+  const flatrate = watchProviders?.results?.[region]?.flatrate || [];
+  const seen = new Set();
+  const names = [];
+  const keys = [];
+  for (const p of flatrate) {
+    const entry = providerMap.get(p.provider_id);
+    if (entry && !seen.has(entry.key)) {
+      seen.add(entry.key);
+      names.push(entry.name);
+      keys.push(entry.key);
+    }
+  }
+  return { names, keys };
+}
+
+/**
+ * For each item in `watchlistRows`, fetch current streaming availability from
+ * TMDB (with 24-hour per-user cache in `watchlist_streaming_cache`) and return
+ * only those items streamable on at least one of the user's platforms.
+ *
+ * This intentionally bypasses `catalog_cache_entries` so obscure / non-popular
+ * titles that never appear in the top-300 discover snapshot are still found.
+ */
+async function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, region) {
+  if (!watchlistRows.length || !platforms.length) return [];
+
+  const providerMap = buildProviderLookupMap(platforms);
+  const platformSet = new Set(platforms);
+  const nowMs = Date.now();
+  const nowIso = new Date().toISOString();
+  const result = [];
+
+  for (const row of watchlistRows) {
+    const m = row.item_id.match(/^(movie|tv)-(\d+)$/);
+    if (!m) continue;
+    const [, mediaType, tmdbIdStr] = m;
+    const tmdbId = parseInt(tmdbIdStr, 10);
+
+    let cached = await get(db,
+      'SELECT * FROM watchlist_streaming_cache WHERE user_id = ? AND item_id = ?',
+      [userId, row.item_id]
+    );
+
+    const isFresh = cached &&
+      (nowMs - new Date(cached.checked_at).getTime() < WATCHLIST_STREAMING_TTL_MS);
+
+    if (!isFresh) {
+      try {
+        const details = await fetchTitleDetails(mediaType, tmdbId, { includeExternalIds: true });
+        if (!details) {
+          if (!cached) continue;
+        } else {
+          const available = extractAvailability(details['watch/providers'], providerMap, region);
+          const vals = [
+            userId,
+            row.item_id,
+            details.title || details.name || row.title || 'Unknown',
+            details.poster_path
+              ? `https://image.tmdb.org/t/p/w500${details.poster_path}`
+              : (row.poster_url || null),
+            details.overview || null,
+            details.release_date || details.first_air_date || null,
+            (details.release_date || details.first_air_date || '').slice(0, 4) || null,
+            details.vote_average || null,
+            details.vote_count || null,
+            details.popularity || null,
+            details.original_language || null,
+            JSON.stringify((details.genres || []).map((g) => g.name)),
+            details.external_ids?.imdb_id || null,
+            JSON.stringify(available.names),
+            JSON.stringify(available.keys),
+            nowIso,
+          ];
+          await run(db,
+            `INSERT OR REPLACE INTO watchlist_streaming_cache
+               (user_id, item_id, title, poster_url, overview, release_date, year,
+                tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id,
+                available_on_json, available_on_keys_json, checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            vals
+          );
+          cached = {
+            title: vals[2], poster_url: vals[3], overview: vals[4],
+            release_date: vals[5], year: vals[6], tmdb_rating: vals[7],
+            tmdb_vote_count: vals[8], popularity: vals[9], original_language: vals[10],
+            genres_json: vals[11], imdb_id: vals[12],
+            available_on_json: vals[13], available_on_keys_json: vals[14],
+          };
+        }
+      } catch (e) {
+        console.error(`[watchlist-streaming] Failed to fetch ${row.item_id}:`, e.message);
+        if (!cached) continue;
+        // fall through and use stale cached data
+      }
+    }
+
+    if (!cached) continue;
+
+    const availableKeys = JSON.parse(cached.available_on_keys_json || '[]');
+    if (!availableKeys.some((k) => platformSet.has(k))) continue;
+
+    result.push({
+      id: row.item_id,
+      tmdbId,
+      mediaType,
+      title: cached.title || row.title,
+      overview: cached.overview || null,
+      releaseDate: cached.release_date || null,
+      year: cached.year || null,
+      posterUrl: cached.poster_url || row.poster_url || null,
+      backdropPath: null,
+      tmdbRating: cached.tmdb_rating || null,
+      tmdbVoteCount: cached.tmdb_vote_count || null,
+      popularity: cached.popularity || null,
+      originalLanguage: cached.original_language || null,
+      genres: JSON.parse(cached.genres_json || '[]'),
+      imdbId: cached.imdb_id || null,
+      ratings: { tmdb: cached.tmdb_rating || null, imdb: null, rottenTomatoes: null, metacritic: null },
+      sortableRatings: { tmdb: cached.tmdb_rating || 0, imdb: 0, rottenTomatoes: 0, metacritic: 0 },
+      availableOn: JSON.parse(cached.available_on_json || '[]'),
+      availableOnKeys: JSON.parse(cached.available_on_keys_json || '[]'),
+    });
+  }
+
+  return result;
+}
+
 module.exports = {
   DAILY_SYNC_MS,
   ensureCatalogTables,
   ensureScopeSynced,
   readCachedCatalog,
+  getStreamableWatchlistItems,
   refreshAllCachedScopes,
   startDailyCatalogRefresh,
   syncScope,
