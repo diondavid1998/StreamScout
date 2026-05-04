@@ -10,8 +10,8 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const DOCUMENTARY_GENRE_ID = 99;
 const DEFAULT_PAGE_SIZE = 24;
 const PREFETCH_DISCOVER_PAGES = 5;
-const SNAPSHOT_DISCOVER_PAGES = 6;
-const MAX_SNAPSHOT_ITEMS = 300;
+const SNAPSHOT_DISCOVER_PAGES = 25;
+const MAX_SNAPSHOT_ITEMS = 1000;
 
 // OMDB circuit breaker — trips when the daily request limit is hit.
 // Resets automatically at next midnight so hydration resumes the following day.
@@ -425,7 +425,7 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
   const mediaType = options.mediaType || 'all';
   const sortBy = options.sortBy || 'popularity';
   const region = options.region || DEFAULT_REGION;
-  const limit = Math.min(Math.max(Number(options.limit) || DEFAULT_PAGE_SIZE, 1), 500);
+  const limit = Math.min(Math.max(Number(options.limit) || DEFAULT_PAGE_SIZE, 1), 2000);
   const page = Math.max(Number(options.page) || 1, 1);
   const snapshotMode = Boolean(options.snapshotMode);
   const includeRatings = options.includeRatings !== false;
@@ -436,7 +436,7 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
         (snapshotMode ? SNAPSHOT_DISCOVER_PAGES : Math.max(PREFETCH_DISCOVER_PAGES, page + 1)),
       DISCOVER_PAGE_COUNT
     ),
-    20
+    50
   );
   const selectedMediaTypes = mediaType === 'all' || mediaType === 'documentary' ? ['movie', 'tv'] : [mediaType];
   const { providerIds, providerMapById } = buildProviderSelection(platforms);
@@ -602,6 +602,49 @@ async function fetchTitlesByPerson(personId, platforms) {
   return enriched.filter(Boolean);
 }
 
+// Search TMDB for any title by query string.
+// Returns all matching results (up to 20), sorted so platform-available titles
+// come first. Streaming availability is annotated but not used to filter results,
+// so users can find and add unwatched titles to their watchlist.
+async function searchCatalog(query, { platforms = [], region = DEFAULT_REGION } = {}) {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const data = await fetchTmdb('/search/multi', {
+    query: trimmed,
+    language: 'en-US',
+    include_adult: false,
+  });
+
+  const results = (data.results || [])
+    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
+    .slice(0, 20);
+
+  if (!results.length) return [];
+
+  const { providerMapById } = buildProviderSelection(platforms);
+
+  const enriched = await mapWithConcurrency(results, 5, async (item) => {
+    try {
+      const details = await fetchTitleDetails(item.media_type, item.id, { includeExternalIds: false });
+      const providers = normalizeProviders(details, providerMapById, region);
+      return normalizeCatalogItem(item, details, buildRatingsPayload({}), providers, item.media_type);
+    } catch {
+      return null;
+    }
+  });
+
+  const valid = enriched.filter(Boolean);
+  // Surface platform-available titles first, then by TMDB popularity
+  valid.sort((a, b) => {
+    const aAvail = a.availableOnKeys.length > 0 ? 1 : 0;
+    const bAvail = b.availableOnKeys.length > 0 ? 1 : 0;
+    if (bAvail !== aAvail) return bAvail - aAvail;
+    return (b.popularity || 0) - (a.popularity || 0);
+  });
+  return valid;
+}
+
 module.exports = {
   PLATFORM_CONFIG,
   fetchOmdbRatings,
@@ -610,6 +653,7 @@ module.exports = {
   fetchTitleWithCredits,
   isOmdbRateLimited,
   searchTitleOnTmdb,
+  searchCatalog,
   fetchTitlesByPerson,
   // Exported for unit testing
   buildRatingsPayload,

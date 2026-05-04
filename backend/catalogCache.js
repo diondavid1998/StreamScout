@@ -243,9 +243,9 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
     const catalog = await fetchCatalogByPlatforms(platforms, {
       mediaType: 'all',
       sortBy: 'popularity',
-      limit: 300,
+      limit: 1000,
       page: 1,
-      pageCount: 6,
+      pageCount: 25,
       region,
       includeRatings: false,   // always skip inline OMDB — background hydration handles ratings
       includeExternalIds: true,

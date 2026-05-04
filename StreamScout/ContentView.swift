@@ -641,6 +641,11 @@ struct CatalogView: View {
     @State private var watchlistOnly = false
     @State private var selectedDetail: CatalogItem? = nil
     @State private var pollingTask: Task<Void, Never>?
+    @State private var searchText = ""
+    @State private var searchResults: [CatalogItem] = []
+    @State private var isSearchActive = false
+    @State private var isSearchLoading = false
+    @State private var searchTask: Task<Void, Never>?
 
     static let allGenres: [(key: String, label: String)] = [
         ("Action","Action"), ("Adventure","Adventure"), ("Animation","Animation"),
@@ -653,10 +658,13 @@ struct CatalogView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-            filterBar.padding(.bottom, 8)
+            searchBar
+            if !isSearchActive { filterBar.padding(.bottom, 8) }
             Divider().overlay(Color.mkBorder)
 
-            if isLoading || (movies.isEmpty && meta?.refreshing == true) {
+            if isSearchActive {
+                searchContent
+            } else if isLoading || (movies.isEmpty && meta?.refreshing == true) {
                 Spacer()
                 VStack(spacing: 10) {
                     ProgressView().tint(.mkAccent)
@@ -725,7 +733,7 @@ struct CatalogView: View {
         .onChange(of: showSettingsView) { open in
             if !open { page = 1; Task { await fetch() } }
         }
-        .onDisappear { pollingTask?.cancel() }
+        .onDisappear { pollingTask?.cancel(); searchTask?.cancel() }
     }
 
     // MARK: Sub-views
@@ -877,6 +885,84 @@ struct CatalogView: View {
         }
     }
 
+    // MARK: Search
+
+    var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundColor(.mkMuted)
+            TextField("Search any movie or show…", text: $searchText)
+                .foregroundColor(.mkText)
+                .autocorrectionDisabled()
+                .onChange(of: searchText) { text in
+                    searchTask?.cancel()
+                    guard text.count >= 2 else {
+                        if text.isEmpty {
+                            searchResults = []
+                            isSearchActive = false
+                            isSearchLoading = false
+                            if meta?.refreshing == true { startPollingIfNeeded() }
+                        }
+                        return
+                    }
+                    pollingTask?.cancel()
+                    isSearchActive = true
+                    isSearchLoading = true
+                    let captured = text
+                    searchTask = Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        guard !Task.isCancelled else { return }
+                        await searchCatalog(captured)
+                    }
+                }
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    searchResults = []
+                    isSearchActive = false
+                    isSearchLoading = false
+                    searchTask?.cancel()
+                    if meta?.refreshing == true { startPollingIfNeeded() }
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundColor(.mkMuted)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.mkSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    var searchContent: some View {
+        Group {
+            if isSearchLoading {
+                Spacer()
+                ProgressView().tint(.mkAccent)
+                Spacer()
+            } else if searchResults.isEmpty {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 32)).foregroundColor(.mkMuted.opacity(0.5))
+                    Text("No results for \"\(searchText)\"")
+                        .font(.subheadline).foregroundColor(.mkMuted)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(searchResults) { movie in
+                            MovieCardView(movie: movie, onTap: { selectedDetail = movie })
+                                .padding(.horizontal, 16)
+                        }
+                    }
+                    .padding(.top, 12).padding(.bottom, 24)
+                }
+            }
+        }
+    }
+
     // MARK: Labels
 
     var mediaTypeLabel: String {
@@ -932,6 +1018,20 @@ struct CatalogView: View {
             errorMsg = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
+    }
+
+    @MainActor func searchCatalog(_ query: String) async {
+        do {
+            let resp: CatalogResponse = try await APIService.shared.get(
+                "/search", params: ["q": query], token: app.token
+            )
+            // Discard if user has already typed something new
+            guard query == searchText else { return }
+            searchResults = resp.catalog
+        } catch APIError.unauthorized {
+            app.logout()
+        } catch { }
+        isSearchLoading = false
     }
 
     func startPollingIfNeeded() {

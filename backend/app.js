@@ -19,7 +19,7 @@ const {
   buildScopeKey,
   syncScope,
 } = require('./catalogCache');
-const { fetchTitleWithCredits, searchTitleOnTmdb, fetchTitlesByPerson } = require('./movieService');
+const { fetchTitleWithCredits, searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -739,6 +739,28 @@ function createApp(db, { disableRateLimit = false } = {}) {
         res.json({ success: true });
       }
     );
+  });
+
+  // ── Title search ────────────────────────────────────────────────────────────
+  // Live TMDB search: returns up to 20 results for any movie/show, annotated with
+  // streaming availability on the user's platforms. Platform-available titles sort
+  // first; results not on any service still appear so users can add to watchlist.
+  app.get('/search', authenticateToken, async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ items: [] });
+
+    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], async (err, row) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      let platforms = [];
+      try { platforms = JSON.parse(row?.platforms || '[]'); } catch {}
+      const region = req.query.region || 'US';
+      try {
+        const items = await searchCatalog(q, { platforms, region });
+        return res.json({ items });
+      } catch (e) {
+        return res.status(500).json({ error: 'Search failed', details: e.message });
+      }
+    });
   });
 
   // ── Letterboxd CSV preview ────────────────────────────────────────────────
