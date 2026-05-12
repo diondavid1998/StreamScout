@@ -398,6 +398,7 @@ struct PlatformsView: View {
     @State private var isLoading = true
     @State private var isSaving  = false
     @State private var errorMsg: String?
+    @State private var showLogoutAlert = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
 
@@ -418,7 +419,7 @@ struct PlatformsView: View {
                 if app.page != .platforms {
                     IconButton(icon: "xmark") { dismiss() }
                 }
-                IconButton(icon: "rectangle.portrait.and.arrow.right") { app.logout() }
+                IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
@@ -527,6 +528,12 @@ struct PlatformsView: View {
             }
         }
         .task { await load() }
+        .alert("Log Out", isPresented: $showLogoutAlert) {
+            Button("Log Out", role: .destructive) { app.logout() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to log out?")
+        }
     }
 
     @MainActor func load() async {
@@ -646,6 +653,7 @@ struct CatalogView: View {
     @State private var isSearchActive = false
     @State private var isSearchLoading = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var showLogoutAlert = false
 
     static let allGenres: [(key: String, label: String)] = [
         ("Action","Action"), ("Adventure","Adventure"), ("Animation","Animation"),
@@ -705,6 +713,7 @@ struct CatalogView: View {
                     }
                     .padding(.top, 12)
                 }
+                .dismissesKeyboardOnScroll()
             }
         }
         .sheet(isPresented: $showSettingsView) {
@@ -734,6 +743,12 @@ struct CatalogView: View {
             if !open { page = 1; Task { await fetch() } }
         }
         .onDisappear { pollingTask?.cancel(); searchTask?.cancel() }
+        .alert("Log Out", isPresented: $showLogoutAlert) {
+            Button("Log Out", role: .destructive) { app.logout() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to log out?")
+        }
     }
 
     // MARK: Sub-views
@@ -750,11 +765,7 @@ struct CatalogView: View {
             Spacer()
             IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
             IconButton(icon: "gearshape.fill") { showSettingsView = true }
-            IconButton(icon: "rectangle.portrait.and.arrow.right") { app.logout() }
-        }
-    }
-
-    var filterBar: some View {
+            IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Menu {
@@ -959,6 +970,7 @@ struct CatalogView: View {
                     }
                     .padding(.top, 12).padding(.bottom, 24)
                 }
+                .dismissesKeyboardOnScroll()
             }
         }
     }
@@ -1054,8 +1066,10 @@ struct MovieCardView: View {
     var onTap: () -> Void = {}
     @EnvironmentObject var app: AppState
     @State private var isTogglingWatched = false
+    @State private var isTogglingWatchlist = false
     var isTV: Bool { movie.mediaType == "tv" }
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
+    var isWatchlisted: Bool { app.watchlistIds.contains(movie.id) }
     var mediaType: String { movie.mediaType ?? "movie" }
     var tmdbId: String {
         let parts = movie.id.split(separator: "-")
@@ -1120,6 +1134,51 @@ struct MovieCardView: View {
         isTogglingWatched = false
     }
 
+    var watchlistToggleButton: some View {
+        Button { Task { await toggleWatchlist() } } label: {
+            Group {
+                if isTogglingWatchlist {
+                    ProgressView().scaleEffect(0.5).tint(.mkAccent)
+                        .frame(width: 14, height: 18)
+                } else {
+                    Image(systemName: isWatchlisted ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(isWatchlisted ? .mkAccent : .white)
+                        .shadow(color: .black.opacity(0.6), radius: 1)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, 5)
+            .padding(.bottom, 9)
+            .background(Color.black.opacity(isWatchlisted ? 0.65 : 0.4))
+        }
+        .buttonStyle(.plain)
+        .disabled(isTogglingWatchlist)
+    }
+
+    @MainActor func toggleWatchlist() async {
+        isTogglingWatchlist = true
+        do {
+            if isWatchlisted {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/watchlist/\(movie.id)", token: app.token
+                )
+                app.setWatchlisted(movie.id, on: false)
+            } else {
+                let body: [String: String] = ["itemId": movie.id, "title": movie.title,
+                                               "mediaType": mediaType, "tmdbId": tmdbId,
+                                               "posterUrl": movie.posterUrl ?? ""]
+                let _: ToggleWatchedResponse = try await APIService.shared.post(
+                    "/watchlist", body: body, token: app.token
+                )
+                app.setWatchlisted(movie.id, on: true)
+            }
+        } catch let err as APIError {
+            if case .unauthorized = err { app.logout() }
+        } catch { }
+        isTogglingWatchlist = false
+    }
+
     // Left accent bar — blue for TV, red for movies
     var accentBar: some View {
         HStack {
@@ -1147,6 +1206,7 @@ struct MovieCardView: View {
         .frame(width: 88, height: 132)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.mkBorder, lineWidth: 1))
+        .overlay(alignment: .topLeading) { watchlistToggleButton }
     }
 
     var posterPlaceholder: some View {
@@ -2854,6 +2914,19 @@ extension View {
         #if os(iOS)
         if #available(iOS 16.4, *) {
             self.scrollBounceBehavior(.basedOnSize)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func dismissesKeyboardOnScroll() -> some View {
+        #if os(iOS)
+        if #available(iOS 16.0, *) {
+            self.scrollDismissesKeyboard(.immediately)
         } else {
             self
         }
