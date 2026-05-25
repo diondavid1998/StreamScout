@@ -766,6 +766,10 @@ struct CatalogView: View {
             IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
             IconButton(icon: "gearshape.fill") { showSettingsView = true }
             IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
+        }
+    }
+
+    var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Menu {
