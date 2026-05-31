@@ -1504,12 +1504,9 @@ struct LanguagePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onApply: () -> Void
 
-    // Show only languages the user has configured; fall back to all if none set
-    var displayLanguages: [AppLanguage] {
-        available.isEmpty
-            ? allLanguages
-            : allLanguages.filter { available.contains($0.key) }
-    }
+    // Always show all supported languages so any language can be used as a filter,
+    // regardless of which languages the user configured in their profile.
+    var displayLanguages: [AppLanguage] { allLanguages }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 

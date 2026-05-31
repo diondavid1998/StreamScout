@@ -323,7 +323,7 @@ function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
     title,
     overview: rawItem.overview || details.overview || '',
     releaseDate,
-    year: releaseDate ? String(releaseDate).slice(0, 4) : null,
+    year: releaseDate ? (parseInt(String(releaseDate).slice(0, 4), 10) || null) : null,
     posterPath: rawItem.poster_path || details.poster_path || null,
     posterUrl: rawItem.poster_path || details.poster_path ? `${TMDB_IMAGE_BASE_URL}${rawItem.poster_path || details.poster_path}` : null,
     backdropPath: rawItem.backdrop_path || details.backdrop_path || null,
