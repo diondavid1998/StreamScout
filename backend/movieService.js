@@ -534,12 +534,18 @@ async function searchTitleOnTmdb(name, year) {
     try {
       const data = await fetchTmdb(endpoint, { query: name, [yearParam]: yearValue, language: 'en-US' });
       const results = data.results || [];
-      const match =
-        results.find((r) => {
-          const t = normalize(r.title || r.name || '');
-          return t === normName || t.includes(normName) || normName.includes(t);
-        }) || (results.length > 0 ? results[0] : null);
-      return match;
+      // Only accept an exact normalized-title match (or a whole-word substring match)
+      // so short/common titles (e.g. "Up", "It") don't wrongly match unrelated results,
+      // and so we never silently fall back to the first (possibly unrelated) result.
+      const match = results.find((r) => {
+        const t = normalize(r.title || r.name || '');
+        if (!t) return false;
+        if (t === normName) return true;
+        const boundary = (haystack, needle) =>
+          new RegExp(`(^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(haystack);
+        return boundary(t, normName) || boundary(normName, t);
+      });
+      return match || null;
     } catch {
       return null;
     }
