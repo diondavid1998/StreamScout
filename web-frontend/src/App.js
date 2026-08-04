@@ -1434,12 +1434,15 @@ function App() {
     if (settingsTab === 'watchlist') { loadWatched(); loadWatchlist(); }
   }, [settingsTab, showSettings]); // eslint-disable-line
 
-  // Auto-retry when the backend is still warming up the catalog cache
+  // Auto-retry when the backend is still warming up the catalog cache.
+  // Only do this while there are no items to show yet — once titles are loaded,
+  // background rating hydration (which can keep `refreshing` true for a long
+  // time) shouldn't keep forcing full catalog refetches every few seconds.
   useEffect(() => {
-    if (!catalogMeta?.refreshing || page !== 'movies' || loadingMovies) return;
+    if (!catalogMeta?.refreshing || page !== 'movies' || loadingMovies || movies.length > 0) return;
     const timer = setTimeout(() => fetchMovies(), 8000);
     return () => clearTimeout(timer);
-  }, [catalogMeta, page, loadingMovies, fetchMovies]);
+  }, [catalogMeta, page, loadingMovies, movies.length, fetchMovies]);
 
   useEffect(() => {
     setServiceFilters((current) => current.filter((key) => selected.includes(key)));
