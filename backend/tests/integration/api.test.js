@@ -410,3 +410,169 @@ describe('GET /movies', () => {
     expect(res.body.meta.pageSize).toBe(10);
   });
 });
+
+// ── GET /movies?watchlistOnly=true ────────────────────────────────────────────
+
+/**
+ * Helper: insert a row into watchlist_items and a fresh watchlist_streaming_cache
+ * row for the given user so getStreamableWatchlistItems treats it as cached and
+ * available on the supplied platform key — no real TMDB network call needed.
+ */
+async function seedWatchlistItem(db, userId, { itemId, mediaType, title, genres = [], platformKey }) {
+  const run = (sql, params) =>
+    new Promise((resolve, reject) =>
+      db.run(sql, params, (err) => (err ? reject(err) : resolve()))
+    );
+
+  await run(
+    `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url) VALUES (?, ?, ?, ?, ?)`,
+    [userId, itemId, mediaType, title, null]
+  );
+
+  await run(
+    `INSERT OR REPLACE INTO watchlist_streaming_cache
+       (user_id, item_id, title, poster_url, overview, release_date, year,
+        tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id,
+        available_on_json, available_on_keys_json, checked_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [
+      userId, itemId, title, null, null, '2020-01-01', '2020',
+      7.5, 100, 50.0, 'en',
+      JSON.stringify(genres),
+      null,
+      JSON.stringify([platformKey]),
+      JSON.stringify([platformKey]),
+    ]
+  );
+}
+
+async function getUserId(db, username) {
+  return new Promise((resolve, reject) =>
+    db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) =>
+      err ? reject(err) : resolve(row?.id)
+    )
+  );
+}
+
+describe('GET /movies?watchlistOnly=true — mediaType filter', () => {
+  let db, app, token, userId;
+
+  beforeAll(async () => {
+    db = await createTestDb();
+    app = createApp(db, { disableRateLimit: true });
+    token = await registerAndLogin(request(app), 'wlmediauser', 'password123');
+    userId = await getUserId(db, 'wlmediauser');
+
+    // Set the user's platform to 'netflix' so the streaming filter passes
+    await new Promise((resolve, reject) =>
+      db.run(
+        `UPDATE users SET platforms = ? WHERE id = ?`,
+        [JSON.stringify(['netflix']), userId],
+        (err) => (err ? reject(err) : resolve())
+      )
+    );
+
+    // Seed one movie and one TV show, both available on netflix
+    await seedWatchlistItem(db, userId, {
+      itemId: 'movie-1001', mediaType: 'movie', title: 'Test Movie', genres: ['Action'], platformKey: 'netflix',
+    });
+    await seedWatchlistItem(db, userId, {
+      itemId: 'tv-2002', mediaType: 'tv', title: 'Test TV Show', genres: ['Drama'], platformKey: 'netflix',
+    });
+  });
+
+  afterAll(() => closeDb(db));
+
+  it('returns only movies when mediaType=movie', async () => {
+    const res = await request(app)
+      .get('/movies?watchlistOnly=true&mediaType=movie')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.items)).toBe(true);
+    expect(res.body.items.every((item) => item.mediaType === 'movie')).toBe(true);
+    expect(res.body.items.some((item) => item.id === 'movie-1001')).toBe(true);
+    expect(res.body.items.some((item) => item.id === 'tv-2002')).toBe(false);
+  });
+
+  it('returns only TV shows when mediaType=tv', async () => {
+    const res = await request(app)
+      .get('/movies?watchlistOnly=true&mediaType=tv')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.items)).toBe(true);
+    expect(res.body.items.every((item) => item.mediaType === 'tv')).toBe(true);
+    expect(res.body.items.some((item) => item.id === 'tv-2002')).toBe(true);
+    expect(res.body.items.some((item) => item.id === 'movie-1001')).toBe(false);
+  });
+
+  it('returns both movies and TV shows when mediaType=all', async () => {
+    const res = await request(app)
+      .get('/movies?watchlistOnly=true&mediaType=all')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items.some((item) => item.id === 'movie-1001')).toBe(true);
+    expect(res.body.items.some((item) => item.id === 'tv-2002')).toBe(true);
+  });
+});
+
+describe('DELETE /watchlist/:item_id — stale cache cleanup', () => {
+  let db, app, token, userId;
+
+  beforeAll(async () => {
+    db = await createTestDb();
+    app = createApp(db, { disableRateLimit: true });
+    token = await registerAndLogin(request(app), 'wldeluser', 'password123');
+    userId = await getUserId(db, 'wldeluser');
+
+    await new Promise((resolve, reject) =>
+      db.run(
+        `UPDATE users SET platforms = ? WHERE id = ?`,
+        [JSON.stringify(['netflix']), userId],
+        (err) => (err ? reject(err) : resolve())
+      )
+    );
+  });
+
+  afterAll(() => closeDb(db));
+
+  it('does not return deleted item even if stale cache row existed', async () => {
+    // Add item to watchlist and seed a fresh cache row
+    await seedWatchlistItem(db, userId, {
+      itemId: 'movie-9999', mediaType: 'movie', title: 'Ghost Movie', genres: [], platformKey: 'netflix',
+    });
+
+    // Confirm it appears in watchlistOnly results before deletion
+    const before = await request(app)
+      .get('/movies?watchlistOnly=true&mediaType=movie')
+      .set('Authorization', `Bearer ${token}`);
+    expect(before.status).toBe(200);
+    expect(before.body.items.some((item) => item.id === 'movie-9999')).toBe(true);
+
+    // Delete the watchlist item
+    const del = await request(app)
+      .delete('/watchlist/movie-9999')
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(200);
+    expect(del.body.success).toBe(true);
+
+    // Verify the cache row was also removed
+    const cacheRow = await new Promise((resolve) =>
+      db.get(
+        'SELECT * FROM watchlist_streaming_cache WHERE user_id = ? AND item_id = ?',
+        [userId, 'movie-9999'],
+        (err, row) => resolve(row || null)
+      )
+    );
+    expect(cacheRow).toBeNull();
+
+    // Confirm item no longer appears in watchlistOnly results
+    const after = await request(app)
+      .get('/movies?watchlistOnly=true&mediaType=movie')
+      .set('Authorization', `Bearer ${token}`);
+    expect(after.status).toBe(200);
+    expect(after.body.items.some((item) => item.id === 'movie-9999')).toBe(false);
+  });
+});
