@@ -629,6 +629,13 @@ function createApp(db, { disableRateLimit = false } = {}) {
                   const excludeSet = new Set(excludeItemIds);
                   streamable = streamable.filter((item) => !excludeSet.has(item.id));
                 }
+                if (mediaType === 'movie' || mediaType === 'tv') {
+                  streamable = streamable.filter((item) => item.mediaType === mediaType);
+                } else if (mediaType === 'documentary') {
+                  streamable = streamable.filter(
+                    (item) => Array.isArray(item.genres) && item.genres.includes('Documentary')
+                  );
+                }
 
                 // Sort
                 streamable = [...streamable].sort((a, b) => {
@@ -736,6 +743,12 @@ function createApp(db, { disableRateLimit = false } = {}) {
       [req.user.id, itemId],
       function (err) {
         if (err) return res.status(500).json({ error: 'Database error' });
+        // Also remove any stale streaming-cache row so the item cannot resurface
+        // in the "From Watchlist" catalog view after deletion.
+        db.run(
+          'DELETE FROM watchlist_streaming_cache WHERE user_id = ? AND item_id = ?',
+          [req.user.id, itemId]
+        );
         res.json({ success: true });
       }
     );

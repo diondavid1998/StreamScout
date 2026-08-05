@@ -936,6 +936,19 @@ function extractAvailability(watchProviders, providerMap, region) {
  * TMDB (with 24-hour per-user cache in `watchlist_streaming_cache`) and return
  * only those items streamable on at least one of the user's platforms.
  *
+ * NOTE: This is "Streaming watchlist" semantics — items on the watchlist that
+ * are not currently available on any of the user's selected platforms are
+ * intentionally excluded. This means the result is a filtered subset of the
+ * user's watchlist, not a 1:1 mirror of it.
+ *
+ * Scoping guarantees:
+ *  - `watchlistRows` is pre-filtered to `user_id` by the caller.
+ *  - Cache lookups use both `user_id` AND `item_id`, so rows from other users
+ *    cannot leak in.
+ *  - `item_id` must match `/^(movie|tv)-(\d+)$/`; malformed ids are skipped.
+ *  - When an item is removed from the watchlist, its cache row is also deleted
+ *    by the `DELETE /watchlist/:item_id` handler, preventing stale results.
+ *
  * This intentionally bypasses `catalog_cache_entries` so obscure / non-popular
  * titles that never appear in the top-300 discover snapshot are still found.
  */
