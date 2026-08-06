@@ -6,30 +6,42 @@
 //
 
 import XCTest
+@testable import StreamScout
 
-final class StreamScoreTests: XCTestCase {
+@MainActor
+final class StreamScoutTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private let suiteName = "StreamScoutTests.ThemePrefs"
 
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+        defaults = UserDefaults(suiteName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
+        ThemeManager.shared.applyTheme(AppTheme.defaultTheme)
     }
 
     override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+        defaults.removePersistentDomain(forName: suiteName)
+        ThemeManager.shared.applyTheme(AppTheme.defaultTheme)
+        defaults = nil
     }
 
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
+    func testThemeSelectionPersistsAndRestoresOnInit() throws {
+        let app = AppState(userDefaults: defaults)
+        XCTAssertEqual(app.selectedThemeId, AppTheme.defaultTheme.id)
+
+        app.saveTheme(AppTheme.oceanTeal.id)
+        XCTAssertEqual(defaults.string(forKey: "mk_theme_id"), AppTheme.oceanTeal.id)
+
+        let restored = AppState(userDefaults: defaults)
+        XCTAssertEqual(restored.selectedThemeId, AppTheme.oceanTeal.id)
+        XCTAssertEqual(ThemeManager.shared.current.id, AppTheme.oceanTeal.id)
     }
 
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        measure {
-            // Put the code you want to measure the time of here.
-        }
-    }
+    func testInvalidPersistedThemeFallsBackToDefaultTheme() throws {
+        defaults.set("unknown_theme_id", forKey: "mk_theme_id")
 
+        let app = AppState(userDefaults: defaults)
+        XCTAssertEqual(app.selectedThemeId, AppTheme.defaultTheme.id)
+        XCTAssertEqual(ThemeManager.shared.current.id, AppTheme.defaultTheme.id)
+    }
 }
