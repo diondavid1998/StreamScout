@@ -185,7 +185,6 @@ final class ThemeManager: ObservableObject {
     }
 
     func applyTheme(_ theme: AppTheme) {
-        guard current.id != theme.id else { return }
         current = theme
     }
 }

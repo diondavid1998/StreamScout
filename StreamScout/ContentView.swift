@@ -120,7 +120,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            Color.mkBackground.ignoresSafeArea()
+            themeManager.current.background.ignoresSafeArea()
             switch app.page {
             case .loading:   LoadingView()
             case .auth:      AuthView()
@@ -762,7 +762,7 @@ struct CatalogView: View {
             await fetch()
             startPollingIfNeeded()
         }
-        .onChange(of: mainTab) { tab in
+        .onChange(of: mainTab) { _, tab in
             if tab != .discover {
                 isSearchActive = false
                 searchTask?.cancel()
@@ -771,7 +771,7 @@ struct CatalogView: View {
                 startPollingIfNeeded()
             }
         }
-        .onChange(of: showSettingsView) { open in
+        .onChange(of: showSettingsView) { _, open in
             if !open && mainTab == .discover { page = 1; Task { await fetch() } }
         }
         .onDisappear { pollingTask?.cancel(); searchTask?.cancel() }
