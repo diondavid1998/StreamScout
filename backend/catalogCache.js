@@ -4,8 +4,8 @@ const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24
 const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
 const WATCHLIST_STREAMING_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DEFAULT_REGION = 'US';
-// Ratings rarely change — cache them for 30 days before re-fetching from OMDB
-const RATINGS_CACHE_TTL_DAYS = Number(process.env.RATINGS_CACHE_TTL_DAYS) || 30;
+// Ratings rarely change — keep them indefinitely once fetched.
+// They are only re-fetched when a manual full refresh explicitly requests it.
 // Increment this whenever PLATFORM_CONFIG provider IDs change so stale caches are invalidated
 const PROVIDER_CONFIG_VERSION = 2;
 const syncLocks = new Map();
@@ -210,7 +210,6 @@ function isScopeStale(stateRow) {
 // Called after each sync so any title we've already rated (from another scope or
 // a previous session) is immediately populated without OMDB calls.
 async function populateRatingsFromCache(db, scopeKey) {
-  const cutoff = new Date(Date.now() - RATINGS_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const result = await run(
     db,
     `UPDATE catalog_cache_entries AS e
@@ -223,9 +222,8 @@ async function populateRatingsFromCache(db, scopeKey) {
      FROM title_ratings AS tr
      WHERE e.scope_key = ?
        AND e.imdb_id = tr.imdb_id
-       AND tr.fetched_at >= ?
        AND (e.rating_imdb IS NULL OR e.rating_rt IS NULL OR e.rating_meta IS NULL)`,
-    [scopeKey, cutoff]
+    [scopeKey]
   );
   const count = result?.changes ?? 0;
   if (count > 0) {
@@ -233,7 +231,10 @@ async function populateRatingsFromCache(db, scopeKey) {
   }
 }
 
-async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) {
+async function syncScope(
+  db,
+  { platforms, languages, region = DEFAULT_REGION, forceRatingsRefresh = false }
+) {
   const scopeKey = buildScopeKey(platforms, region);
   if (syncLocks.has(scopeKey)) {
     return syncLocks.get(scopeKey);
@@ -356,11 +357,48 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
       }
     });
 
-    // Populate ratings from shared cache first (free, no OMDB calls).
-    // Any remaining NULLs will be filled by background hydration.
-    await populateRatingsFromCache(db, scopeKey).catch((err) => {
-      console.warn(`populateRatingsFromCache failed for ${scopeKey}: ${err.message}`);
-    });
+    if (forceRatingsRefresh) {
+      // Manual full refresh: clear current scope ratings and shared cached ratings
+      // for this scope's titles so OMDB is re-fetched once for fresh values.
+      await enqueueWrite(async () => {
+        await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+        try {
+          await run(
+            db,
+            `DELETE FROM title_ratings
+             WHERE imdb_id IN (
+               SELECT DISTINCT imdb_id
+               FROM catalog_cache_entries
+               WHERE scope_key = ?
+                 AND imdb_id IS NOT NULL
+                 AND imdb_id != ''
+             )`,
+            [scopeKey]
+          );
+          await run(
+            db,
+            `UPDATE catalog_cache_entries
+             SET rating_imdb = NULL,
+                 rating_imdb_num = NULL,
+                 rating_rt = NULL,
+                 rating_rt_num = NULL,
+                 rating_meta = NULL,
+                 rating_meta_num = NULL
+             WHERE scope_key = ?`,
+            [scopeKey]
+          );
+          await run(db, 'COMMIT');
+        } catch (error) {
+          await run(db, 'ROLLBACK');
+          throw error;
+        }
+      });
+    } else {
+      // Normal sync: reuse shared ratings cache and avoid unnecessary OMDB calls.
+      await populateRatingsFromCache(db, scopeKey).catch((err) => {
+        console.warn(`populateRatingsFromCache failed for ${scopeKey}: ${err.message}`);
+      });
+    }
 
     hydrateScopeRatings(db, scopeKey).catch((error) => {
       console.error(`Background rating hydration failed for ${scopeKey}:`, error);
@@ -507,6 +545,7 @@ async function hydrateScopeRatings(db, scopeKey) {
           throw error;
         }
       });
+
     }
   })().finally(() => {
     ratingHydrationLocks.delete(scopeKey);
@@ -590,6 +629,10 @@ async function backfillScopeIdentifiers(db, scopeKey) {
           throw error;
         }
       });
+
+      hydrateScopeRatings(db, scopeKey).catch((error) => {
+        console.error('Deferred rating hydration failed after identifier backfill', scopeKey, error);
+      });
     }
   })().finally(() => {
     identifierBackfillLocks.delete(scopeKey);
@@ -641,10 +684,6 @@ function buildSortExpression(sortBy) {
     default:
       return 'popularity DESC, tmdb_rating DESC';
   }
-}
-
-function isRatingsSort(sortBy) {
-  return sortBy === 'imdb' || sortBy === 'rotten_tomatoes' || sortBy === 'metacritic';
 }
 
 async function readCachedCatalog(
@@ -746,26 +785,6 @@ async function readCachedCatalog(
     });
   }
 
-  if (isRatingsSort(sortBy)) {
-    const missingRatingsRow = await get(
-      db,
-      `SELECT COUNT(*) AS count
-       FROM catalog_cache_entries
-       WHERE ${whereClause}
-         AND imdb_id IS NOT NULL
-         AND (
-           ${sortBy === 'imdb' ? 'rating_imdb_num' : sortBy === 'rotten_tomatoes' ? 'rating_rt_num' : 'rating_meta_num'}
-         ) IS NULL`,
-      params
-    );
-
-    if ((missingRatingsRow?.count || 0) > 0) {
-      hydrateScopeRatings(db, scopeKey).catch((error) => {
-        console.error(`Ratings hydration skipped for ${scopeKey}:`, error.message);
-      });
-    }
-  }
-
   const sortExpression = buildSortExpression(sortBy);
   const countRow = await get(
     db,
@@ -818,16 +837,6 @@ async function readCachedCatalog(
     availableOn: JSON.parse(row.available_on_json || '[]'),
     availableOnKeys: JSON.parse(row.available_on_keys_json || '[]'),
   }));
-
-  if (rows.some((row) => row.imdb_id && (
-    row.rating_imdb == null ||
-    row.rating_rt   == null ||
-    row.rating_meta == null
-  ))) {
-    hydrateScopeRatings(db, scopeKey).catch((error) => {
-      console.error(`Deferred rating hydration failed for ${scopeKey}:`, error);
-    });
-  }
 
   const stateRow = await get(db, 'SELECT * FROM catalog_cache_state WHERE scope_key = ?', [scopeKey]);
 

@@ -381,7 +381,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
         [scopeKey],
         (err2) => {
           if (err2) return res.status(500).json({ error: 'Database error' });
-          syncScope(db, { platforms, languages, region: 'US' }).catch((e) =>
+          syncScope(db, { platforms, languages, region: 'US', forceRatingsRefresh: true }).catch((e) =>
             console.error('[catalog/refresh] background sync failed:', e)
           );
           res.json({ success: true, message: 'Catalog refresh started' });
