@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
     @Published var selectedLanguages: [String] = []
     @Published var watchedIds: Set<String> = []
     @Published var watchlistIds: Set<String> = []
+    @Published var selectedThemeId: String = AppTheme.defaultTheme.id
 
     private let tokenKey      = "mk_token"
     private let usernameKey   = "mk_username"
@@ -26,74 +27,87 @@ final class AppState: ObservableObject {
     private let languagesKey  = "mk_languages"
     private let watchedKey    = "mk_watched_ids"
     private let watchlistKey  = "mk_watchlist_ids"
+    private let themeKey      = "mk_theme_id"
+    private let defaults: UserDefaults
 
-    init() {
-        token    = UserDefaults.standard.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
-        username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
-        selectedPlatforms = UserDefaults.standard.stringArray(forKey: platformsKey) ?? []
-        selectedLanguages = UserDefaults.standard.stringArray(forKey: languagesKey) ?? []
-        watchedIds  = Set(UserDefaults.standard.stringArray(forKey: watchedKey) ?? [])
-        watchlistIds = Set(UserDefaults.standard.stringArray(forKey: watchlistKey) ?? [])
+    init(userDefaults: UserDefaults = .standard) {
+        defaults = userDefaults
+        token    = defaults.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
+        username = defaults.string(forKey: usernameKey) ?? ""
+        selectedPlatforms = defaults.stringArray(forKey: platformsKey) ?? []
+        selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
+        watchedIds  = Set(defaults.stringArray(forKey: watchedKey) ?? [])
+        watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])
+        let theme = AppTheme.theme(with: defaults.string(forKey: themeKey) ?? AppTheme.defaultTheme.id)
+        selectedThemeId = theme.id
+        ThemeManager.shared.applyTheme(theme)
         page = token.isEmpty ? .auth : .catalog
     }
 
     func saveSession(token: String, username: String, isNewUser: Bool = false) {
         self.token    = token.trimmingCharacters(in: .whitespaces)
         self.username = username
-        UserDefaults.standard.set(self.token, forKey: tokenKey)
-        UserDefaults.standard.set(username,   forKey: usernameKey)
+        defaults.set(self.token, forKey: tokenKey)
+        defaults.set(username,   forKey: usernameKey)
         page = isNewUser ? .platforms : .catalog
     }
 
     func savePlatforms(_ platforms: [String]) {
         selectedPlatforms = platforms
-        UserDefaults.standard.set(platforms, forKey: platformsKey)
+        defaults.set(platforms, forKey: platformsKey)
     }
 
     func saveLanguages(_ languages: [String]) {
         selectedLanguages = languages
-        UserDefaults.standard.set(languages, forKey: languagesKey)
+        defaults.set(languages, forKey: languagesKey)
     }
 
     func updateToken(_ newToken: String) {
         token = newToken.trimmingCharacters(in: .whitespaces)
-        UserDefaults.standard.set(token, forKey: tokenKey)
+        defaults.set(token, forKey: tokenKey)
     }
 
     func updateUsername(_ newUsername: String) {
         username = newUsername
-        UserDefaults.standard.set(username, forKey: usernameKey)
+        defaults.set(username, forKey: usernameKey)
     }
 
     func setWatched(_ id: String, watched: Bool) {
         if watched { watchedIds.insert(id) } else { watchedIds.remove(id) }
-        UserDefaults.standard.set(Array(watchedIds), forKey: watchedKey)
+        defaults.set(Array(watchedIds), forKey: watchedKey)
     }
 
     func replaceWatchedIds(_ ids: [String]) {
         watchedIds = Set(ids)
-        UserDefaults.standard.set(ids, forKey: watchedKey)
+        defaults.set(ids, forKey: watchedKey)
     }
 
     func setWatchlisted(_ id: String, on: Bool) {
         if on { watchlistIds.insert(id) } else { watchlistIds.remove(id) }
-        UserDefaults.standard.set(Array(watchlistIds), forKey: watchlistKey)
+        defaults.set(Array(watchlistIds), forKey: watchlistKey)
     }
 
     func replaceWatchlistIds(_ ids: [String]) {
         watchlistIds = Set(ids)
-        UserDefaults.standard.set(ids, forKey: watchlistKey)
+        defaults.set(ids, forKey: watchlistKey)
+    }
+
+    func saveTheme(_ id: String) {
+        let theme = AppTheme.theme(with: id)
+        selectedThemeId = theme.id
+        defaults.set(theme.id, forKey: themeKey)
+        ThemeManager.shared.applyTheme(theme)
     }
 
     func logout() {
         token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []
         watchedIds = []; watchlistIds = []
-        UserDefaults.standard.removeObject(forKey: tokenKey)
-        UserDefaults.standard.removeObject(forKey: usernameKey)
-        UserDefaults.standard.removeObject(forKey: platformsKey)
-        UserDefaults.standard.removeObject(forKey: languagesKey)
-        UserDefaults.standard.removeObject(forKey: watchedKey)
-        UserDefaults.standard.removeObject(forKey: watchlistKey)
+        defaults.removeObject(forKey: tokenKey)
+        defaults.removeObject(forKey: usernameKey)
+        defaults.removeObject(forKey: platformsKey)
+        defaults.removeObject(forKey: languagesKey)
+        defaults.removeObject(forKey: watchedKey)
+        defaults.removeObject(forKey: watchlistKey)
         page = .auth
     }
 }
@@ -102,6 +116,7 @@ final class AppState: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var app = AppState()
+    @EnvironmentObject var themeManager: ThemeManager
 
     var body: some View {
         ZStack {
@@ -627,7 +642,38 @@ struct PlatformTile: View {
 // MARK: - Catalog
 
 struct CatalogView: View {
+    enum MainTab: String, CaseIterable, Identifiable {
+        case discover
+        case watched
+        case watchlist
+
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .discover: return "Discover"
+            case .watched: return "Watched"
+            case .watchlist: return "Watchlist"
+            }
+        }
+        var systemImage: String {
+            switch self {
+            case .discover: return "safari"
+            case .watched: return "checkmark.circle"
+            case .watchlist: return "bookmark"
+            }
+        }
+        var title: String {
+            switch self {
+            case .discover: return "Streaming Catalog"
+            case .watched: return "Watched"
+            case .watchlist: return "Watchlist"
+            }
+        }
+    }
+
     @EnvironmentObject var app: AppState
+    @State private var mainTab: MainTab = .discover
+    @Namespace private var tabPill
     @State private var movies: [CatalogItem] = []
     @State private var meta: CatalogMeta?
     @State private var isLoading = false
@@ -664,12 +710,83 @@ struct CatalogView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-            searchBar
-            if !isSearchActive { filterBar.padding(.bottom, 8) }
-            Divider().overlay(Color.mkBorder)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
+                if mainTab == .discover {
+                    searchBar
+                    if !isSearchActive { filterBar.padding(.bottom, 8) }
+                }
+                Divider().overlay(Color.mkBorder)
 
+                Group {
+                    switch mainTab {
+                    case .discover:
+                        discoverContent
+                    case .watched:
+                        WatchedOnlyTabView().environmentObject(app)
+                    case .watchlist:
+                        WatchlistOnlyTabView().environmentObject(app)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            floatingTabBar
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 74)
+        }
+        .sheet(isPresented: $showSettingsView) {
+            SettingsView().environmentObject(app)
+        }
+        .sheet(isPresented: $showGenrePicker) {
+            GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
+        }
+        .sheet(isPresented: $showLanguagePicker) {
+            LanguagePickerSheet(selected: $languageFilters, available: app.selectedLanguages) {
+                page = 1; Task { await fetch() }
+            }
+        }
+        .sheet(isPresented: $showYearFilter) {
+            YearFilterSheet(yearMin: $yearMin, yearMax: $yearMax) { page = 1; Task { await fetch() } }
+        }
+        .sheet(item: $selectedDetail) { movie in
+            DetailSheet(movie: movie).environmentObject(app)
+        }
+        .task {
+            if app.selectedPlatforms.isEmpty { await loadPlatforms() }
+            if app.selectedPlatforms.isEmpty { showSettingsView = true; return }
+            await fetch()
+            startPollingIfNeeded()
+        }
+        .onChange(of: mainTab) { tab in
+            if tab != .discover {
+                isSearchActive = false
+                searchTask?.cancel()
+                pollingTask?.cancel()
+            } else if meta?.refreshing == true {
+                startPollingIfNeeded()
+            }
+        }
+        .onChange(of: showSettingsView) { open in
+            if !open && mainTab == .discover { page = 1; Task { await fetch() } }
+        }
+        .onDisappear { pollingTask?.cancel(); searchTask?.cancel() }
+        .alert("Log Out", isPresented: $showLogoutAlert) {
+            Button("Log Out", role: .destructive) { app.logout() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to log out?")
+        }
+    }
+
+    // MARK: Sub-views
+
+    var discoverContent: some View {
+        Group {
             if isSearchActive {
                 searchContent
             } else if isLoading || (movies.isEmpty && meta?.refreshing == true) {
@@ -716,42 +833,7 @@ struct CatalogView: View {
                 .dismissesKeyboardOnScroll()
             }
         }
-        .sheet(isPresented: $showSettingsView) {
-            SettingsView().environmentObject(app)
-        }
-        .sheet(isPresented: $showGenrePicker) {
-            GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
-        }
-        .sheet(isPresented: $showLanguagePicker) {
-            LanguagePickerSheet(selected: $languageFilters, available: app.selectedLanguages) {
-                page = 1; Task { await fetch() }
-            }
-        }
-        .sheet(isPresented: $showYearFilter) {
-            YearFilterSheet(yearMin: $yearMin, yearMax: $yearMax) { page = 1; Task { await fetch() } }
-        }
-        .sheet(item: $selectedDetail) { movie in
-            DetailSheet(movie: movie).environmentObject(app)
-        }
-        .task {
-            if app.selectedPlatforms.isEmpty { await loadPlatforms() }
-            if app.selectedPlatforms.isEmpty { showSettingsView = true; return }
-            await fetch()
-            startPollingIfNeeded()
-        }
-        .onChange(of: showSettingsView) { open in
-            if !open { page = 1; Task { await fetch() } }
-        }
-        .onDisappear { pollingTask?.cancel(); searchTask?.cancel() }
-        .alert("Log Out", isPresented: $showLogoutAlert) {
-            Button("Log Out", role: .destructive) { app.logout() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to log out?")
-        }
     }
-
-    // MARK: Sub-views
 
     var topBar: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -759,14 +841,61 @@ struct CatalogView: View {
                 Text("🎬 STREAMSCOUT")
                     .font(.system(size: 11, weight: .semibold)).kerning(1.2)
                     .foregroundColor(.mkAccent)
-                Text("Streaming Catalog")
+                Text(mainTab.title)
                     .font(.system(size: 20, weight: .bold)).foregroundColor(.mkText)
             }
             Spacer()
-            IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
+            if mainTab == .discover {
+                IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
+            }
             IconButton(icon: "gearshape.fill") { showSettingsView = true }
             IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
         }
+    }
+
+    var floatingTabBar: some View {
+        HStack(spacing: 3) {
+            ForEach(MainTab.allCases) { tab in
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                        mainTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 17, weight: .medium))
+                        if mainTab == tab {
+                            Text(tab.label)
+                                .font(.system(size: 14, weight: .semibold))
+                                .fixedSize()
+                        }
+                    }
+                    .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
+                    .frame(height: 46)
+                    .frame(minWidth: 46)
+                    .padding(.horizontal, mainTab == tab ? 16 : 0)
+                    .background {
+                        if mainTab == tab {
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.mkAccent, .mkAccentAlt],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(7)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.mkBorder, lineWidth: 1))
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.55), radius: 20, y: 14)
     }
 
     var filterBar: some View {
@@ -1229,7 +1358,7 @@ struct MovieCardView: View {
 
             // Type + Year chips
             HStack(spacing: 6) {
-                TypeChip(label: isTV ? "TV" : "Film", isTV: isTV)
+                TypeChip(label: isTV ? "TV" : "Movie", isTV: isTV)
                 if let y = movie.year {
                     PillChip(text: String(y), color: .mkMuted)
                 }
@@ -1336,9 +1465,13 @@ struct FilterChip: View {
 struct TypeChip: View {
     let label: String; let isTV: Bool
     var body: some View {
-        Text(label)
-            .font(.system(size: 9, weight: .bold))
-            .kerning(0.3)
+        HStack(spacing: 4) {
+            Image(systemName: isTV ? "tv.fill" : "film.fill")
+                .font(.system(size: 8, weight: .bold))
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .kerning(0.3)
+        }
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(isTV ? Color.mkTV.opacity(0.18) : Color.mkAccent.opacity(0.18))
             .foregroundColor(isTV ? .mkTV : .mkAccent)
@@ -1632,15 +1765,15 @@ struct MKButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if isLoading { ProgressView().tint(.white).scaleEffect(0.85) }
+                if isLoading { ProgressView().tint(.mkOnAccent).scaleEffect(0.85) }
                 else { Image(systemName: icon).font(.system(size: 15)) }
                 Text(label).font(.system(size: 16, weight: .semibold))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(LinearGradient(colors: [.mkAccent, Color(red: 0.82, green: 0.20, blue: 0.32)],
+            .background(LinearGradient(colors: [.mkAccent, .mkAccentAlt],
                                        startPoint: .leading, endPoint: .trailing))
-            .foregroundColor(.white)
+            .foregroundColor(.mkOnAccent)
             .clipShape(RoundedRectangle(cornerRadius: 15))
         }
         .disabled(isLoading)
@@ -2254,7 +2387,7 @@ private struct PersonMovieCell: View {
 // MARK: - Settings View
 
 struct SettingsView: View {
-    enum Tab: String { case services, profile, watched, watchlistTab }
+    enum Tab: String { case services, appearance, profile, watched, watchlistTab }
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .services
@@ -2269,6 +2402,7 @@ struct SettingsView: View {
                     Group {
                         switch tab {
                         case .services:    ServicesTabView().environmentObject(app)
+                        case .appearance:  AppearanceTabView().environmentObject(app)
                         case .profile:     ProfileTabView().environmentObject(app)
                         case .watched:     WatchedOnlyTabView().environmentObject(app)
                         case .watchlistTab: WatchlistOnlyTabView().environmentObject(app)
@@ -2291,6 +2425,7 @@ struct SettingsView: View {
     var tabPicker: some View {
         HStack(spacing: 0) {
             ForEach([(Tab.services, "play.rectangle.on.rectangle", "Services"),
+                     (Tab.appearance, "paintpalette", "Appearance"),
                      (Tab.profile, "person.crop.circle", "Profile"),
                      (Tab.watched, "checkmark.circle", "Watched"),
                      (Tab.watchlistTab, "bookmark.circle", "Watchlist")], id: \.0.rawValue) { t, icon, label in
@@ -2309,6 +2444,76 @@ struct SettingsView: View {
             }
         }
         .background(Color.mkSurface).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// MARK: Appearance Tab
+
+struct AppearanceTabView: View {
+    @EnvironmentObject var app: AppState
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Appearance").font(.title3).bold().foregroundColor(.mkText).padding(.top, 4)
+                Text("Choose a color theme for StreamScout.")
+                    .font(.subheadline)
+                    .foregroundColor(.mkMuted)
+
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(AppTheme.all) { theme in
+                        Button {
+                            app.saveTheme(theme.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [theme.accent, theme.accentAlt],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(height: 56)
+                                    .overlay(alignment: .topTrailing) {
+                                        if app.selectedThemeId == theme.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.system(size: 18))
+                                                .foregroundColor(theme.onAccent)
+                                                .padding(8)
+                                        }
+                                    }
+
+                                HStack(spacing: 8) {
+                                    Circle().fill(theme.background).frame(width: 10, height: 10)
+                                    Text(theme.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(app.selectedThemeId == theme.id ? .mkAccent : .mkText)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.mkSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(app.selectedThemeId == theme.id ? Color.mkAccent.opacity(0.6) : Color.mkBorder, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+        }
     }
 }
 
