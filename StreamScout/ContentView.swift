@@ -905,7 +905,7 @@ struct CatalogView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 66)
         // Insets the top of the bar with a hairline separator
         .overlay(Divider().frame(maxWidth: .infinity), alignment: .top)
     }

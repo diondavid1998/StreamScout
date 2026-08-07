@@ -297,9 +297,12 @@ final class ColorCache: ObservableObject {
         if let cached = cache[urlString] { return cached }
         if let task = inFlight[urlString] { return await task.value }
 
-        let task = Task<Color?, Never> {
+        // Inherit @MainActor context so UIGraphicsImageRenderer runs on the main thread.
+        let task = Task<Color?, Never> { @MainActor in
+            guard !Task.isCancelled else { return nil }
             guard let url = URL(string: urlString),
                   let (data, _) = try? await URLSession.shared.data(from: url),
+                  !Task.isCancelled,
                   let uiImage = UIImage(data: data),
                   let color = Self.averageColor(of: uiImage) else { return nil }
             return color
@@ -313,6 +316,8 @@ final class ColorCache: ObservableObject {
 
     /// Uses `CIAreaAverage` on a 16×16 downsampled version of the image to compute
     /// a representative dominant color cheaply.
+    /// Must run on the main thread because `UIGraphicsImageRenderer` is a UIKit API.
+    @MainActor
     private static func averageColor(of image: UIImage) -> Color? {
         // Downsample to 16×16 to make CIAreaAverage fast
         let targetSize = CGSize(width: 16, height: 16)
