@@ -1220,9 +1220,9 @@ struct MovieCardView: View {
             .padding(14)
             .background {
                 RoundedRectangle(cornerRadius: 18)
-                    .fill(isTV ? Color.mkTV.opacity(0.08) : Color.mkAccent.opacity(0.08))
-                RoundedRectangle(cornerRadius: 18)
                     .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(isTV ? Color.mkTV.opacity(0.08) : Color.mkAccent.opacity(0.08))
             }
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.mkBorder, lineWidth: 1))
