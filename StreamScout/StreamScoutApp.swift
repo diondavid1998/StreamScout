@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+import CoreImage
+import CoreImage.CIFilterBuiltins
+import UIKit
 
 @main
 struct StreamScoutApp: App {
@@ -267,3 +270,85 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "crunchyroll", key: "crunchyroll", name: "Crunchyroll", logoAsset: "crunchyroll",  accentColor: Color(red: 0.957, green: 0.459, blue: 0.129)),
     .init(id: "tubi",        key: "tubi",        name: "Tubi",        logoAsset: "tubi",         accentColor: Color(red: 0.949, green: 0.318, blue: 0.071)),
 ]
+
+// MARK: - Dominant Color Cache
+
+/// Extracts and caches the average/dominant color from poster images.
+/// Results are keyed by poster URL string and held for the lifetime of the session.
+@MainActor
+final class ColorCache: ObservableObject {
+    static let shared = ColorCache()
+    private init() {}
+
+    private var cache: [String: Color] = [:]
+    private var inFlight: [String: Task<Color?, Never>] = [:]
+
+    /// Returns the cached color for `urlString` if available, otherwise returns `nil`
+    /// and triggers a background fetch. Subscribe to the cache via `@ObservedObject`
+    /// or poll via `.task(id:)` to get the result when ready.
+    func cachedColor(for urlString: String) -> Color? {
+        cache[urlString]
+    }
+
+    /// Fetches the dominant color for `urlString`, either from cache or by downloading
+    /// the image and running `CIAreaAverage`. Safe to call multiple times — in-flight
+    /// requests are deduplicated.
+    func fetchColor(for urlString: String) async -> Color? {
+        if let cached = cache[urlString] { return cached }
+        if let task = inFlight[urlString] { return await task.value }
+
+        let task = Task<Color?, Never> {
+            guard let url = URL(string: urlString),
+                  let (data, _) = try? await URLSession.shared.data(from: url),
+                  let uiImage = UIImage(data: data),
+                  let color = Self.averageColor(of: uiImage) else { return nil }
+            return color
+        }
+        inFlight[urlString] = task
+        let color = await task.value
+        inFlight.removeValue(forKey: urlString)
+        if let color { cache[urlString] = color }
+        return color
+    }
+
+    /// Uses `CIAreaAverage` on a 16×16 downsampled version of the image to compute
+    /// a representative dominant color cheaply.
+    private static func averageColor(of image: UIImage) -> Color? {
+        // Downsample to 16×16 to make CIAreaAverage fast
+        let targetSize = CGSize(width: 16, height: 16)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let small = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+
+        guard let ciImage = CIImage(image: small) else { return nil }
+        let extent = CIVector(cgRect: ciImage.extent)
+        let filter = CIFilter.areaAverage()
+        filter.inputImage = ciImage
+        filter.extent = extent
+        guard let output = filter.outputImage else { return nil }
+
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        context.render(
+            output,
+            toBitmap: &bitmap,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+
+        // Boost saturation: pull the color toward a more vivid version
+        let r = Double(bitmap[0]) / 255.0
+        let g = Double(bitmap[1]) / 255.0
+        let b = Double(bitmap[2]) / 255.0
+
+        // Simple saturation boost — shift each channel away from the average
+        let avg = (r + g + b) / 3.0
+        let boost = 1.6
+        let br = min(1.0, max(0, avg + (r - avg) * boost))
+        let bg = min(1.0, max(0, avg + (g - avg) * boost))
+        let bb = min(1.0, max(0, avg + (b - avg) * boost))
+
+        return Color(.sRGB, red: br, green: bg, blue: bb, opacity: 1)
+    }
+}
