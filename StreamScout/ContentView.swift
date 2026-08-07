@@ -710,34 +710,28 @@ struct CatalogView: View {
     ]
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-                if mainTab == .discover {
-                    searchBar
-                    if !isSearchActive { filterBar.padding(.bottom, 8) }
-                }
-                Divider().overlay(Color.mkBorder)
-
-                Group {
-                    switch mainTab {
-                    case .discover:
-                        discoverContent
-                    case .watched:
-                        WatchedOnlyTabView().environmentObject(app)
-                    case .watchlist:
-                        WatchlistOnlyTabView().environmentObject(app)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
+            if mainTab == .discover {
+                searchBar
+                if !isSearchActive { filterBar.padding(.bottom, 8) }
             }
+            Divider().overlay(Color.mkBorder)
 
-            floatingTabBar
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
+            Group {
+                switch mainTab {
+                case .discover:
+                    discoverContent
+                case .watched:
+                    WatchedOnlyTabView().environmentObject(app)
+                case .watchlist:
+                    WatchlistOnlyTabView().environmentObject(app)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 74)
+            dockedTabBar
         }
         .sheet(isPresented: $showSettingsView) {
             SettingsView().environmentObject(app)
@@ -857,49 +851,63 @@ struct CatalogView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.mkBorder, lineWidth: 1))
     }
 
-    var floatingTabBar: some View {
-        HStack(spacing: 3) {
-            ForEach(MainTab.allCases) { tab in
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                        mainTab = tab
-                    }
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: tab.systemImage)
-                            .font(.system(size: 17, weight: .medium))
-                        if mainTab == tab {
-                            Text(tab.label)
-                                .font(.system(size: 14, weight: .semibold))
-                                .fixedSize()
+    /// A full-width bottom bar that houses the tab pill, anchored to the true bottom
+    /// edge of the screen. Content scrolls cleanly above it via `.safeAreaInset`.
+    var dockedTabBar: some View {
+        ZStack {
+            // Full-width backdrop that bleeds under the home indicator
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea(.container, edges: .bottom)
+
+            // The existing pill-style tab selector, centered
+            HStack(spacing: 3) {
+                ForEach(MainTab.allCases) { tab in
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                            mainTab = tab
                         }
-                    }
-                    .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
-                    .frame(height: 46)
-                    .frame(minWidth: 46)
-                    .padding(.horizontal, mainTab == tab ? 16 : 0)
-                    .background {
-                        if mainTab == tab {
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.mkAccent, .mkAccentAlt],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: tab.systemImage)
+                                .font(.system(size: 17, weight: .medium))
+                            if mainTab == tab {
+                                Text(tab.label)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .fixedSize()
+                            }
+                        }
+                        .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
+                        .frame(height: 46)
+                        .frame(minWidth: 46)
+                        .padding(.horizontal, mainTab == tab ? 16 : 0)
+                        .background {
+                            if mainTab == tab {
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.mkAccent, .mkAccentAlt],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
-                                .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                                    .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(7)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.mkBorder, lineWidth: 1))
+            .clipShape(Capsule())
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
         }
-        .padding(7)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.mkBorder, lineWidth: 1))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.55), radius: 20, y: 14)
+        .frame(maxWidth: .infinity, minHeight: 66)
+        // Insets the top of the bar with a hairline separator
+        .overlay(Divider().frame(maxWidth: .infinity), alignment: .top)
     }
 
     var filterBar: some View {
@@ -1202,6 +1210,8 @@ struct MovieCardView: View {
     @EnvironmentObject var app: AppState
     @State private var isTogglingWatched = false
     @State private var isTogglingWatchlist = false
+    /// Dominant color extracted from the poster; nil until the async fetch completes.
+    @State private var dominantColor: Color? = nil
     var isTV: Bool { movie.mediaType == "tv" }
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
     var isWatchlisted: Bool { app.watchlistIds.contains(movie.id) }
@@ -1209,6 +1219,11 @@ struct MovieCardView: View {
     var tmdbId: String {
         let parts = movie.id.split(separator: "-")
         return parts.count >= 2 ? String(parts.last!) : movie.id
+    }
+    /// The tint color used for both the card background and the accent bar.
+    /// Falls back to theme-based colors when no dominant color is available yet.
+    var cardTint: Color {
+        dominantColor ?? (isTV ? .mkTV : .mkAccent)
     }
 
     var body: some View {
@@ -1221,15 +1236,38 @@ struct MovieCardView: View {
             .background {
                 RoundedRectangle(cornerRadius: 18)
                     .fill(.ultraThinMaterial)
+                // Frosted-glass tint layer: dominant poster color when available,
+                // otherwise falls back to theme-based tint.
                 RoundedRectangle(cornerRadius: 18)
-                    .fill(isTV ? Color.mkTV.opacity(0.08) : Color.mkAccent.opacity(0.08))
+                    .fill(cardTint.opacity(dominantColor != nil ? 0.22 : 0.08))
             }
             .clipShape(RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.mkBorder, lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(
+                        dominantColor != nil
+                            ? cardTint.opacity(0.35)
+                            : Color.mkBorder,
+                        lineWidth: 1
+                    )
+            )
             .overlay(accentBar)
             .overlay(watchedToggleButton, alignment: .topTrailing)
         }
         .buttonStyle(.plain)
+        // Seed from cache synchronously (no flicker on re-render after first load)
+        .onAppear {
+            if let urlString = movie.posterUrl {
+                dominantColor = ColorCache.shared.cachedColor(for: urlString)
+            }
+        }
+        // Kick off async fetch; task is re-run only when the posterUrl changes
+        .task(id: movie.posterUrl) {
+            guard let urlString = movie.posterUrl else { return }
+            if let color = await ColorCache.shared.fetchColor(for: urlString) {
+                withAnimation(.easeIn(duration: 0.4)) { dominantColor = color }
+            }
+        }
     }
 
     var watchedToggleButton: some View {
@@ -1319,11 +1357,11 @@ struct MovieCardView: View {
         isTogglingWatchlist = false
     }
 
-    // Left accent bar — blue for TV, red for movies
+    // Left accent bar — uses dominant poster color when available, theme accent as fallback
     var accentBar: some View {
         HStack {
             RoundedRectangle(cornerRadius: 18)
-                .fill(isTV ? Color.mkTV.opacity(0.7) : Color.mkAccent.opacity(0.7))
+                .fill(cardTint.opacity(0.8))
                 .frame(width: 3)
             Spacer()
         }
