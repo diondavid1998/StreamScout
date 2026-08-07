@@ -325,10 +325,9 @@ final class ColorCache: ObservableObject {
         let small = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: targetSize)) }
 
         guard let ciImage = CIImage(image: small) else { return nil }
-        let extent = CIVector(cgRect: ciImage.extent)
         let filter = CIFilter.areaAverage()
         filter.inputImage = ciImage
-        filter.extent = extent
+        filter.extent = ciImage.extent
         guard let output = filter.outputImage else { return nil }
 
         var bitmap = [UInt8](repeating: 0, count: 4)
