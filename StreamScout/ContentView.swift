@@ -851,6 +851,10 @@ struct CatalogView: View {
             IconButton(icon: "gearshape.fill") { showSettingsView = true }
             IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.mkBorder, lineWidth: 1))
     }
 
     var floatingTabBar: some View {
@@ -958,8 +962,7 @@ struct CatalogView: View {
                     }
                     .foregroundColor(.mkMuted)
                     .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(Color.mkSurface)
-                    .clipShape(Capsule())
+                    .background(.ultraThinMaterial, in: Capsule())
                     .overlay(Capsule().stroke(Color.mkBorder, lineWidth: 1))
                 }
             }
@@ -1073,8 +1076,7 @@ struct CatalogView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.mkSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -1216,7 +1218,12 @@ struct MovieCardView: View {
                 infoColumn
             }
             .padding(14)
-            .background(Color.mkCard)
+            .background {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(isTV ? Color.mkTV.opacity(0.08) : Color.mkAccent.opacity(0.08))
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(.ultraThinMaterial)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.mkBorder, lineWidth: 1))
             .overlay(accentBar)
@@ -1237,7 +1244,7 @@ struct MovieCardView: View {
                         .foregroundColor(isWatched ? .green : .mkMuted.opacity(0.6))
                 }
             }
-            .background(Circle().fill(Color.mkCard).padding(2))
+            .background(Circle().fill(.ultraThinMaterial).padding(2))
             .padding(8)
         }
         .buttonStyle(.plain)
@@ -1456,7 +1463,10 @@ struct FilterChip: View {
         }
         .foregroundColor(active ? .mkAccent : .mkMuted)
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(active ? Color.mkAccent.opacity(0.1) : Color.mkSurface)
+        .background {
+            Capsule().fill(.ultraThinMaterial)
+            if active { Capsule().fill(Color.mkAccent.opacity(0.12)) }
+        }
         .clipShape(Capsule())
         .overlay(Capsule().stroke(active ? Color.mkAccent.opacity(0.4) : Color.mkBorder, lineWidth: 1))
     }
@@ -1791,8 +1801,7 @@ struct IconButton: View {
                 .font(.system(size: 17))
                 .foregroundColor(.mkMuted)
                 .frame(width: 36, height: 36)
-                .background(Color.mkSurface)
-                .clipShape(Circle())
+                .background(.ultraThinMaterial, in: Circle())
                 .rotationEffect(.degrees(spinning ? 360 : 0))
                 .animation(spinning ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: spinning)
         }
