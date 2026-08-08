@@ -807,8 +807,8 @@ struct CatalogView: View {
                     .blur(radius: 88)
                     .offset(x: -size.width * 0.08, y: size.height * 0.02)
             }
-            .ignoresSafeArea()
         }
+        .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 
@@ -3244,25 +3244,34 @@ struct GlassSurface: ViewModifier {
         content
             .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(reduceTransparency ? Color.mkSurface.opacity(0.96) : .ultraThinMaterial)
+                    .fill(
+                        reduceTransparency
+                            ? AnyShapeStyle(Color.mkSurface.opacity(0.96))
+                            : AnyShapeStyle(.ultraThinMaterial)
+                    )
                     .overlay {
                         RoundedRectangle(cornerRadius: radius, style: .continuous)
                             .fill(Color.white.opacity(interactive ? 0.035 : 0.025))
                     }
             }
             .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(reduceTransparency ? 0.18 : 0.30),
-                                Color.white.opacity(reduceTransparency ? 0.04 : 0.06)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
+                if reduceTransparency {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(Color.mkBorder, lineWidth: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.30),
+                                    Color.white.opacity(0.06)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
