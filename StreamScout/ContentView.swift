@@ -642,6 +642,7 @@ struct PlatformTile: View {
 // MARK: - Catalog
 
 struct CatalogView: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     enum MainTab: String, CaseIterable, Identifiable {
         case discover
         case watched
@@ -710,25 +711,29 @@ struct CatalogView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-            if mainTab == .discover {
-                searchBar
-                if !isSearchActive { filterBar.padding(.bottom, 8) }
-            }
-            Divider().overlay(Color.mkBorder)
+        ZStack {
+            ambientBackdrop
 
-            Group {
-                switch mainTab {
-                case .discover:
-                    discoverContent
-                case .watched:
-                    WatchedOnlyTabView().environmentObject(app)
-                case .watchlist:
-                    WatchlistOnlyTabView().environmentObject(app)
+            VStack(spacing: 0) {
+                topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
+                if mainTab == .discover {
+                    searchBar
+                    if !isSearchActive { filterBar.padding(.bottom, 8) }
                 }
+                Divider().overlay(Color.mkBorder)
+
+                Group {
+                    switch mainTab {
+                    case .discover:
+                        discoverContent
+                    case .watched:
+                        WatchedOnlyTabView().environmentObject(app)
+                    case .watchlist:
+                        WatchlistOnlyTabView().environmentObject(app)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .bottom) {
             dockedTabBar
@@ -775,6 +780,36 @@ struct CatalogView: View {
         } message: {
             Text("Are you sure you want to log out?")
         }
+    }
+
+    var ambientBackdrop: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+
+            ZStack {
+                Color.mkBackground
+
+                Circle()
+                    .fill(Color.mkAccent.opacity(reduceTransparency ? 0.14 : 0.26))
+                    .frame(width: 268, height: 268)
+                    .blur(radius: 96)
+                    .offset(x: -size.width * 0.22, y: -size.height * 0.34)
+
+                Circle()
+                    .fill(Color.mkAccentAlt.opacity(reduceTransparency ? 0.12 : 0.22))
+                    .frame(width: 252, height: 252)
+                    .blur(radius: 92)
+                    .offset(x: size.width * 0.32, y: -size.height * 0.24)
+
+                Circle()
+                    .fill(Color.mkTV.opacity(reduceTransparency ? 0.10 : 0.18))
+                    .frame(width: 244, height: 244)
+                    .blur(radius: 88)
+                    .offset(x: -size.width * 0.08, y: size.height * 0.02)
+            }
+            .ignoresSafeArea()
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: Sub-views
@@ -847,8 +882,6 @@ struct CatalogView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.mkBorder, lineWidth: 1))
     }
 
     /// A full-width bottom bar that houses the tab pill, anchored to the true bottom
@@ -1084,7 +1117,7 @@ struct CatalogView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .glassSurface(radius: 14)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -3195,5 +3228,42 @@ extension View {
         #else
         self
         #endif
+    }
+
+    func glassSurface(radius: CGFloat = 18, interactive: Bool = false) -> some View {
+        modifier(GlassSurface(radius: radius, interactive: interactive))
+    }
+}
+
+struct GlassSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let radius: CGFloat
+    let interactive: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(reduceTransparency ? Color.mkSurface.opacity(0.96) : .ultraThinMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .fill(Color.white.opacity(interactive ? 0.035 : 0.025))
+                    }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(reduceTransparency ? 0.18 : 0.30),
+                                Color.white.opacity(reduceTransparency ? 0.04 : 0.06)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 }
