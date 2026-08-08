@@ -464,6 +464,7 @@ struct PlatformsView: View {
                                 Text(Brand.displayName)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(.mkAccent)
+                                Text("will show titles available across your chosen platforms.")
                                     .font(.subheadline)
                                     .foregroundColor(.mkMuted)
                             }
