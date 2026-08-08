@@ -1,10 +1,11 @@
 import Foundation
+import SwiftUI
 
 // MARK: - API Config
 
 struct API {
     static let baseURL = "https://streamscore-backend-production.up.railway.app"
-    static let appName = "StreamScout"
+    static let appName = Brand.displayName
 }
 
 // MARK: - Errors
@@ -47,6 +48,31 @@ struct GenericResponse: Codable {
 
 // MARK: - Catalog
 
+enum MediaKind: String, Codable {
+    case movie, series
+
+    var accent: Color {
+        switch self {
+        case .movie:  Color(hex: "#FF453A")   // systemRed
+        case .series: Color(hex: "#0A84FF")   // systemBlue
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .movie:  "Movie"
+        case .series: "TV Show"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .movie:  "film.fill"
+        case .series: "tv.fill"
+        }
+    }
+}
+
 struct CatalogItem: Identifiable {
     var id: String
     var title: String
@@ -65,6 +91,9 @@ struct CatalogItem: Identifiable {
     var rottenTomatoesAudience: String?
     var metacriticRating: String?
     var metacriticAudience: String?
+
+    /// Media classification derived from the backend's mediaType string.
+    var kind: MediaKind { mediaType == "tv" ? .series : .movie }
 }
 
 extension CatalogItem: Decodable {
