@@ -128,6 +128,7 @@ struct ContentView: View {
             case .catalog:   CatalogView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environmentObject(app)
     }
 }
@@ -734,9 +735,7 @@ struct CatalogView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             dockedTabBar
         }
@@ -865,7 +864,6 @@ struct CatalogView: View {
                 .dismissesKeyboardOnScroll()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     var topBar: some View {
@@ -1157,7 +1155,6 @@ struct CatalogView: View {
                 .dismissesKeyboardOnScroll()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: Labels
