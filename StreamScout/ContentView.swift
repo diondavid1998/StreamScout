@@ -734,7 +734,9 @@ struct CatalogView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             dockedTabBar
         }
@@ -819,20 +821,21 @@ struct CatalogView: View {
             if isSearchActive {
                 searchContent
             } else if isLoading || (movies.isEmpty && meta?.refreshing == true) {
-                Spacer()
                 VStack(spacing: 10) {
+                    Spacer()
                     ProgressView().tint(.mkAccent)
                     Text(meta?.refreshing == true && !isLoading
                          ? "Building your catalog… check back in a moment."
                          : "Loading catalog…")
                         .font(.caption).foregroundColor(.mkMuted)
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    Spacer()
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if movies.isEmpty && !isLoading {
                 if let err = errorMsg {
-                    Spacer()
                     VStack(spacing: 12) {
+                        Spacer()
                         Image(systemName: "wifi.exclamationmark")
                             .font(.system(size: 40)).foregroundColor(.mkAccent)
                         Text("Couldn't load titles")
@@ -841,9 +844,9 @@ struct CatalogView: View {
                             .multilineTextAlignment(.center).padding(.horizontal, 40)
                         MKButton(label: "Retry", icon: "arrow.clockwise") { Task { await fetch() } }
                             .frame(maxWidth: 180).padding(.top, 4)
+                        Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    Spacer()
                 } else {
                     emptyState
                 }
@@ -862,6 +865,7 @@ struct CatalogView: View {
                 .dismissesKeyboardOnScroll()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     var topBar: some View {
@@ -1125,17 +1129,21 @@ struct CatalogView: View {
     var searchContent: some View {
         Group {
             if isSearchLoading {
-                Spacer()
-                ProgressView().tint(.mkAccent)
-                Spacer()
+                VStack {
+                    Spacer()
+                    ProgressView().tint(.mkAccent)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if searchResults.isEmpty {
-                Spacer()
                 VStack(spacing: 8) {
+                    Spacer()
                     Image(systemName: "magnifyingglass").font(.system(size: 32)).foregroundColor(.mkMuted.opacity(0.5))
                     Text("No results for \"\(searchText)\"")
                         .font(.subheadline).foregroundColor(.mkMuted)
+                    Spacer()
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
@@ -1149,6 +1157,7 @@ struct CatalogView: View {
                 .dismissesKeyboardOnScroll()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: Labels
