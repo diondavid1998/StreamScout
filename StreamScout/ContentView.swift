@@ -886,63 +886,52 @@ struct CatalogView: View {
         .padding(.vertical, 8)
     }
 
-    /// A full-width bottom bar that houses the tab pill, anchored to the true bottom
-    /// edge of the screen. Content scrolls cleanly above it via `.safeAreaInset`.
+    /// A floating pill tab bar. The capsule itself is the glass surface —
+    /// no full-width plate behind it, so nothing balloons the safe-area inset.
     var dockedTabBar: some View {
-        ZStack {
-            // Full-width backdrop that bleeds under the home indicator
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea(.container, edges: .bottom)
-
-            // The existing pill-style tab selector, centered
-            HStack(spacing: 3) {
-                ForEach(MainTab.allCases) { tab in
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                            mainTab = tab
-                        }
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: tab.systemImage)
-                                .font(.system(size: 17, weight: .medium))
-                            if mainTab == tab {
-                                Text(tab.label)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .fixedSize()
-                            }
-                        }
-                        .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
-                        .frame(height: 46)
-                        .frame(minWidth: 46)
-                        .padding(.horizontal, mainTab == tab ? 16 : 0)
-                        .background {
-                            if mainTab == tab {
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [.mkAccent, .mkAccentAlt],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .matchedGeometryEffect(id: "activeTab", in: tabPill)
-                            }
+        HStack(spacing: 3) {
+            ForEach(MainTab.allCases) { tab in
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                        mainTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 17, weight: .medium))
+                        if mainTab == tab {
+                            Text(tab.label)
+                                .font(.system(size: 14, weight: .semibold))
+                                .fixedSize()
                         }
                     }
-                    .buttonStyle(.plain)
+                    .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
+                    .frame(height: 46)
+                    .frame(minWidth: 46)
+                    .padding(.horizontal, mainTab == tab ? 16 : 0)
+                    .background {
+                        if mainTab == tab {
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.mkAccent, .mkAccentAlt],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                        }
+                    }
                 }
+                .buttonStyle(.plain)
             }
-            .padding(7)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.mkBorder, lineWidth: 1))
-            .clipShape(Capsule())
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
         }
-        .frame(maxWidth: .infinity, minHeight: 66)
-        // Insets the top of the bar with a hairline separator
-        .overlay(Divider().frame(maxWidth: .infinity), alignment: .top)
+        .padding(7)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.mkBorder, lineWidth: 1))
+        .clipShape(Capsule())
+        .padding(.horizontal, 20)
+        .padding(.bottom, 6)
     }
 
     var filterBar: some View {
