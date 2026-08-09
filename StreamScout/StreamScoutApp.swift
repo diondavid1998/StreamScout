@@ -23,6 +23,13 @@ struct StreamScoutApp: App {
     }
 }
 
+// MARK: - Brand
+
+enum Brand {
+    static let wordmark = "STREAM SCOUT"
+    static let displayName = "Stream Scout"
+}
+
 // MARK: - Themes
 
 struct AppTheme: Identifiable, Equatable {
@@ -38,6 +45,15 @@ struct AppTheme: Identifiable, Equatable {
     let muted: Color
     let border: Color
     let tv: Color
+    let meshTopLeading: Color
+    let meshTop: Color
+    let meshTopTrailing: Color
+    let meshLeading: Color
+    let meshCenter: Color
+    let meshTrailing: Color
+    let meshBottomLeading: Color
+    let meshBottom: Color
+    let meshBottomTrailing: Color
 
     static let signatureViolet = AppTheme(
         id: "signature_violet",
@@ -51,7 +67,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#EEF1FF"),
         muted: Color(hex: "#8F98B5"),
         border: Color.white.opacity(0.09),
-        tv: Color(hex: "#5EA6FF")
+        tv: Color(hex: "#5EA6FF"),
+        meshTopLeading:     Color(hex: "#1A1440"),
+        meshTop:            Color(hex: "#141B4A"),
+        meshTopTrailing:    Color(hex: "#0F1638"),
+        meshLeading:        Color(hex: "#14103A"),
+        meshCenter:         Color(hex: "#191540"),
+        meshTrailing:       Color(hex: "#121A44"),
+        meshBottomLeading:  Color(hex: "#0E0C2A"),
+        meshBottom:         Color(hex: "#110F30"),
+        meshBottomTrailing: Color(hex: "#0C0A24")
     )
 
     static let midnightBlue = AppTheme(
@@ -66,7 +91,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#EAF0FF"),
         muted: Color(hex: "#8997B8"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#69B4FF")
+        tv: Color(hex: "#69B4FF"),
+        meshTopLeading:     Color(hex: "#111828"),
+        meshTop:            Color(hex: "#0D1A30"),
+        meshTopTrailing:    Color(hex: "#0A1522"),
+        meshLeading:        Color(hex: "#0C1220"),
+        meshCenter:         Color(hex: "#101828"),
+        meshTrailing:       Color(hex: "#0B1626"),
+        meshBottomLeading:  Color(hex: "#080C18"),
+        meshBottom:         Color(hex: "#090E1C"),
+        meshBottomTrailing: Color(hex: "#060810")
     )
 
     static let sunsetAmber = AppTheme(
@@ -81,7 +115,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#FFF0EA"),
         muted: Color(hex: "#C7A093"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#5EA6FF")
+        tv: Color(hex: "#5EA6FF"),
+        meshTopLeading:     Color(hex: "#271812"),
+        meshTop:            Color(hex: "#221410"),
+        meshTopTrailing:    Color(hex: "#1E1210"),
+        meshLeading:        Color(hex: "#1C100E"),
+        meshCenter:         Color(hex: "#201410"),
+        meshTrailing:       Color(hex: "#1A1210"),
+        meshBottomLeading:  Color(hex: "#160E0C"),
+        meshBottom:         Color(hex: "#140C0A"),
+        meshBottomTrailing: Color(hex: "#120C0A")
     )
 
     static let oceanTeal = AppTheme(
@@ -96,7 +139,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#E8FFF9"),
         muted: Color(hex: "#8FBDB7"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#62B1FF")
+        tv: Color(hex: "#62B1FF"),
+        meshTopLeading:     Color(hex: "#112220"),
+        meshTop:            Color(hex: "#0E201E"),
+        meshTopTrailing:    Color(hex: "#0C1C1A"),
+        meshLeading:        Color(hex: "#0A1816"),
+        meshCenter:         Color(hex: "#0F1E1C"),
+        meshTrailing:       Color(hex: "#0B1C1A"),
+        meshBottomLeading:  Color(hex: "#071412"),
+        meshBottom:         Color(hex: "#081614"),
+        meshBottomTrailing: Color(hex: "#05100F")
     )
 
     static let crimsonNoir = AppTheme(
@@ -111,7 +163,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#F9EEF1"),
         muted: Color(hex: "#B48D97"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#5EA6FF")
+        tv: Color(hex: "#5EA6FF"),
+        meshTopLeading:     Color(hex: "#211418"),
+        meshTop:            Color(hex: "#1C1214"),
+        meshTopTrailing:    Color(hex: "#181012"),
+        meshLeading:        Color(hex: "#160E10"),
+        meshCenter:         Color(hex: "#1A1014"),
+        meshTrailing:       Color(hex: "#160E12"),
+        meshBottomLeading:  Color(hex: "#100A0C"),
+        meshBottom:         Color(hex: "#0E0A0C"),
+        meshBottomTrailing: Color(hex: "#0B0B0B")
     )
 
     static let graphiteMinimal = AppTheme(
@@ -126,7 +187,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#F0F2F7"),
         muted: Color(hex: "#9AA2B6"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#6CAEFF")
+        tv: Color(hex: "#6CAEFF"),
+        meshTopLeading:     Color(hex: "#1C1E24"),
+        meshTop:            Color(hex: "#181A20"),
+        meshTopTrailing:    Color(hex: "#15171C"),
+        meshLeading:        Color(hex: "#131518"),
+        meshCenter:         Color(hex: "#171920"),
+        meshTrailing:       Color(hex: "#14161C"),
+        meshBottomLeading:  Color(hex: "#0F1014"),
+        meshBottom:         Color(hex: "#0D0E12"),
+        meshBottomTrailing: Color(hex: "#0C0D10")
     )
 
     static let monochrome = AppTheme(
@@ -141,7 +211,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#F2F2F2"),
         muted: Color(hex: "#9A9A9A"),
         border: Color.white.opacity(0.18),
-        tv: Color(hex: "#6CAEFF")
+        tv: Color(hex: "#6CAEFF"),
+        meshTopLeading:     Color(hex: "#181818"),
+        meshTop:            Color(hex: "#161616"),
+        meshTopTrailing:    Color(hex: "#141414"),
+        meshLeading:        Color(hex: "#121212"),
+        meshCenter:         Color(hex: "#161616"),
+        meshTrailing:       Color(hex: "#121212"),
+        meshBottomLeading:  Color(hex: "#0A0A0A"),
+        meshBottom:         Color(hex: "#080808"),
+        meshBottomTrailing: Color(hex: "#000000")
     )
 
     static let vibrantNeon = AppTheme(
@@ -156,7 +235,16 @@ struct AppTheme: Identifiable, Equatable {
         text: Color(hex: "#F7EEFF"),
         muted: Color(hex: "#B59BC9"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#54B0FF")
+        tv: Color(hex: "#54B0FF"),
+        meshTopLeading:     Color(hex: "#1C1230"),
+        meshTop:            Color(hex: "#181030"),
+        meshTopTrailing:    Color(hex: "#130E28"),
+        meshLeading:        Color(hex: "#120A22"),
+        meshCenter:         Color(hex: "#181030"),
+        meshTrailing:       Color(hex: "#130E2A"),
+        meshBottomLeading:  Color(hex: "#0D0818"),
+        meshBottom:         Color(hex: "#0C0718"),
+        meshBottomTrailing: Color(hex: "#0A0512")
     )
 
     static let all: [AppTheme] = [
@@ -219,6 +307,15 @@ extension Color {
     static var mkMuted: Color { ThemeManager.shared.current.muted }
     static var mkBorder: Color { ThemeManager.shared.current.border }
     static var mkTV: Color { ThemeManager.shared.current.tv }
+    static var mkMeshTopLeading: Color { ThemeManager.shared.current.meshTopLeading }
+    static var mkMeshTop: Color { ThemeManager.shared.current.meshTop }
+    static var mkMeshTopTrailing: Color { ThemeManager.shared.current.meshTopTrailing }
+    static var mkMeshLeading: Color { ThemeManager.shared.current.meshLeading }
+    static var mkMeshCenter: Color { ThemeManager.shared.current.meshCenter }
+    static var mkMeshTrailing: Color { ThemeManager.shared.current.meshTrailing }
+    static var mkMeshBottomLeading: Color { ThemeManager.shared.current.meshBottomLeading }
+    static var mkMeshBottom: Color { ThemeManager.shared.current.meshBottom }
+    static var mkMeshBottomTrailing: Color { ThemeManager.shared.current.meshBottomTrailing }
 }
 
 // MARK: - Streaming Platforms

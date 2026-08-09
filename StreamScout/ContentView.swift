@@ -148,7 +148,7 @@ struct StreamScoutTitle: View {
                 .frame(width: logoSize, height: logoSize)
                 .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
                 .shadow(color: .mkAccent.opacity(0.4), radius: 6, x: 0, y: 3)
-            Text("StreamScout")
+            Text(Brand.displayName)
                 .font(.system(size: size, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing))
         }
@@ -461,7 +461,7 @@ struct PlatformsView: View {
                                     .scaledToFit()
                                     .frame(width: 16, height: 16)
                                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                                Text("StreamScout")
+                                Text(Brand.displayName)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(.mkAccent)
                                 Text("will show titles available across your chosen platforms.")
@@ -643,7 +643,6 @@ struct PlatformTile: View {
 // MARK: - Catalog
 
 struct CatalogView: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     enum MainTab: String, CaseIterable, Identifiable {
         case discover
         case watched
@@ -670,6 +669,16 @@ struct CatalogView: View {
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
             }
+        }
+    }
+
+    private enum Layout {
+        static let tabBarHeight: CGFloat = 60
+        static let tabBarBottomMargin: CGFloat = 24
+        static let feedBottomGap: CGFloat = 16
+
+        static var feedBottomInset: CGFloat {
+            tabBarHeight + tabBarBottomMargin + feedBottomGap
         }
     }
 
@@ -784,31 +793,20 @@ struct CatalogView: View {
     }
 
     var ambientBackdrop: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-
-            ZStack {
-                Color.mkBackground
-
-                Circle()
-                    .fill(Color.mkAccent.opacity(reduceTransparency ? 0.14 : 0.26))
-                    .frame(width: 268, height: 268)
-                    .blur(radius: 96)
-                    .offset(x: -size.width * 0.22, y: -size.height * 0.34)
-
-                Circle()
-                    .fill(Color.mkAccentAlt.opacity(reduceTransparency ? 0.12 : 0.22))
-                    .frame(width: 252, height: 252)
-                    .blur(radius: 92)
-                    .offset(x: size.width * 0.32, y: -size.height * 0.24)
-
-                Circle()
-                    .fill(Color.mkTV.opacity(reduceTransparency ? 0.10 : 0.18))
-                    .frame(width: 244, height: 244)
-                    .blur(radius: 88)
-                    .offset(x: -size.width * 0.08, y: size.height * 0.02)
-            }
-        }
+        MeshGradient(
+            width: 3,
+            height: 3,
+            points: [
+                [0.0, 0.0], [0.5, 0.0], [1.0, 0.0],
+                [0.0, 0.5], [0.5, 0.5], [1.0, 0.5],
+                [0.0, 1.0], [0.5, 1.0], [1.0, 1.0]
+            ],
+            colors: [
+                .mkMeshTopLeading,    .mkMeshTop,    .mkMeshTopTrailing,
+                .mkMeshLeading,       .mkMeshCenter, .mkMeshTrailing,
+                .mkMeshBottomLeading, .mkMeshBottom, .mkMeshBottomTrailing
+            ]
+        )
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
@@ -860,6 +858,7 @@ struct CatalogView: View {
                         if totalPages > 1 { paginationBar.padding(.horizontal, 16).padding(.bottom, 24) }
                     }
                     .padding(.top, 12)
+                    .padding(.bottom, Layout.feedBottomInset)
                 }
                 .dismissesKeyboardOnScroll()
             }
@@ -869,8 +868,8 @@ struct CatalogView: View {
     var topBar: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("🎬 STREAMSCOUT")
-                    .font(.system(size: 11, weight: .semibold)).kerning(1.2)
+                Text("🎬 \(Brand.wordmark)")
+                    .font(.system(size: 11, weight: .semibold)).tracking(2.0)
                     .foregroundColor(.mkAccent)
                 Text(mainTab.title)
                     .font(.system(size: 20, weight: .bold)).foregroundColor(.mkText)
@@ -1139,7 +1138,7 @@ struct CatalogView: View {
                                 .padding(.horizontal, 16)
                         }
                     }
-                    .padding(.top, 12).padding(.bottom, 24)
+                    .padding(.top, 12).padding(.bottom, Layout.feedBottomInset)
                 }
                 .dismissesKeyboardOnScroll()
             }
@@ -1248,8 +1247,8 @@ struct MovieCardView: View {
         let parts = movie.id.split(separator: "-")
         return parts.count >= 2 ? String(parts.last!) : movie.id
     }
-    /// The tint color used for both the card background and the accent bar.
-    /// Falls back to theme-based colors when no dominant color is available yet.
+    /// The tint color used for the card background. Falls back to theme-based colors when no
+    /// dominant color is available yet. The accent bar uses `movie.kind.accent` instead.
     var cardTint: Color {
         dominantColor ?? (isTV ? .mkTV : .mkAccent)
     }
@@ -1267,7 +1266,7 @@ struct MovieCardView: View {
                 // Frosted-glass tint layer: dominant poster color when available,
                 // otherwise falls back to theme-based tint.
                 RoundedRectangle(cornerRadius: 18)
-                    .fill(cardTint.opacity(dominantColor != nil ? 0.22 : 0.08))
+                    .fill(cardTint.opacity(dominantColor != nil ? 0.14 : 0.08))
             }
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(
@@ -1385,12 +1384,14 @@ struct MovieCardView: View {
         isTogglingWatchlist = false
     }
 
-    // Left accent bar — uses dominant poster color when available, theme accent as fallback
+    // Left accent bar — color-coded by media type (red = film, blue = series)
     var accentBar: some View {
         HStack {
-            RoundedRectangle(cornerRadius: 18)
-                .fill(cardTint.opacity(0.8))
-                .frame(width: 3)
+            Capsule()
+                .fill(movie.kind.accent)
+                .frame(width: 3.5)
+                .padding(.vertical, 14)
+                .padding(.leading, 1)
             Spacer()
         }
         .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -1431,7 +1432,12 @@ struct MovieCardView: View {
 
             // Type + Year chips
             HStack(spacing: 6) {
-                TypeChip(label: isTV ? "TV" : "Movie", isTV: isTV)
+                Label(movie.kind.label, systemImage: movie.kind.symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(movie.kind.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(movie.kind.accent.opacity(0.15)))
                 if let y = movie.year {
                     PillChip(text: String(y), color: .mkMuted)
                 }
@@ -1535,23 +1541,6 @@ struct FilterChip: View {
         }
         .clipShape(Capsule())
         .overlay(Capsule().stroke(active ? Color.mkAccent.opacity(0.4) : Color.mkBorder, lineWidth: 1))
-    }
-}
-
-struct TypeChip: View {
-    let label: String; let isTV: Bool
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: isTV ? "tv.fill" : "film.fill")
-                .font(.system(size: 8, weight: .bold))
-            Text(label)
-                .font(.system(size: 9, weight: .bold))
-                .kerning(0.3)
-        }
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(isTV ? Color.mkTV.opacity(0.18) : Color.mkAccent.opacity(0.18))
-            .foregroundColor(isTV ? .mkTV : .mkAccent)
-            .clipShape(Capsule())
     }
 }
 
@@ -2190,8 +2179,12 @@ struct DetailSheet: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.mkText)
             HStack(spacing: 8) {
-                TypeChip(label: (movie.mediaType ?? "movie") == "tv" ? "TV" : "Film",
-                         isTV: (movie.mediaType ?? "movie") == "tv")
+                Label(movie.kind.label, systemImage: movie.kind.symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(movie.kind.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(movie.kind.accent.opacity(0.15)))
                 if let y = movie.year { PillChip(text: String(y), color: .mkMuted) }
                 if let t = details?.tagline, !t.isEmpty {
                     Text("· \(t)").font(.caption).foregroundColor(.mkMuted).lineLimit(1)
