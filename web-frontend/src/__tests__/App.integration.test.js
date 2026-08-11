@@ -282,5 +282,24 @@ describe('Logged-in catalog view', () => {
       expect(screen.getByText(/Genre/i)).toBeInTheDocument();
     }, { timeout: 8000 });
   });
-});
 
+  it('uses 1950 as the default lower bound for the year range filter', async () => {
+    setupLoggedInSession();
+    setupFetchMock([
+      mockResponse({ platforms: ['netflix'], languages: [] }),
+      mockResponse(EMPTY_CATALOG),
+    ]);
+
+    render(<App />);
+
+    const yearRangeButton = await screen.findByRole('button', { name: /Year Range/i });
+    fireEvent.click(yearRangeButton);
+
+    const [minSlider, maxSlider] = screen.getAllByRole('slider');
+
+    expect(minSlider).toHaveAttribute('min', '1950');
+    expect(minSlider).toHaveValue('1950');
+    expect(maxSlider).toHaveAttribute('min', '1950');
+    expect(maxSlider).toHaveValue(String(new Date().getFullYear()));
+  });
+});
