@@ -743,7 +743,7 @@ struct CatalogView: View {
         static let tabItemHeight: CGFloat = 46
         static let tabBarPadding: CGFloat = 7
         static let tabBarBottomClearance: CGFloat = 6
-        static var tabBarHeight: CGFloat { tabItemHeight + tabBarPadding * 2 + tabBarBottomClearance }
+        static let tabBarHeight: CGFloat = tabItemHeight + tabBarPadding * 2 + tabBarBottomClearance
         static let tabBarBottomMargin: CGFloat = 24
         static let feedBottomGap: CGFloat = 16
 
@@ -754,7 +754,6 @@ struct CatalogView: View {
 
     @Environment(AppState.self) private var app
     @State private var mainTab: MainTab = .discover
-    @Namespace private var tabPill
     @Namespace private var tabGlass
     @State private var movies: [CatalogItem] = []
     @State private var meta: CatalogMeta?
@@ -969,7 +968,7 @@ struct CatalogView: View {
                     ForEach(MainTab.allCases) { tab in
                         Color.clear
                             .frame(height: Layout.tabItemHeight)
-                            .frame(minWidth: mainTab == tab ? 0 : 56)
+                            .frame(minWidth: 56)
                             .padding(.horizontal, mainTab == tab ? 16 : 8)
                             .overlay {
                                 if mainTab == tab {
@@ -979,7 +978,6 @@ struct CatalogView: View {
                                             in: Capsule()
                                         )
                                         .glassEffectID("activeTab", in: tabGlass)
-                                        .matchedGeometryEffect(id: "activeTab", in: tabPill)
                                 }
                             }
                             .allowsHitTesting(false)
@@ -1005,7 +1003,7 @@ struct CatalogView: View {
                             }
                             .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
                             .frame(height: Layout.tabItemHeight)
-                            .frame(minWidth: mainTab == tab ? 0 : 56)
+                            .frame(minWidth: 56)
                             .padding(.horizontal, mainTab == tab ? 16 : 8)
                             .contentShape(Capsule())
                         }
