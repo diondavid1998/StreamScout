@@ -739,7 +739,11 @@ struct CatalogView: View {
     }
 
     private enum Layout {
-        static let tabBarHeight: CGFloat = 60
+        // Tab bar is built from: item height (46) + vertical padding (7*2) + bottom clearance (6)
+        static let tabItemHeight: CGFloat = 46
+        static let tabBarPadding: CGFloat = 7
+        static let tabBarBottomClearance: CGFloat = 6
+        static let tabBarHeight: CGFloat = tabItemHeight + tabBarPadding * 2 + tabBarBottomClearance
         static let tabBarBottomMargin: CGFloat = 24
         static let feedBottomGap: CGFloat = 16
 
@@ -750,7 +754,7 @@ struct CatalogView: View {
 
     @Environment(AppState.self) private var app
     @State private var mainTab: MainTab = .discover
-    @Namespace private var tabPill
+    @Namespace private var tabGlass
     @State private var movies: [CatalogItem] = []
     @State private var meta: CatalogMeta?
     @State private var isLoading = false
@@ -957,51 +961,63 @@ struct CatalogView: View {
     /// no full-width plate behind it, so nothing balloons the safe-area inset.
     var dockedTabBar: some View {
         GlassEffectContainer {
-            HStack(spacing: 3) {
-                ForEach(MainTab.allCases) { tab in
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                            mainTab = tab
-                        }
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: tab.systemImage)
-                                .font(.system(size: 17, weight: .medium))
-                            if mainTab == tab {
-                                Text(tab.label)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .fixedSize()
-                            }
-                        }
-                        .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
-                        .frame(height: 46)
-                        .frame(minWidth: 46)
-                        .padding(.horizontal, mainTab == tab ? 16 : 0)
-                        .background {
-                            if mainTab == tab {
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [.mkAccent, .mkAccentAlt],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
+            ZStack(alignment: .leading) {
+                // Active-pill background — lives directly inside GlassEffectContainer
+                // so morphing/merging with the outer bar glass is visible.
+                HStack(spacing: 3) {
+                    ForEach(MainTab.allCases) { tab in
+                        Color.clear
+                            .frame(height: Layout.tabItemHeight)
+                            .frame(minWidth: 56)
+                            .padding(.horizontal, mainTab == tab ? 16 : 8)
+                            .overlay {
+                                if mainTab == tab {
+                                    Capsule()
+                                        .glassEffect(
+                                            .regular.tint(Color.mkAccent).interactive(),
+                                            in: Capsule()
                                         )
-                                    )
-                                    .glassEffect(.regular.interactive(), in: Capsule())
-                                    .glassEffectID("activeTab", in: tabPill)
-                                    .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                                        .glassEffectID("activeTab", in: tabGlass)
+                                }
                             }
-                        }
+                            .allowsHitTesting(false)
                     }
-                    .buttonStyle(.plain)
+                }
+
+                // Tap layer — overlays the pill background with full hit areas.
+                HStack(spacing: 3) {
+                    ForEach(MainTab.allCases) { tab in
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                                mainTab = tab
+                            }
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: tab.systemImage)
+                                    .font(.system(size: 17, weight: .medium))
+                                if mainTab == tab {
+                                    Text(tab.label)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .fixedSize()
+                                }
+                            }
+                            .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
+                            .frame(height: Layout.tabItemHeight)
+                            .frame(minWidth: 56)
+                            .padding(.horizontal, mainTab == tab ? 16 : 8)
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
-        .padding(7)
+        .padding(Layout.tabBarPadding)
         .glassEffect(.regular, in: Capsule())
-        .clipShape(Capsule())
+        // No .clipShape — glassEffect already shapes the bar, and clipShape
+        // kills hit-testing at the rounded ends of outer tabs.
         .padding(.horizontal, 20)
-        .padding(.bottom, 6)
+        .padding(.bottom, Layout.tabBarBottomClearance)
     }
 
     var filterBar: some View {
@@ -1064,8 +1080,7 @@ struct CatalogView: View {
                     }
                     .foregroundColor(.mkMuted)
                     .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().stroke(Color.mkBorder, lineWidth: 1))
+                    .glassEffect(.regular, in: Capsule())
                 }
             }
             .padding(.horizontal, 16)
@@ -1612,12 +1627,10 @@ struct FilterChip: View {
         }
         .foregroundColor(active ? .mkAccent : .mkMuted)
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background {
-            Capsule().fill(.ultraThinMaterial)
-            if active { Capsule().fill(Color.mkAccent.opacity(0.12)) }
-        }
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(active ? Color.mkAccent.opacity(0.4) : Color.mkBorder, lineWidth: 1))
+        .glassEffect(
+            active ? .regular.tint(Color.mkAccent).interactive() : .regular.interactive(),
+            in: Capsule()
+        )
     }
 }
 
@@ -1930,7 +1943,7 @@ struct IconButton: View {
                 .font(.system(size: 17))
                 .foregroundColor(.mkMuted)
                 .frame(width: 36, height: 36)
-                .background(.ultraThinMaterial, in: Circle())
+                .glassEffect(.regular.interactive(), in: Circle())
                 .rotationEffect(.degrees(spinning ? 360 : 0))
                 .animation(spinning ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: spinning)
         }
