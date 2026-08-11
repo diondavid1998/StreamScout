@@ -1950,10 +1950,10 @@ struct YearFilterSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onApply: () -> Void
 
-    private let minYear: Double = 1900
+    private let minYear: Double = 1950
     private let maxYear: Double = Double(Calendar.current.component(.year, from: Date()))
 
-    @State private var sliderMin: Double = 1900
+    @State private var sliderMin: Double = 1950
     @State private var sliderMax: Double = Double(Calendar.current.component(.year, from: Date()))
 
     var body: some View {

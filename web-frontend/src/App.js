@@ -8,7 +8,7 @@ const AUTH_TOKEN_KEY = 'streamScout.authToken';
 const AUTH_USERNAME_KEY = 'streamScout.username';
 const BYPASS_MODE_KEY = 'streamScout.bypassMode';
 const PAGE_SIZE = 24;
-const YEAR_RANGE_MIN = 1900;
+const YEAR_RANGE_MIN = 1950;
 const YEAR_RANGE_MAX = new Date().getFullYear();
 
 const styles = {
