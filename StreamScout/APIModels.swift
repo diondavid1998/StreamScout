@@ -12,6 +12,7 @@ struct API {
 
 enum APIError: LocalizedError {
     case unauthorized
+    case clientError(Int, String?)
     case serverError(Int)
     case decodingError
     case networkError(Error)
@@ -19,6 +20,8 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unauthorized:          return "Session expired — please sign in again."
+        case .clientError(let c, let message):
+            return message?.isEmpty == false ? message : "Request failed (\(c))."
         case .serverError(let c):    return "Server error (\(c))."
         case .decodingError:         return "Unexpected server response."
         case .networkError(let e):   return e.localizedDescription
@@ -367,6 +370,10 @@ final class APIService {
         }
         if let http = response as? HTTPURLResponse {
             if http.statusCode == 401 { throw APIError.unauthorized }
+            if (400...499).contains(http.statusCode) {
+                let message = (try? JSONDecoder().decode(GenericResponse.self, from: data))?.error
+                throw APIError.clientError(http.statusCode, message)
+            }
             if http.statusCode >= 500 { throw APIError.serverError(http.statusCode) }
         }
         do {

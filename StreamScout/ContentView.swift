@@ -7,19 +7,68 @@
 
 import SwiftUI
 import PhotosUI
+import Observation
+import Security
 
 @MainActor
-final class AppState: ObservableObject {
+enum KeychainStore {
+    private static var service: String {
+        Bundle.main.bundleIdentifier ?? "com.diondavid.streamscout"
+    }
+
+    private static let account = "auth_token"
+
+    private static var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+    }
+
+    @discardableResult
+    static func save(_ token: String) -> Bool {
+        var query = baseQuery
+        let data = Data(token.utf8)
+
+        SecItemDelete(query as CFDictionary)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func read() -> String? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let token = String(data: data, encoding: .utf8) else { return nil }
+        return token
+    }
+
+    static func delete() {
+        SecItemDelete(baseQuery as CFDictionary)
+    }
+}
+
+@Observable
+@MainActor
+final class AppState {
     enum Page { case loading, auth, platforms, catalog }
 
-    @Published var page: Page = .loading
-    @Published var token: String = ""
-    @Published var username: String = ""
-    @Published var selectedPlatforms: [String] = []
-    @Published var selectedLanguages: [String] = []
-    @Published var watchedIds: Set<String> = []
-    @Published var watchlistIds: Set<String> = []
-    @Published var selectedThemeId: String = AppTheme.defaultTheme.id
+    var page: Page = .loading
+    var token: String = ""
+    var username: String = ""
+    var selectedPlatforms: [String] = []
+    var selectedLanguages: [String] = []
+    var watchedIds: Set<String> = []
+    var watchlistIds: Set<String> = []
+    var selectedThemeId: String = AppTheme.defaultTheme.id
 
     private let tokenKey      = "mk_token"
     private let usernameKey   = "mk_username"
@@ -32,12 +81,21 @@ final class AppState: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         defaults = userDefaults
-        token    = defaults.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
+
+        if KeychainStore.read() == nil,
+           let legacyToken = defaults.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces),
+           !legacyToken.isEmpty {
+            _ = KeychainStore.save(legacyToken)
+            defaults.removeObject(forKey: tokenKey)
+        }
+
+        token = KeychainStore.read()?.trimmingCharacters(in: .whitespaces) ?? ""
         username = defaults.string(forKey: usernameKey) ?? ""
         selectedPlatforms = defaults.stringArray(forKey: platformsKey) ?? []
         selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
-        watchedIds  = Set(defaults.stringArray(forKey: watchedKey) ?? [])
+        watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])
         watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])
+
         let theme = AppTheme.theme(with: defaults.string(forKey: themeKey) ?? AppTheme.defaultTheme.id)
         selectedThemeId = theme.id
         ThemeManager.shared.applyTheme(theme)
@@ -45,10 +103,11 @@ final class AppState: ObservableObject {
     }
 
     func saveSession(token: String, username: String, isNewUser: Bool = false) {
-        self.token    = token.trimmingCharacters(in: .whitespaces)
+        self.token = token.trimmingCharacters(in: .whitespaces)
         self.username = username
-        defaults.set(self.token, forKey: tokenKey)
-        defaults.set(username,   forKey: usernameKey)
+        _ = KeychainStore.save(self.token)
+        defaults.removeObject(forKey: tokenKey)
+        defaults.set(username, forKey: usernameKey)
         page = isNewUser ? .platforms : .catalog
     }
 
@@ -64,7 +123,8 @@ final class AppState: ObservableObject {
 
     func updateToken(_ newToken: String) {
         token = newToken.trimmingCharacters(in: .whitespaces)
-        defaults.set(token, forKey: tokenKey)
+        _ = KeychainStore.save(token)
+        defaults.removeObject(forKey: tokenKey)
     }
 
     func updateUsername(_ newUsername: String) {
@@ -100,8 +160,14 @@ final class AppState: ObservableObject {
     }
 
     func logout() {
-        token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []
-        watchedIds = []; watchlistIds = []
+        token = ""
+        username = ""
+        selectedPlatforms = []
+        selectedLanguages = []
+        watchedIds = []
+        watchlistIds = []
+
+        KeychainStore.delete()
         defaults.removeObject(forKey: tokenKey)
         defaults.removeObject(forKey: usernameKey)
         defaults.removeObject(forKey: platformsKey)
@@ -115,8 +181,8 @@ final class AppState: ObservableObject {
 // MARK: - Root Router
 
 struct ContentView: View {
-    @StateObject private var app = AppState()
-    @EnvironmentObject var themeManager: ThemeManager
+    @State private var app = AppState()
+    @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
         ZStack {
@@ -129,7 +195,7 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environmentObject(app)
+        .environment(app)
     }
 }
 
@@ -167,7 +233,7 @@ struct LoadingView: View {
 // MARK: - Auth
 
 struct AuthView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
 
     enum Mode: CaseIterable { case login, register }
     enum ResetStep { case none, enterEmail, enterCode }
@@ -217,7 +283,7 @@ struct AuthView: View {
                 .padding(.bottom, 40)
             }
         }
-        .scrollBounceBasedOnSize()
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     // MARK: Main auth card
@@ -407,7 +473,7 @@ struct AuthView: View {
 // MARK: - Platforms
 
 struct PlatformsView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var selected: Set<String> = []
     @State private var selectedLangs: Set<String> = []
@@ -682,7 +748,7 @@ struct CatalogView: View {
         }
     }
 
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @State private var mainTab: MainTab = .discover
     @Namespace private var tabPill
     @State private var movies: [CatalogItem] = []
@@ -737,9 +803,9 @@ struct CatalogView: View {
                     case .discover:
                         discoverContent
                     case .watched:
-                        WatchedOnlyTabView().environmentObject(app)
+                        WatchedOnlyTabView().environment(app)
                     case .watchlist:
-                        WatchlistOnlyTabView().environmentObject(app)
+                        WatchlistOnlyTabView().environment(app)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -749,7 +815,7 @@ struct CatalogView: View {
             dockedTabBar
         }
         .sheet(isPresented: $showSettingsView) {
-            SettingsView().environmentObject(app)
+            SettingsView().environment(app)
         }
         .sheet(isPresented: $showGenrePicker) {
             GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
@@ -763,7 +829,7 @@ struct CatalogView: View {
             YearFilterSheet(yearMin: $yearMin, yearMax: $yearMax) { page = 1; Task { await fetch() } }
         }
         .sheet(item: $selectedDetail) { movie in
-            DetailSheet(movie: movie).environmentObject(app)
+            DetailSheet(movie: movie).environment(app)
         }
         .task {
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
@@ -783,6 +849,7 @@ struct CatalogView: View {
         .onChange(of: showSettingsView) { _, open in
             if !open && mainTab == .discover { page = 1; Task { await fetch() } }
         }
+        .sensoryFeedback(.selection, trigger: mainTab)
         .onDisappear { pollingTask?.cancel(); searchTask?.cancel() }
         .alert("Log Out", isPresented: $showLogoutAlert) {
             Button("Log Out", role: .destructive) { app.logout() }
@@ -860,7 +927,8 @@ struct CatalogView: View {
                     .padding(.top, 12)
                     .padding(.bottom, Layout.feedBottomInset)
                 }
-                .dismissesKeyboardOnScroll()
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollDismissesKeyboard(.immediately)
             }
         }
     }
@@ -888,46 +956,49 @@ struct CatalogView: View {
     /// A floating pill tab bar. The capsule itself is the glass surface —
     /// no full-width plate behind it, so nothing balloons the safe-area inset.
     var dockedTabBar: some View {
-        HStack(spacing: 3) {
-            ForEach(MainTab.allCases) { tab in
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                        mainTab = tab
-                    }
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: tab.systemImage)
-                            .font(.system(size: 17, weight: .medium))
-                        if mainTab == tab {
-                            Text(tab.label)
-                                .font(.system(size: 14, weight: .semibold))
-                                .fixedSize()
+        GlassEffectContainer {
+            HStack(spacing: 3) {
+                ForEach(MainTab.allCases) { tab in
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                            mainTab = tab
                         }
-                    }
-                    .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
-                    .frame(height: 46)
-                    .frame(minWidth: 46)
-                    .padding(.horizontal, mainTab == tab ? 16 : 0)
-                    .background {
-                        if mainTab == tab {
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.mkAccent, .mkAccentAlt],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: tab.systemImage)
+                                .font(.system(size: 17, weight: .medium))
+                            if mainTab == tab {
+                                Text(tab.label)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .fixedSize()
+                            }
+                        }
+                        .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
+                        .frame(height: 46)
+                        .frame(minWidth: 46)
+                        .padding(.horizontal, mainTab == tab ? 16 : 0)
+                        .background {
+                            if mainTab == tab {
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.mkAccent, .mkAccentAlt],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
-                                .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                                    .glassEffect(.regular.interactive(), in: Capsule())
+                                    .glassEffectID("activeTab", in: tabPill)
+                                    .matchedGeometryEffect(id: "activeTab", in: tabPill)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(7)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.mkBorder, lineWidth: 1))
+        .glassEffect(.regular, in: Capsule())
         .clipShape(Capsule())
         .padding(.horizontal, 20)
         .padding(.bottom, 6)
@@ -1071,7 +1142,7 @@ struct CatalogView: View {
             TextField("Search any movie or show…", text: $searchText)
                 .foregroundColor(.mkText)
                 .autocorrectionDisabled()
-                .onChange(of: searchText) { text in
+                .onChange(of: searchText) { _, text in
                     searchTask?.cancel()
                     guard text.count >= 2 else {
                         if text.isEmpty {
@@ -1140,7 +1211,7 @@ struct CatalogView: View {
                     }
                     .padding(.top, 12).padding(.bottom, Layout.feedBottomInset)
                 }
-                .dismissesKeyboardOnScroll()
+                .scrollDismissesKeyboard(.immediately)
             }
         }
     }
@@ -1234,7 +1305,7 @@ struct CatalogView: View {
 struct MovieCardView: View {
     let movie: CatalogItem
     var onTap: () -> Void = {}
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @State private var isTogglingWatched = false
     @State private var isTogglingWatchlist = false
     /// Dominant color extracted from the poster; nil until the async fetch completes.
@@ -1307,6 +1378,8 @@ struct MovieCardView: View {
                     Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 22))
                         .foregroundColor(isWatched ? .green : .mkMuted.opacity(0.6))
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: isWatched)
                 }
             }
             .background(Circle().fill(.ultraThinMaterial).padding(2))
@@ -1314,6 +1387,7 @@ struct MovieCardView: View {
         }
         .buttonStyle(.plain)
         .disabled(isTogglingWatched)
+        .sensoryFeedback(.success, trigger: isWatched)
     }
 
     @MainActor func toggleWatched() async {
@@ -1350,6 +1424,8 @@ struct MovieCardView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(isWatchlisted ? .mkAccent : .white)
                         .shadow(color: .black.opacity(0.6), radius: 1)
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: isWatchlisted)
                 }
             }
             .padding(.horizontal, 6)
@@ -1359,6 +1435,7 @@ struct MovieCardView: View {
         }
         .buttonStyle(.plain)
         .disabled(isTogglingWatchlist)
+        .sensoryFeedback(.success, trigger: isWatchlisted)
     }
 
     @MainActor func toggleWatchlist() async {
@@ -1400,7 +1477,7 @@ struct MovieCardView: View {
     var posterView: some View {
         Group {
             if let urlStr = movie.posterUrl, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let img): img.resizable().scaledToFill()
                     default: posterPlaceholder
@@ -1836,13 +1913,10 @@ struct MKButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(LinearGradient(colors: [.mkAccent, .mkAccentAlt],
-                                       startPoint: .leading, endPoint: .trailing))
-            .foregroundColor(.mkOnAccent)
-            .clipShape(RoundedRectangle(cornerRadius: 15))
         }
         .disabled(isLoading)
-        .buttonStyle(ScaleButtonStyle())
+        .tint(.mkAccent)
+        .buttonStyle(.glassProminent)
     }
 }
 
@@ -2023,7 +2097,7 @@ struct YearFilterSheet: View {
 
 struct DetailSheet: View {
     let movie: CatalogItem
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var details: TitleDetails?
     @State private var isLoadingExtras = true
@@ -2140,7 +2214,7 @@ struct DetailSheet: View {
     var backdropSection: some View {
         Group {
             if let urlStr = details?.backdropUrl ?? movie.posterUrl, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let img):
                         ZStack {
@@ -2325,7 +2399,7 @@ struct CastCell: View {
             VStack(spacing: 5) {
                 Group {
                     if let urlStr = member.profileUrl, let url = URL(string: urlStr) {
-                        AsyncImage(url: url) { phase in
+                        CachedAsyncImage(url: url) { phase in
                             switch phase {
                             case .success(let img): img.resizable().scaledToFill()
                             default: placeholderPerson
@@ -2363,14 +2437,14 @@ struct CastCell: View {
 
 struct PersonMoviesSheet: View {
     let person: CastMember
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var items: [CatalogItem] = []
     @State private var isLoading = true
     @State private var errorMsg: String?
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.mkBackground.ignoresSafeArea()
                 content
@@ -2429,7 +2503,7 @@ private struct PersonMovieCell: View {
     let item: CatalogItem
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: URL(string: item.posterUrl ?? "")) { phase in
+            CachedAsyncImage(url: URL(string: item.posterUrl ?? "")) { phase in
                 switch phase {
                 case .success(let img): img.resizable().scaledToFill()
                 default:
@@ -2456,7 +2530,7 @@ private struct PersonMovieCell: View {
 
 struct SettingsView: View {
     enum Tab: String { case services, appearance, profile, watched, watchlistTab }
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .services
 
@@ -2469,11 +2543,11 @@ struct SettingsView: View {
                     Divider().overlay(Color.mkBorder)
                     Group {
                         switch tab {
-                        case .services:    ServicesTabView().environmentObject(app)
-                        case .appearance:  AppearanceTabView().environmentObject(app)
-                        case .profile:     ProfileTabView().environmentObject(app)
-                        case .watched:     WatchedOnlyTabView().environmentObject(app)
-                        case .watchlistTab: WatchlistOnlyTabView().environmentObject(app)
+                        case .services:    ServicesTabView().environment(app)
+                        case .appearance:  AppearanceTabView().environment(app)
+                        case .profile:     ProfileTabView().environment(app)
+                        case .watched:     WatchedOnlyTabView().environment(app)
+                        case .watchlistTab: WatchlistOnlyTabView().environment(app)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2518,7 +2592,7 @@ struct SettingsView: View {
 // MARK: Appearance Tab
 
 struct AppearanceTabView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -2588,7 +2662,7 @@ struct AppearanceTabView: View {
 // MARK: Services Tab
 
 struct ServicesTabView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @State private var isSaving = false
     @State private var savedMsg = ""
 
@@ -2698,7 +2772,7 @@ struct LanguageToggle: View {
 // MARK: Profile Tab
 
 struct ProfileTabView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @State private var username = ""
     @State private var email = ""
     @State private var currentPassword = ""
@@ -2822,7 +2896,7 @@ struct ProfileTabView: View {
             } // end else
         }
         .task { await loadAccount() }
-        .onChange(of: avatarItem) { item in
+        .onChange(of: avatarItem) { _, item in
             Task { await loadAvatar(from: item) }
         }
         .fileImporter(
@@ -3035,7 +3109,7 @@ struct ProfileTabView: View {
 // MARK: Watched Tab
 
 struct WatchedOnlyTabView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @State private var items: [WatchedItem] = []
     @State private var isLoading = true
 
@@ -3106,7 +3180,7 @@ struct WatchedOnlyTabView: View {
 // MARK: Watchlist Tab
 
 struct WatchlistOnlyTabView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(AppState.self) private var app
     @State private var items: [WatchlistItem] = []
     @State private var isLoading = true
 
@@ -3178,37 +3252,12 @@ struct WatchlistOnlyTabView: View {
 
 #Preview {
     ContentView()
+        .environment(ThemeManager.shared)
 }
 
 // MARK: - View Helpers
 
 extension View {
-    @ViewBuilder
-    func scrollBounceBasedOnSize() -> some View {
-        #if os(iOS)
-        if #available(iOS 16.4, *) {
-            self.scrollBounceBehavior(.basedOnSize)
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
-    }
-
-    @ViewBuilder
-    func dismissesKeyboardOnScroll() -> some View {
-        #if os(iOS)
-        if #available(iOS 16.0, *) {
-            self.scrollDismissesKeyboard(.immediately)
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
-    }
-
     @ViewBuilder
     func disableAutocap() -> some View {
         #if os(iOS)
@@ -3224,43 +3273,16 @@ extension View {
 }
 
 struct GlassSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let radius: CGFloat
     let interactive: Bool
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .background {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(
-                        reduceTransparency
-                            ? AnyShapeStyle(Color.mkSurface.opacity(0.96))
-                            : AnyShapeStyle(.ultraThinMaterial)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: radius, style: .continuous)
-                            .fill(Color.white.opacity(interactive ? 0.035 : 0.025))
-                    }
-            }
-            .overlay {
-                if reduceTransparency {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(Color.mkBorder, lineWidth: 1)
-                } else {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.30),
-                                    Color.white.opacity(0.06)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if interactive {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content.glassEffect(.regular, in: shape)
+        }
     }
 }

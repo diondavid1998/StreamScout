@@ -44,4 +44,14 @@ final class StreamScoutTests: XCTestCase {
         XCTAssertEqual(app.selectedThemeId, AppTheme.defaultTheme.id)
         XCTAssertEqual(ThemeManager.shared.current.id, AppTheme.defaultTheme.id)
     }
+
+    func testClientErrorDescriptionUsesServerMessage() {
+        let error = APIError.clientError(400, "Validation failed")
+        XCTAssertEqual(error.errorDescription, "Validation failed")
+    }
+
+    func testClientErrorDescriptionFallsBackToStatusCode() {
+        let error = APIError.clientError(422, nil)
+        XCTAssertEqual(error.errorDescription, "Request failed (422).")
+    }
 }
