@@ -6,18 +6,19 @@
 //
 
 import SwiftUI
+import Observation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import UIKit
 
 @main
 struct StreamScoutApp: App {
-    @StateObject private var themeManager = ThemeManager.shared
+    @State private var themeManager = ThemeManager.shared
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(themeManager)
+                .environment(themeManager)
                 .preferredColorScheme(.dark)
         }
     }
@@ -265,9 +266,10 @@ struct AppTheme: Identifiable, Equatable {
     }
 }
 
-final class ThemeManager: ObservableObject {
+@Observable
+final class ThemeManager {
     static let shared = ThemeManager()
-    @Published private(set) var current: AppTheme = .defaultTheme
+    private(set) var current: AppTheme = .defaultTheme
 
     private init() {}
 
@@ -368,42 +370,124 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "tubi",        key: "tubi",        name: "Tubi",        logoAsset: "tubi",         accentColor: Color(red: 0.949, green: 0.318, blue: 0.071)),
 ]
 
+// MARK: - Image Cache
+
+@Observable
+@MainActor
+final class ImageCache {
+    static let shared = ImageCache()
+
+    private let imageCache = NSCache<NSString, UIImage>()
+    private let dataCache = NSCache<NSString, NSData>()
+    private var dataTasks: [String: Task<Data?, Never>] = [:]
+    private var imageTasks: [String: Task<UIImage?, Never>] = [:]
+
+    private init() {}
+
+    func cachedImage(for urlString: String) -> UIImage? {
+        imageCache.object(forKey: urlString as NSString)
+    }
+
+    func imageData(for urlString: String) async -> Data? {
+        let key = urlString as NSString
+        if let cached = dataCache.object(forKey: key) { return cached as Data }
+        if let task = dataTasks[urlString] { return await task.value }
+        guard let url = URL(string: urlString) else { return nil }
+
+        let task = Task<Data?, Never> {
+            await Task.detached(priority: .utility) {
+                guard let (data, response) = try? await URLSession.shared.data(from: url),
+                      let http = response as? HTTPURLResponse,
+                      (200...299).contains(http.statusCode) else { return nil }
+                return data
+            }.value
+        }
+
+        dataTasks[urlString] = task
+        let data = await task.value
+        dataTasks.removeValue(forKey: urlString)
+        if let data { dataCache.setObject(data as NSData, forKey: key) }
+        return data
+    }
+
+    func image(for urlString: String) async -> UIImage? {
+        let key = urlString as NSString
+        if let cached = imageCache.object(forKey: key) { return cached }
+        if let task = imageTasks[urlString] { return await task.value }
+
+        let task = Task<UIImage?, Never> {
+            guard let data = await self.imageData(for: urlString) else { return nil }
+            return await Task.detached(priority: .utility) {
+                guard let decoded = UIImage(data: data) else { return nil }
+                return decoded.preparingForDisplay() ?? decoded
+            }.value
+        }
+
+        imageTasks[urlString] = task
+        let image = await task.value
+        imageTasks.removeValue(forKey: urlString)
+        if let image { imageCache.setObject(image, forKey: key) }
+        return image
+    }
+}
+
+enum CachedAsyncImagePhase {
+    case empty
+    case success(Image)
+    case failure
+}
+
+struct CachedAsyncImage<Content: View>: View {
+    let url: URL?
+    @ViewBuilder let content: (CachedAsyncImagePhase) -> Content
+
+    @State private var phase: CachedAsyncImagePhase = .empty
+
+    var body: some View {
+        content(phase)
+            .task(id: url?.absoluteString) {
+                guard let url else {
+                    phase = .failure
+                    return
+                }
+                phase = .empty
+                if let image = await ImageCache.shared.image(for: url.absoluteString) {
+                    phase = .success(Image(uiImage: image))
+                } else {
+                    phase = .failure
+                }
+            }
+    }
+}
+
 // MARK: - Dominant Color Cache
 
 /// Extracts and caches the average/dominant color from poster images.
 /// Results are keyed by poster URL string and held for the lifetime of the session.
+@Observable
 @MainActor
-final class ColorCache: ObservableObject {
+final class ColorCache {
     static let shared = ColorCache()
     private init() {}
 
     private var cache: [String: Color] = [:]
     private var inFlight: [String: Task<Color?, Never>] = [:]
 
-    /// Returns the cached color for `urlString` if available, otherwise returns `nil`
-    /// and triggers a background fetch. Subscribe to the cache via `@ObservedObject`
-    /// or poll via `.task(id:)` to get the result when ready.
     func cachedColor(for urlString: String) -> Color? {
         cache[urlString]
     }
 
-    /// Fetches the dominant color for `urlString`, either from cache or by downloading
-    /// the image and running `CIAreaAverage`. Safe to call multiple times — in-flight
-    /// requests are deduplicated.
     func fetchColor(for urlString: String) async -> Color? {
         if let cached = cache[urlString] { return cached }
         if let task = inFlight[urlString] { return await task.value }
 
-        // Inherit @MainActor context so UIGraphicsImageRenderer runs on the main thread.
-        let task = Task<Color?, Never> { @MainActor in
-            guard !Task.isCancelled else { return nil }
-            guard let url = URL(string: urlString),
-                  let (data, _) = try? await URLSession.shared.data(from: url),
-                  !Task.isCancelled,
-                  let uiImage = UIImage(data: data),
-                  let color = Self.averageColor(of: uiImage) else { return nil }
-            return color
+        let task = Task<Color?, Never> {
+            guard let data = await ImageCache.shared.imageData(for: urlString) else { return nil }
+            return await Task.detached(priority: .utility) {
+                Self.averageColor(from: data)
+            }.value
         }
+
         inFlight[urlString] = task
         let color = await task.value
         inFlight.removeValue(forKey: urlString)
@@ -411,20 +495,23 @@ final class ColorCache: ObservableObject {
         return color
     }
 
-    /// Uses `CIAreaAverage` on a 16×16 downsampled version of the image to compute
-    /// a representative dominant color cheaply.
-    /// Must run on the main thread because `UIGraphicsImageRenderer` is a UIKit API.
-    @MainActor
-    private static func averageColor(of image: UIImage) -> Color? {
-        // Downsample to 16×16 to make CIAreaAverage fast
-        let targetSize = CGSize(width: 16, height: 16)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        let small = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+    private static func averageColor(from data: Data) -> Color? {
+        guard var image = CIImage(data: data), !image.extent.isEmpty else { return nil }
 
-        guard let ciImage = CIImage(image: small) else { return nil }
+        let maxDimension = max(image.extent.width, image.extent.height)
+        if maxDimension > 16 {
+            let scaleFilter = CIFilter.lanczosScaleTransform()
+            scaleFilter.inputImage = image
+            scaleFilter.scale = Float(16.0 / maxDimension)
+            scaleFilter.aspectRatio = 1
+            if let scaled = scaleFilter.outputImage {
+                image = scaled
+            }
+        }
+
         let filter = CIFilter.areaAverage()
-        filter.inputImage = ciImage
-        filter.extent = ciImage.extent
+        filter.inputImage = image
+        filter.extent = image.extent
         guard let output = filter.outputImage else { return nil }
 
         var bitmap = [UInt8](repeating: 0, count: 4)
@@ -438,12 +525,10 @@ final class ColorCache: ObservableObject {
             colorSpace: CGColorSpaceCreateDeviceRGB()
         )
 
-        // Boost saturation: pull the color toward a more vivid version
         let r = Double(bitmap[0]) / 255.0
         let g = Double(bitmap[1]) / 255.0
         let b = Double(bitmap[2]) / 255.0
 
-        // Simple saturation boost — shift each channel away from the average
         let avg = (r + g + b) / 3.0
         let boost = 1.6
         let br = min(1.0, max(0, avg + (r - avg) * boost))

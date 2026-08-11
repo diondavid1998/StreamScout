@@ -8,8 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		8A852EFE2F85DB4A0063D17E /* StreamScoutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */; };
-		8A852F002F85DB4A0063D17E /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFF2F85DB4A0063D17E /* Persistence.swift */; };
-		8A852F032F85DB4A0063D17E /* StreamScout.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F012F85DB4A0063D17E /* StreamScout.xcdatamodeld */; };
 		8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F042F85DB4A0063D17E /* ContentView.swift */; };
 		8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F612F85DB4A0063D17E /* APIModels.swift */; };
 		8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F062F85DB4C0063D17E /* Assets.xcassets */; };
@@ -39,8 +37,6 @@
 /* Begin PBXFileReference section */
 		8A852EFA2F85DB4A0063D17E /* StreamScout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamScout.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutApp.swift; sourceTree = "<group>"; };
-		8A852EFF2F85DB4A0063D17E /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
-		8A852F022F85DB4A0063D17E /* StreamScout.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamScout.xcdatamodel; sourceTree = "<group>"; };
 		8A852F042F85DB4A0063D17E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8A852F062F85DB4C0063D17E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8A852F082F85DB4C0063D17E /* StreamScout.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamScout.entitlements; sourceTree = "<group>"; };
@@ -102,12 +98,10 @@
 			isa = PBXGroup;
 			children = (
 				8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */,
-				8A852EFF2F85DB4A0063D17E /* Persistence.swift */,
 				8A852F042F85DB4A0063D17E /* ContentView.swift */,
 				8A852F612F85DB4A0063D17E /* APIModels.swift */,
 				8A852F062F85DB4C0063D17E /* Assets.xcassets */,
 				8A852F082F85DB4C0063D17E /* StreamScout.entitlements */,
-				8A852F012F85DB4A0063D17E /* StreamScout.xcdatamodeld */,
 				8A852F092F85DB4C0063D17E /* Preview Content */,
 			);
 			path = StreamScout;
@@ -269,10 +263,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				8A852EFE2F85DB4A0063D17E /* StreamScoutApp.swift in Sources */,
-				8A852F002F85DB4A0063D17E /* Persistence.swift in Sources */,
 				8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */,
 				8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */,
-				8A852F032F85DB4A0063D17E /* StreamScout.xcdatamodeld in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -432,7 +424,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamScout/Preview Content\"";
 				DEVELOPMENT_TEAM = 4DKL5S4CND;
@@ -449,11 +441,11 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 25.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.diondavid.streamscout;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -472,7 +464,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamScout/Preview Content\"";
 				DEVELOPMENT_TEAM = 4DKL5S4CND;
@@ -489,11 +481,11 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 25.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.diondavid.streamscout;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -512,10 +504,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 25.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diondavid.streamscout.StreamScoutTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -534,10 +526,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 25.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diondavid.streamscout.StreamScoutTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -555,10 +547,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 25.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diondavid.streamscout.StreamScoutUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -576,10 +568,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 25.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MACOSX_DEPLOYMENT_TARGET = 12.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.myApp.StreamScoutUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.diondavid.streamscout.StreamScoutUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -631,18 +623,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCVersionGroup section */
-		8A852F012F85DB4A0063D17E /* StreamScout.xcdatamodeld */ = {
-			isa = XCVersionGroup;
-			children = (
-				8A852F022F85DB4A0063D17E /* StreamScout.xcdatamodel */,
-			);
-			currentVersion = 8A852F022F85DB4A0063D17E /* StreamScout.xcdatamodel */;
-			path = StreamScout.xcdatamodeld;
-			sourceTree = "<group>";
-			versionGroupType = wrapper.xcdatamodel;
-		};
-/* End XCVersionGroup section */
 	};
 	rootObject = 8A852EF22F85DB4A0063D17E /* Project object */;
 }
