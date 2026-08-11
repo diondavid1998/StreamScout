@@ -495,7 +495,7 @@ final class ColorCache {
         return color
     }
 
-    private static func averageColor(from data: Data) -> Color? {
+    private nonisolated static func averageColor(from data: Data) -> Color? {
         guard var image = CIImage(data: data), !image.extent.isEmpty else { return nil }
 
         let maxDimension = max(image.extent.width, image.extent.height)
