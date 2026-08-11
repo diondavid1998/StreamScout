@@ -13,7 +13,7 @@ const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
 let writeQueue = Promise.resolve();
 const HYDRATION_BATCH_SIZE = 40;
-const HYDRATION_CONCURRENCY = 4;
+const HYDRATION_CONCURRENCY = 8;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -460,6 +460,7 @@ async function hydrateScopeRatings(db, scopeKey) {
              rating_rt   IS NULL OR
              rating_meta IS NULL
            )
+         ORDER BY popularity DESC
          LIMIT ?`,
         [scopeKey, HYDRATION_BATCH_SIZE]
       );

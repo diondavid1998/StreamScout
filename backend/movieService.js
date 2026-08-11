@@ -584,17 +584,36 @@ async function fetchTitlesByPerson(personId, platforms) {
   const { providerIds, providerMapById } = buildProviderSelection(platforms);
   if (!providerIds.length) return [];
 
-  const [movieResults, tvResults] = await Promise.all([
-    discoverTitles('movie', providerIds, 1, DEFAULT_REGION, { with_cast: String(personId) }),
-    discoverTitles('tv', providerIds, 1, DEFAULT_REGION, { with_cast: String(personId) }),
-  ]);
+  const today = new Date().toISOString().slice(0, 10);
 
-  const allItems = dedupeCatalog([
-    ...movieResults.map((item) => ({ ...item, media_type: 'movie' })),
-    ...tvResults.map((item) => ({ ...item, media_type: 'tv' })),
-  ]).slice(0, 24);
+  const personData = await fetchTmdb(`/person/${personId}/combined_credits`, {
+    language: 'en-US',
+  });
 
-  const enriched = await mapWithConcurrency(allItems, 4, async (item) => {
+  const allCredits = (personData.cast || []).filter((credit) => {
+    if (credit.media_type !== 'movie' && credit.media_type !== 'tv') return false;
+    if (!credit.poster_path) return false;
+    const releaseDate = credit.release_date || credit.first_air_date || '';
+    return releaseDate.length >= 10 && releaseDate.slice(0, 10) <= today;
+  });
+
+  // Deduplicate by media_type:id first, then by normalized title
+  const seenIds = new Set();
+  const seenTitles = new Set();
+  const uniqueCredits = allCredits.filter((credit) => {
+    const idKey = `${credit.media_type}:${credit.id}`;
+    const titleKey = (credit.title || credit.name || '').toLowerCase().trim();
+    if (seenIds.has(idKey) || (titleKey && seenTitles.has(titleKey))) return false;
+    seenIds.add(idKey);
+    if (titleKey) seenTitles.add(titleKey);
+    return true;
+  });
+
+  const topCredits = uniqueCredits
+    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+    .slice(0, 24);
+
+  const enriched = await mapWithConcurrency(topCredits, 4, async (item) => {
     try {
       const details = await fetchTmdb(`/${item.media_type}/${item.id}`, {
         append_to_response: 'watch/providers',
