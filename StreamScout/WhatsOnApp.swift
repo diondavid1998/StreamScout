@@ -12,7 +12,7 @@ import CoreImage.CIFilterBuiltins
 import UIKit
 
 @main
-struct StreamScoutApp: App {
+struct WhatsOnApp: App {
     @State private var themeManager = ThemeManager.shared
 
     var body: some Scene {
@@ -27,8 +27,8 @@ struct StreamScoutApp: App {
 // MARK: - Brand
 
 enum Brand {
-    static let wordmark = "STREAM SCOUT"
-    static let displayName = "Stream Scout"
+    static let wordmark = "WHATSON"
+    static let displayName = "WhatsOn"
 }
 
 // MARK: - Themes

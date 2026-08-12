@@ -13,7 +13,7 @@ import Security
 @MainActor
 enum KeychainStore {
     private static var service: String {
-        Bundle.main.bundleIdentifier ?? "com.diondavid.streamscout"
+        Bundle.main.bundleIdentifier ?? "com.diondavid.whatson"
     }
 
     private static let account = "auth_token"
@@ -201,8 +201,8 @@ struct ContentView: View {
 
 // MARK: - Loading
 
-/// Reusable inline StreamScout brand header (logo + name side by side)
-struct StreamScoutTitle: View {
+/// Reusable inline WhatsOn brand header (logo + name side by side)
+struct WhatsOnTitle: View {
     var size: CGFloat = 28
     var logoSize: CGFloat = 32
 
@@ -224,7 +224,7 @@ struct StreamScoutTitle: View {
 struct LoadingView: View {
     var body: some View {
         VStack(spacing: 16) {
-            StreamScoutTitle(size: 30, logoSize: 34)
+            WhatsOnTitle(size: 30, logoSize: 34)
             ProgressView().tint(.mkAccent).padding(.top, 8)
         }
     }
@@ -257,7 +257,7 @@ struct AuthView: View {
             VStack(spacing: 0) {
                 // Hero
                 VStack(spacing: 10) {
-                    StreamScoutTitle(size: 34, logoSize: 40)
+                    WhatsOnTitle(size: 34, logoSize: 40)
                         .padding(.top, 60)
                     Text("Your streaming catalog, unified.")
                         .font(.subheadline)
@@ -2623,7 +2623,7 @@ struct AppearanceTabView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Appearance").font(.title3).bold().foregroundColor(.mkText).padding(.top, 4)
-                Text("Choose a color theme for StreamScout.")
+                Text("Choose a color theme for WhatsOn.")
                     .font(.subheadline)
                     .foregroundColor(.mkMuted)
 

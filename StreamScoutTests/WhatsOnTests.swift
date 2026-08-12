@@ -6,12 +6,12 @@
 //
 
 import XCTest
-@testable import StreamScout
+@testable import WhatsOn
 
 @MainActor
-final class StreamScoutTests: XCTestCase {
+final class WhatsOnTests: XCTestCase {
     private var defaults: UserDefaults!
-    private let suiteName = "StreamScoutTests.ThemePrefs"
+    private let suiteName = "WhatsOnTests.ThemePrefs"
 
     override func setUpWithError() throws {
         defaults = UserDefaults(suiteName: suiteName)

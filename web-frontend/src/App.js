@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenTomatoesType } from './utils';
-import streamscoutLogo from './logos/streamscout.png';
+import whatsOnLogo from './logos/whatson.png';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend-production.up.railway.app';
 const AUTH_TOKEN_KEY = 'streamScout.authToken';
@@ -1632,7 +1632,7 @@ function App() {
       <div style={styles.container} className="mk-container">
         <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth">
           <div style={styles.authMeta}>
-            <img src={streamscoutLogo} alt="StreamScout" style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 12 }} />
+            <img src={whatsOnLogo} alt="WhatsOn" style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 12 }} />
             <h1 style={styles.title}>Restoring session</h1>
             <p style={styles.subtitle}>Checking your saved sign-in state…</p>
           </div>
@@ -1651,7 +1651,7 @@ function App() {
           <div style={styles.shell} className="mk-shell">
             <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
               <div style={styles.authMeta}>
-                <img src={streamscoutLogo} alt="StreamScout" style={{ width: 48, height: 48, borderRadius: 12, marginBottom: 10 }} />
+                <img src={whatsOnLogo} alt="WhatsOn" style={{ width: 48, height: 48, borderRadius: 12, marginBottom: 10 }} />
                 <h1 style={styles.title}>Reset Password</h1>
                 <p style={styles.subtitle}>Enter the email address on your account. We'll send a 6-digit code.</p>
               </div>
@@ -1680,7 +1680,7 @@ function App() {
           <div style={styles.shell} className="mk-shell">
             <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
               <div style={styles.authMeta}>
-                <img src={streamscoutLogo} alt="StreamScout" style={{ width: 48, height: 48, borderRadius: 12, marginBottom: 10 }} />
+                <img src={whatsOnLogo} alt="WhatsOn" style={{ width: 48, height: 48, borderRadius: 12, marginBottom: 10 }} />
                 <h1 style={styles.title}>Enter Code</h1>
                 <p style={styles.subtitle}>Enter the 6-digit code sent to <strong>{resetEmail}</strong> and choose a new password.</p>
               </div>
@@ -1713,8 +1713,8 @@ function App() {
         <div style={styles.shell} className="mk-shell">
           <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
             <div style={styles.authMeta}>
-              <img src={streamscoutLogo} alt="StreamScout" style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 12 }} />
-              <div style={styles.eyebrow}>StreamScout</div>
+              <img src={whatsOnLogo} alt="WhatsOn" style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 12 }} />
+              <div style={styles.eyebrow}>WhatsOn</div>
               <h1 style={styles.title}>{isRegister ? 'Create your account' : 'Sign in'}</h1>
               <p style={styles.subtitle}>
                 {isRegister
@@ -1793,8 +1793,8 @@ function App() {
             <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <img src={streamscoutLogo} alt="StreamScout" style={{ width: 36, height: 36, borderRadius: 9 }} />
-                  <div style={styles.eyebrow}>StreamScout</div>
+                  <img src={whatsOnLogo} alt="WhatsOn" style={{ width: 36, height: 36, borderRadius: 9 }} />
+                  <div style={styles.eyebrow}>WhatsOn</div>
                 </div>
                 <h1 style={styles.title}>{isFirstSetup ? 'Choose your platforms' : 'Settings'}</h1>
                 <p style={styles.subtitle}>Signed in as <strong>{username || 'your account'}</strong></p>
@@ -2034,10 +2034,10 @@ function App() {
             <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                  <img src={streamscoutLogo} alt="StreamScout" style={{ width: 32, height: 32, borderRadius: 8 }} />
+                  <img src={whatsOnLogo} alt="WhatsOn" style={{ width: 32, height: 32, borderRadius: 8 }} />
                   <div style={styles.eyebrow}>🎬 Catalog</div>
                 </div>
-                <h1 style={styles.title}>StreamScout</h1>
+                <h1 style={styles.title}>WhatsOn</h1>
                 <p style={styles.subtitle}>Live movies &amp; TV from your selected streaming services.</p>
               </div>
               <div style={styles.topActions} className="top-actions-wrap">
