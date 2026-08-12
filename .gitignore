@@ -24,6 +24,6 @@ yarn-debug.log*
 
 # iOS build artifacts
 StreamScout/build/
-StreamScout.xcodeproj/xcuserdata/
+WhatsOn.xcodeproj/xcuserdata/
 *.xcuserstate
 DerivedData/
