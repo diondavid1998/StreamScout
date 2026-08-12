@@ -1,6 +1,6 @@
 //
-//  StreamScoreApp.swift
-//  StreamScore
+//  WhatsOnApp.swift
+//  WhatsOn
 //
 //  Created by Dion David on 4/7/26.
 //

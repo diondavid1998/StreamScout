@@ -107,7 +107,7 @@
 				8A852F082F85DB4C0063D17E /* WhatsOn.entitlements */,
 				8A852F092F85DB4C0063D17E /* Preview Content */,
 			);
-			path = StreamScout;
+			path = WhatsOn;
 			sourceTree = "<group>";
 		};
 		8A852F092F85DB4C0063D17E /* Preview Content */ = {
@@ -123,7 +123,7 @@
 			children = (
 				8A852F142F85DB4C0063D17E /* WhatsOnTests.swift */,
 			);
-			path = StreamScoutTests;
+			path = WhatsOnTests;
 			sourceTree = "<group>";
 		};
 		8A852F1D2F85DB4C0063D17E /* WhatsOnUITests */ = {
@@ -132,7 +132,7 @@
 				8A852F1E2F85DB4C0063D17E /* WhatsOnUITests.swift */,
 				8A852F202F85DB4C0063D17E /* WhatsOnUITestsLaunchTests.swift */,
 			);
-			path = StreamScoutUITests;
+			path = WhatsOnUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -425,12 +425,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = StreamScout/WhatsOn.entitlements;
+				CODE_SIGN_ENTITLEMENTS = WhatsOn/WhatsOn.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_ASSET_PATHS = "\"StreamScout/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"WhatsOn/Preview Content\"";
 				DEVELOPMENT_TEAM = 4DKL5S4CND;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -465,12 +465,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = StreamScout/WhatsOn.entitlements;
+				CODE_SIGN_ENTITLEMENTS = WhatsOn/WhatsOn.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_ASSET_PATHS = "\"StreamScout/Preview Content\"";
+				DEVELOPMENT_ASSET_PATHS = "\"WhatsOn/Preview Content\"";
 				DEVELOPMENT_TEAM = 4DKL5S4CND;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;

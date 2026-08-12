@@ -1,6 +1,6 @@
 //
-//  StreamScoreTests.swift
-//  StreamScoreTests
+//  WhatsOnTests.swift
+//  WhatsOnTests
 //
 //  Created by Dion David on 4/7/26.
 //

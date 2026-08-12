@@ -178,8 +178,8 @@ describe('Auth page', () => {
 
 describe('Logged-in catalog view', () => {
   function setupLoggedInSession() {
-    localStorage.setItem('streamScout.authToken', 'mock-jwt');
-    localStorage.setItem('streamScout.username', 'testuser');
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
   }
 
   /**

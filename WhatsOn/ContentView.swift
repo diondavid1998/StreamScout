@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  StreamScore
+//  WhatsOn
 //
 //  Created by Dion David on 4/7/26.
 //
@@ -208,7 +208,7 @@ struct WhatsOnTitle: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image("StreamScoreLogo")
+            Image("WhatsOnLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: logoSize, height: logoSize)
@@ -522,7 +522,7 @@ struct PlatformsView: View {
                                     .multilineTextAlignment(.center)
                             }
                             HStack(spacing: 5) {
-                                Image("StreamScoreLogo")
+                                Image("WhatsOnLogo")
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: 16, height: 16)

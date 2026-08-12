@@ -4,9 +4,26 @@ import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenToma
 import whatsOnLogo from './logos/whatson.png';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend-production.up.railway.app';
-const AUTH_TOKEN_KEY = 'streamScout.authToken';
-const AUTH_USERNAME_KEY = 'streamScout.username';
-const BYPASS_MODE_KEY = 'streamScout.bypassMode';
+const AUTH_TOKEN_KEY = 'whatsOn.authToken';
+const AUTH_USERNAME_KEY = 'whatsOn.username';
+const BYPASS_MODE_KEY = 'whatsOn.bypassMode';
+
+// Migrate legacy storage keys written by the old StreamScout branding.
+// Runs once on module load; safe to call multiple times (no-op if already migrated).
+(function migrateStorageKeys() {
+  const legacyToNew = {
+    'streamScout.authToken': AUTH_TOKEN_KEY,
+    'streamScout.username': AUTH_USERNAME_KEY,
+    'streamScout.bypassMode': BYPASS_MODE_KEY,
+  };
+  Object.entries(legacyToNew).forEach(([oldKey, newKey]) => {
+    const value = localStorage.getItem(oldKey);
+    if (value !== null) {
+      localStorage.setItem(newKey, value);
+      localStorage.removeItem(oldKey);
+    }
+  });
+})();
 const PAGE_SIZE = 24;
 const YEAR_RANGE_MIN = 1950;
 const YEAR_RANGE_MAX = new Date().getFullYear();
