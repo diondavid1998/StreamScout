@@ -987,16 +987,11 @@ struct CatalogView: View {
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .background {
-                        if isSelected {
-                            Capsule()
-                                .glassEffect(
-                                    .regular.tint(Color.mkAccent).interactive(),
-                                    in: Capsule()
-                                )
-                                .glassEffectID(tab.id, in: tabGlass)
-                        }
-                    }
+                    .glassEffect(
+                        isSelected ? .regular.tint(Color.mkAccent).interactive() : .clear,
+                        in: Capsule()
+                    )
+                    .glassEffectID(tab.id, in: tabGlass)
                 }
             }
         }
@@ -1686,6 +1681,7 @@ struct GenrePickerSheet: View {
     let onApply: () -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    private let genreAccent = Color(red: 0.56, green: 0.38, blue: 1.0)
 
     var body: some View {
         NavigationView {
@@ -1718,7 +1714,7 @@ struct GenrePickerSheet: View {
                                             .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
                                             .glassEffect(
                                                 isOn
-                                                    ? .regular.tint(Color(red: 0.56, green: 0.38, blue: 1.0)).interactive()
+                                                    ? .regular.tint(genreAccent).interactive()
                                                     : .regular.interactive(),
                                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                             )
@@ -2576,18 +2572,16 @@ struct SettingsView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .background {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .glassEffect(.regular.tint(.mkAccent).interactive(), in: .rect(cornerRadius: 12))
-                                .glassEffectID(t.rawValue, in: tabGlass)
-                        }
-                    }
+                    .glassEffect(
+                        isSelected ? .regular.tint(.mkAccent).interactive() : .clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .glassEffectID(t.rawValue, in: tabGlass)
                 }
             }
         }
         .padding(4)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
