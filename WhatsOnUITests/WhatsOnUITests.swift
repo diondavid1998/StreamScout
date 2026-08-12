@@ -1,13 +1,13 @@
 //
-//  StreamScoreUITests.swift
-//  StreamScoreUITests
+//  WhatsOnUITests.swift
+//  WhatsOnUITests
 //
 //  Created by Dion David on 4/7/26.
 //
 
 import XCTest
 
-final class StreamScoreUITests: XCTestCase {
+final class WhatsOnUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

@@ -1,13 +1,13 @@
 //
-//  StreamScoreUITestsLaunchTests.swift
-//  StreamScoreUITests
+//  WhatsOnUITestsLaunchTests.swift
+//  WhatsOnUITests
 //
 //  Created by Dion David on 4/7/26.
 //
 
 import XCTest
 
-final class StreamScoreUITestsLaunchTests: XCTestCase {
+final class WhatsOnUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

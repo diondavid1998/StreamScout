@@ -1,4 +1,4 @@
-# 🎬 StreamScore
+# 🎬 WhatsOn
 
 A full-stack streaming catalog app that lets you pick your streaming services and browse movies & TV shows with aggregated ratings from IMDb, Rotten Tomatoes, Metacritic, and TMDb — all in one place.
 
@@ -60,18 +60,18 @@ Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on *
 
 ## 📱 Install on iPhone (PWA)
 
-StreamScore is a Progressive Web App — you can add it to your iPhone Home Screen and it will run like a native app (full screen, no browser chrome).
+WhatsOn is a Progressive Web App — you can add it to your iPhone Home Screen and it will run like a native app (full screen, no browser chrome).
 
 **Requirements:** iPhone running iOS 16.4 or later, Safari browser.
 
 **Steps:**
 
 1. Open **Safari** on your iPhone (must be Safari — Chrome/Firefox won't show the install option)
-2. Navigate to your StreamScore Netlify URL — e.g. **`https://your-site-name.netlify.app`** (replace with the URL you got after deploying above)
+2. Navigate to your WhatsOn Netlify URL — e.g. **`https://your-site-name.netlify.app`** (replace with the URL you got after deploying above)
 3. Tap the **Share** button (the box with an arrow pointing up) in the bottom toolbar
 4. Scroll down in the share sheet and tap **"Add to Home Screen"**
-5. Edit the name if you like (it defaults to "StreamScore"), then tap **Add**
-6. The StreamScore icon will appear on your Home Screen — tap it to launch
+5. Edit the name if you like (it defaults to "WhatsOn"), then tap **Add**
+6. The WhatsOn icon will appear on your Home Screen — tap it to launch
 
 > ℹ️ The app runs in standalone mode (no Safari address bar), caches content for offline use, and behaves like a native app.
 
@@ -119,7 +119,7 @@ WhatsOn/
 │   │   └── logos/        # Rating & platform logo assets
 │   └── package.json
 ├── logo/                 # Source logo assets
-├── WhatsOn/          # iOS Swift app (displays as "StreamScore")
+├── WhatsOn/          # iOS Swift app
 ├── WhatsOn.xcodeproj/
 └── README.md
 ```
