@@ -1,5 +1,19 @@
 # StreamScout.icon — Liquid Glass App Icon
 
+> ⚠️ **IMPORTANT — Build setting prerequisite**
+>
+> `ASSETCATALOG_COMPILER_APPICON_NAME` **must remain set to `AppIcon`** in
+> `StreamScout.xcodeproj/project.pbxproj` until you have completed the Icon Composer
+> workflow described below. Do **not** change it to `StreamScout` until you have:
+> 1. Opened `StreamScout.icon` in Icon Composer,
+> 2. Populated every layer with real layered artwork, and
+> 3. Saved the bundle from Icon Composer (⌘S).
+>
+> That save is what produces a valid `actool` input. Switching the setting before that
+> step causes `actool` to fail with:
+> *"None of the input catalogs contained a matching … app icon set, or icon stack named
+> 'StreamScout'"*, which breaks the entire build.
+
 ## What this bundle is
 
 `StreamScout.icon` is an **Icon Composer** bundle for an iOS 26 Liquid Glass app icon.
@@ -53,14 +67,25 @@ with real layered artwork before the icon looks correct.
 
 ## How it is wired into the Xcode project
 
-`project.pbxproj` sets:
+`project.pbxproj` currently sets:
+
+```
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+```
+
+for all build configurations. This points `actool` at the existing `AppIcon.appiconset`,
+which is the working flat-PNG icon.
+
+**Once you have completed the Icon Composer workflow** (opened `StreamScout.icon`, replaced
+all placeholder layers with real layered artwork, and saved), change the build setting to:
 
 ```
 ASSETCATALOG_COMPILER_APPICON_NAME = StreamScout;
 ```
 
-for all build configurations. This tells the asset-catalog compiler to use
-`StreamScout.icon` (matched by basename) as the primary app icon for iOS 26+.
+in **both** the Debug and Release configurations in `project.pbxproj`. That change tells
+`actool` to use `StreamScout.icon` (matched by basename) as the primary app icon for
+iOS 26+ with Liquid Glass.
 
 **The existing `AppIcon.appiconset` is kept unchanged** as the fallback for devices running
 iOS 25 and earlier. No deletion is needed; the build system selects the appropriate icon
