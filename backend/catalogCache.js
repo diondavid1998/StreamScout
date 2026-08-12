@@ -159,6 +159,29 @@ async function ensureCatalogTables(db) {
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`
   );
 
+  // User watchlist — created here so hydration queries can always reference it.
+  // Also created in index.js and testHelpers.js; those are harmlessly idempotent.
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS watchlist_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      item_id TEXT NOT NULL,
+      media_type TEXT,
+      title TEXT,
+      poster_url TEXT,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, item_id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`
+  );
+
+  // Index to speed up the EXISTS subquery in hydrateScopeRatings.
+  await run(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_watchlist_items_item_id ON watchlist_items(item_id)`
+  );
+
   // Per-user streaming availability cache for watchlist items.
   // Keyed by (user_id, item_id) so it never pollutes the shared scope catalog.
   await run(
@@ -450,17 +473,21 @@ async function hydrateScopeRatings(db, scopeKey) {
 
       const rows = await all(
         db,
-        `SELECT scope_key, media_type, tmdb_id, imdb_id
-         FROM catalog_cache_entries
-         WHERE scope_key = ?
-           AND imdb_id IS NOT NULL
-           AND imdb_id != ''
+        `SELECT e.scope_key, e.media_type, e.tmdb_id, e.imdb_id,
+                EXISTS (
+                  SELECT 1 FROM watchlist_items w
+                  WHERE w.item_id = e.media_type || '-' || CAST(e.tmdb_id AS TEXT)
+                ) AS on_watchlist
+         FROM catalog_cache_entries e
+         WHERE e.scope_key = ?
+           AND e.imdb_id IS NOT NULL
+           AND e.imdb_id != ''
            AND (
-             rating_imdb IS NULL OR
-             rating_rt   IS NULL OR
-             rating_meta IS NULL
+             e.rating_imdb IS NULL OR
+             e.rating_rt   IS NULL OR
+             e.rating_meta IS NULL
            )
-         ORDER BY popularity DESC
+         ORDER BY on_watchlist DESC, e.popularity DESC
          LIMIT ?`,
         [scopeKey, HYDRATION_BATCH_SIZE]
       );
@@ -1056,14 +1083,50 @@ async function getStreamableWatchlistItems(db, userId, watchlistRows, platforms,
       originalLanguage: cached.original_language || null,
       genres: JSON.parse(cached.genres_json || '[]'),
       imdbId: cached.imdb_id || null,
-      ratings: { tmdb: cached.tmdb_rating || null, imdb: null, rottenTomatoes: null, metacritic: null },
-      sortableRatings: { tmdb: cached.tmdb_rating || 0, imdb: 0, rottenTomatoes: 0, metacritic: 0 },
+      _imdbIdForRatings: cached.imdb_id || null,
       availableOn: JSON.parse(cached.available_on_json || '[]'),
       availableOnKeys: JSON.parse(cached.available_on_keys_json || '[]'),
     });
   }
 
-  return result;
+  // Batch-resolve third-party ratings from the shared title_ratings cache.
+  const imdbIds = [...new Set(result.map((r) => r._imdbIdForRatings).filter(Boolean))];
+  const ratingsMap = new Map();
+  if (imdbIds.length > 0) {
+    const placeholders = imdbIds.map(() => '?').join(', ');
+    const ratingRows = await all(
+      db,
+      `SELECT imdb_id, rating_imdb, rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num
+       FROM title_ratings
+       WHERE imdb_id IN (${placeholders})`,
+      imdbIds
+    );
+    for (const rr of ratingRows) {
+      ratingsMap.set(rr.imdb_id, rr);
+    }
+  }
+
+  return result.map(({ _imdbIdForRatings, ...item }) => {
+    const tr = _imdbIdForRatings ? ratingsMap.get(_imdbIdForRatings) : null;
+    const imdbVal = (tr?.rating_imdb   && tr.rating_imdb   !== '') ? tr.rating_imdb   : null;
+    const rtVal   = (tr?.rating_rt     && tr.rating_rt     !== '') ? tr.rating_rt     : null;
+    const metaVal = (tr?.rating_meta   && tr.rating_meta   !== '') ? tr.rating_meta   : null;
+    return {
+      ...item,
+      ratings: {
+        tmdb: item.tmdbRating || null,
+        imdb: imdbVal,
+        rottenTomatoes: rtVal,
+        metacritic: metaVal,
+      },
+      sortableRatings: {
+        tmdb: item.tmdbRating || 0,
+        imdb: tr?.rating_imdb_num ?? 0,
+        rottenTomatoes: tr?.rating_rt_num ?? 0,
+        metacritic: tr?.rating_meta_num ?? 0,
+      },
+    };
+  });
 }
 
 module.exports = {
@@ -1079,4 +1142,5 @@ module.exports = {
   buildScopeKey,
   mapWithConcurrency,
   isRateLimitError,
+  hydrateScopeRatings,
 };
