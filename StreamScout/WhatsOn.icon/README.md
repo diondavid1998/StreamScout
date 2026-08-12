@@ -1,4 +1,4 @@
-# StreamScout.icon — Liquid Glass App Icon
+# WhatsOn.icon — Liquid Glass App Icon
 
 > ⛔ **BUILD SETTING WARNING**
 >
@@ -10,15 +10,15 @@
 > will reject it and the build will fail with:
 >
 > ```
-> None of the input catalogs contained a matching … app icon set, or icon stack named "StreamScout".
+> None of the input catalogs contained a matching … app icon set, or icon stack named "WhatsOn".
 > ```
 >
-> **Only switch the setting to `StreamScout` after completing the Icon Composer workflow
+> **Only switch the setting to `WhatsOn` after completing the Icon Composer workflow
 > described below and confirming the build succeeds locally.**
 
 ## What this bundle is
 
-`StreamScout.icon` is an **Icon Composer** bundle for an iOS 26 Liquid Glass app icon.
+`WhatsOn.icon` is an **Icon Composer** bundle for an iOS 26 Liquid Glass app icon.
 It contains a layered manifest (`icon.json`) and placeholder layer art that you must replace
 with real layered artwork before the icon looks correct.
 
@@ -31,15 +31,15 @@ with real layered artwork before the icon looks correct.
 
 ### Prerequisites
 - Xcode 26 or later (includes Icon Composer)
-- Layered source artwork for the StreamScout logo (Sketch / Figma / Illustrator / SVG).
+- Layered source artwork for the WhatsOn logo (Sketch / Figma / Illustrator / SVG).
   *The only asset in the repo today is a flattened PNG
-  (`Assets.xcassets/StreamScoreLogo.imageset/StreamScout.png`); new layered art is required
+  (`Assets.xcassets/StreamScoreLogo.imageset/WhatsOn.png`); new layered art is required
   for a quality result.*
 
 ### Step-by-step workflow
 
 1. **Open Icon Composer**
-   In Xcode 26: *File ▶ Open* → select `StreamScout/StreamScout.icon`.
+   In Xcode 26: *File ▶ Open* → select `WhatsOn/WhatsOn.icon`.
    Icon Composer will read `icon.json` and display the layer stack.
 
 2. **Replace placeholder layers**
@@ -48,7 +48,7 @@ with real layered artwork before the icon looks correct.
    |-------|-----------------|
    | **Background** (Default / Light) | A gradient or solid fill using the app's signature violet palette: `#8C7BFF` → `#5B8CFF` at 135 °. A 1024 × 1024 transparent PNG or a vector fill works best. |
    | **Background** (Dark) | Deeper version of the same palette (`#5B8CFF` → `#3B5BDB`). |
-   | **Foreground** | The StreamScout logo glyph with a transparent background (PNG or vector). Place it centred with adequate safe-area margin so it isn't clipped by the squircle mask. |
+   | **Foreground** | The WhatsOn logo glyph with a transparent background (PNG or vector). Place it centred with adequate safe-area margin so it isn't clipped by the squircle mask. |
 
 3. **Tune per-layer glass settings**
    Select each layer and adjust the *Specular*, *Refraction*, and *Shadow* sliders in the
@@ -83,10 +83,10 @@ Once you have completed the Icon Composer workflow below and saved a valid `.ico
 change the setting in **both** the Debug and Release configurations to:
 
 ```
-ASSETCATALOG_COMPILER_APPICON_NAME = StreamScout;
+ASSETCATALOG_COMPILER_APPICON_NAME = WhatsOn;
 ```
 
-That tells the compiler to use `StreamScout.icon` (matched by basename) as the primary
+That tells the compiler to use `WhatsOn.icon` (matched by basename) as the primary
 app icon for iOS 26+. **Do not make this change before Icon Composer has saved the bundle**
 — the hand-authored `icon.json` is not a valid `actool` input and the build will fail.
 
@@ -104,7 +104,7 @@ automatically based on the OS version.
 | `mkAccentAlt` / accentAlt | `#5B8CFF` | Background gradient end |
 | `mkBackground` | `#0A0B14` | Dark-mode canvas background |
 
-These values come from `AppTheme.signatureViolet` in `StreamScoutApp.swift`.
+These values come from `AppTheme.signatureViolet` in `WhatsOnApp.swift`.
 
 ---
 

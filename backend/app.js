@@ -42,12 +42,12 @@ async function sendResetEmail(toEmail, username, code) {
     return;
   }
   await transporter.sendMail({
-    from: `"StreamScout" <${process.env.EMAIL_FROM}>`,
+    from: `"WhatsOn" <${process.env.EMAIL_FROM}>`,
     to: toEmail,
-    subject: 'StreamScout — Password Reset Code',
+    subject: 'WhatsOn — Password Reset Code',
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:auto">
-        <h2 style="color:#e50914">StreamScout</h2>
+        <h2 style="color:#e50914">WhatsOn</h2>
         <p>Hi ${username},</p>
         <p>Your password reset code is:</p>
         <h1 style="letter-spacing:8px;font-size:40px;color:#e50914;text-align:center">${code}</h1>

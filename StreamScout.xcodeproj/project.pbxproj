@@ -7,15 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		8A852EFE2F85DB4A0063D17E /* StreamScoutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */; };
+		8A852EFE2F85DB4A0063D17E /* WhatsOnApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */; };
 		8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F042F85DB4A0063D17E /* ContentView.swift */; };
 		8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F612F85DB4A0063D17E /* APIModels.swift */; };
 		8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F062F85DB4C0063D17E /* Assets.xcassets */; };
-		AA852F012F85DB4C0063D17E /* StreamScout.icon in Resources */ = {isa = PBXBuildFile; fileRef = AA852F002F85DB4C0063D17E /* StreamScout.icon */; };
+		AA852F012F85DB4C0063D17E /* WhatsOn.icon in Resources */ = {isa = PBXBuildFile; fileRef = AA852F002F85DB4C0063D17E /* WhatsOn.icon */; };
 		8A852F0B2F85DB4C0063D17E /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F0A2F85DB4C0063D17E /* Preview Assets.xcassets */; };
-		8A852F152F85DB4C0063D17E /* StreamScoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */; };
-		8A852F1F2F85DB4C0063D17E /* StreamScoutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */; };
-		8A852F212F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */; };
+		8A852F152F85DB4C0063D17E /* WhatsOnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F142F85DB4C0063D17E /* WhatsOnTests.swift */; };
+		8A852F1F2F85DB4C0063D17E /* WhatsOnUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F1E2F85DB4C0063D17E /* WhatsOnUITests.swift */; };
+		8A852F212F85DB4C0063D17E /* WhatsOnUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F202F85DB4C0063D17E /* WhatsOnUITestsLaunchTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,31 +24,31 @@
 			containerPortal = 8A852EF22F85DB4A0063D17E /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 8A852EF92F85DB4A0063D17E;
-			remoteInfo = StreamScout;
+			remoteInfo = WhatsOn;
 		};
 		8A852F1B2F85DB4C0063D17E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 8A852EF22F85DB4A0063D17E /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 8A852EF92F85DB4A0063D17E;
-			remoteInfo = StreamScout;
+			remoteInfo = WhatsOn;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		8A852EFA2F85DB4A0063D17E /* StreamScout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamScout.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutApp.swift; sourceTree = "<group>"; };
+		8A852EFA2F85DB4A0063D17E /* WhatsOn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhatsOn.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsOnApp.swift; sourceTree = "<group>"; };
 		8A852F042F85DB4A0063D17E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8A852F062F85DB4C0063D17E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		8A852F082F85DB4C0063D17E /* StreamScout.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamScout.entitlements; sourceTree = "<group>"; };
+		8A852F082F85DB4C0063D17E /* WhatsOn.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhatsOn.entitlements; sourceTree = "<group>"; };
 		8A852F0A2F85DB4C0063D17E /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		8A852F102F85DB4C0063D17E /* StreamScoutTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreamScoutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutTests.swift; sourceTree = "<group>"; };
-		8A852F1A2F85DB4C0063D17E /* StreamScoutUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreamScoutUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutUITests.swift; sourceTree = "<group>"; };
-		8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		8A852F102F85DB4C0063D17E /* WhatsOnTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhatsOnTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A852F142F85DB4C0063D17E /* WhatsOnTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsOnTests.swift; sourceTree = "<group>"; };
+		8A852F1A2F85DB4C0063D17E /* WhatsOnUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhatsOnUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A852F1E2F85DB4C0063D17E /* WhatsOnUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsOnUITests.swift; sourceTree = "<group>"; };
+		8A852F202F85DB4C0063D17E /* WhatsOnUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsOnUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		8A852F612F85DB4A0063D17E /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
-		AA852F002F85DB4C0063D17E /* StreamScout.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StreamScout.icon; sourceTree = "<group>"; };
+		AA852F002F85DB4C0063D17E /* WhatsOn.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; path = WhatsOn.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,9 +79,9 @@
 		8A852EF12F85DB4A0063D17E = {
 			isa = PBXGroup;
 			children = (
-				8A852EFC2F85DB4A0063D17E /* StreamScout */,
-				8A852F132F85DB4C0063D17E /* StreamScoutTests */,
-				8A852F1D2F85DB4C0063D17E /* StreamScoutUITests */,
+				8A852EFC2F85DB4A0063D17E /* WhatsOn */,
+				8A852F132F85DB4C0063D17E /* WhatsOnTests */,
+				8A852F1D2F85DB4C0063D17E /* WhatsOnUITests */,
 				8A852EFB2F85DB4A0063D17E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -89,22 +89,22 @@
 		8A852EFB2F85DB4A0063D17E /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				8A852EFA2F85DB4A0063D17E /* StreamScout.app */,
-				8A852F102F85DB4C0063D17E /* StreamScoutTests.xctest */,
-				8A852F1A2F85DB4C0063D17E /* StreamScoutUITests.xctest */,
+				8A852EFA2F85DB4A0063D17E /* WhatsOn.app */,
+				8A852F102F85DB4C0063D17E /* WhatsOnTests.xctest */,
+				8A852F1A2F85DB4C0063D17E /* WhatsOnUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		8A852EFC2F85DB4A0063D17E /* StreamScout */ = {
+		8A852EFC2F85DB4A0063D17E /* WhatsOn */ = {
 			isa = PBXGroup;
 			children = (
-				8A852EFD2F85DB4A0063D17E /* StreamScoutApp.swift */,
+				8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */,
 				8A852F042F85DB4A0063D17E /* ContentView.swift */,
 				8A852F612F85DB4A0063D17E /* APIModels.swift */,
 				8A852F062F85DB4C0063D17E /* Assets.xcassets */,
-				AA852F002F85DB4C0063D17E /* StreamScout.icon */,
-				8A852F082F85DB4C0063D17E /* StreamScout.entitlements */,
+				AA852F002F85DB4C0063D17E /* WhatsOn.icon */,
+				8A852F082F85DB4C0063D17E /* WhatsOn.entitlements */,
 				8A852F092F85DB4C0063D17E /* Preview Content */,
 			);
 			path = StreamScout;
@@ -118,19 +118,19 @@
 			path = "Preview Content";
 			sourceTree = "<group>";
 		};
-		8A852F132F85DB4C0063D17E /* StreamScoutTests */ = {
+		8A852F132F85DB4C0063D17E /* WhatsOnTests */ = {
 			isa = PBXGroup;
 			children = (
-				8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */,
+				8A852F142F85DB4C0063D17E /* WhatsOnTests.swift */,
 			);
 			path = StreamScoutTests;
 			sourceTree = "<group>";
 		};
-		8A852F1D2F85DB4C0063D17E /* StreamScoutUITests */ = {
+		8A852F1D2F85DB4C0063D17E /* WhatsOnUITests */ = {
 			isa = PBXGroup;
 			children = (
-				8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */,
-				8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */,
+				8A852F1E2F85DB4C0063D17E /* WhatsOnUITests.swift */,
+				8A852F202F85DB4C0063D17E /* WhatsOnUITestsLaunchTests.swift */,
 			);
 			path = StreamScoutUITests;
 			sourceTree = "<group>";
@@ -138,9 +138,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		8A852EF92F85DB4A0063D17E /* StreamScout */ = {
+		8A852EF92F85DB4A0063D17E /* WhatsOn */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScout" */;
+			buildConfigurationList = 8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "WhatsOn" */;
 			buildPhases = (
 				8A852EF62F85DB4A0063D17E /* Sources */,
 				8A852EF72F85DB4A0063D17E /* Frameworks */,
@@ -150,14 +150,14 @@
 			);
 			dependencies = (
 			);
-			name = StreamScout;
-			productName = StreamScout;
-			productReference = 8A852EFA2F85DB4A0063D17E /* StreamScout.app */;
+			name = WhatsOn;
+			productName = WhatsOn;
+			productReference = 8A852EFA2F85DB4A0063D17E /* WhatsOn.app */;
 			productType = "com.apple.product-type.application";
 		};
-		8A852F0F2F85DB4C0063D17E /* StreamScoutTests */ = {
+		8A852F0F2F85DB4C0063D17E /* WhatsOnTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutTests" */;
+			buildConfigurationList = 8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "WhatsOnTests" */;
 			buildPhases = (
 				8A852F0C2F85DB4C0063D17E /* Sources */,
 				8A852F0D2F85DB4C0063D17E /* Frameworks */,
@@ -168,14 +168,14 @@
 			dependencies = (
 				8A852F122F85DB4C0063D17E /* PBXTargetDependency */,
 			);
-			name = StreamScoutTests;
-			productName = StreamScoutTests;
-			productReference = 8A852F102F85DB4C0063D17E /* StreamScoutTests.xctest */;
+			name = WhatsOnTests;
+			productName = WhatsOnTests;
+			productReference = 8A852F102F85DB4C0063D17E /* WhatsOnTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		8A852F192F85DB4C0063D17E /* StreamScoutUITests */ = {
+		8A852F192F85DB4C0063D17E /* WhatsOnUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutUITests" */;
+			buildConfigurationList = 8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "WhatsOnUITests" */;
 			buildPhases = (
 				8A852F162F85DB4C0063D17E /* Sources */,
 				8A852F172F85DB4C0063D17E /* Frameworks */,
@@ -186,9 +186,9 @@
 			dependencies = (
 				8A852F1C2F85DB4C0063D17E /* PBXTargetDependency */,
 			);
-			name = StreamScoutUITests;
-			productName = StreamScoutUITests;
-			productReference = 8A852F1A2F85DB4C0063D17E /* StreamScoutUITests.xctest */;
+			name = WhatsOnUITests;
+			productName = WhatsOnUITests;
+			productReference = 8A852F1A2F85DB4C0063D17E /* WhatsOnUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -214,7 +214,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "StreamScout" */;
+			buildConfigurationList = 8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "WhatsOn" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -227,9 +227,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				8A852EF92F85DB4A0063D17E /* StreamScout */,
-				8A852F0F2F85DB4C0063D17E /* StreamScoutTests */,
-				8A852F192F85DB4C0063D17E /* StreamScoutUITests */,
+				8A852EF92F85DB4A0063D17E /* WhatsOn */,
+				8A852F0F2F85DB4C0063D17E /* WhatsOnTests */,
+				8A852F192F85DB4C0063D17E /* WhatsOnUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -241,7 +241,7 @@
 			files = (
 				8A852F0B2F85DB4C0063D17E /* Preview Assets.xcassets in Resources */,
 				8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */,
-				AA852F012F85DB4C0063D17E /* StreamScout.icon in Resources */,
+				AA852F012F85DB4C0063D17E /* WhatsOn.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,7 +266,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8A852EFE2F85DB4A0063D17E /* StreamScoutApp.swift in Sources */,
+				8A852EFE2F85DB4A0063D17E /* WhatsOnApp.swift in Sources */,
 				8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */,
 				8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */,
 			);
@@ -276,7 +276,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8A852F152F85DB4C0063D17E /* StreamScoutTests.swift in Sources */,
+				8A852F152F85DB4C0063D17E /* WhatsOnTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -284,8 +284,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8A852F212F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift in Sources */,
-				8A852F1F2F85DB4C0063D17E /* StreamScoutUITests.swift in Sources */,
+				8A852F212F85DB4C0063D17E /* WhatsOnUITestsLaunchTests.swift in Sources */,
+				8A852F1F2F85DB4C0063D17E /* WhatsOnUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -294,12 +294,12 @@
 /* Begin PBXTargetDependency section */
 		8A852F122F85DB4C0063D17E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 8A852EF92F85DB4A0063D17E /* StreamScout */;
+			target = 8A852EF92F85DB4A0063D17E /* WhatsOn */;
 			targetProxy = 8A852F112F85DB4C0063D17E /* PBXContainerItemProxy */;
 		};
 		8A852F1C2F85DB4C0063D17E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 8A852EF92F85DB4A0063D17E /* StreamScout */;
+			target = 8A852EF92F85DB4A0063D17E /* WhatsOn */;
 			targetProxy = 8A852F1B2F85DB4C0063D17E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -425,7 +425,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
+				CODE_SIGN_ENTITLEMENTS = StreamScout/WhatsOn.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
@@ -465,7 +465,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
+				CODE_SIGN_ENTITLEMENTS = StreamScout/WhatsOn.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
@@ -518,7 +518,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamScout.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreamScout";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhatsOn.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WhatsOn";
 			};
 			name = Debug;
 		};
@@ -540,7 +540,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamScout.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreamScout";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhatsOn.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WhatsOn";
 			};
 			name = Release;
 		};
@@ -561,7 +561,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = StreamScout;
+				TEST_TARGET_NAME = WhatsOn;
 			};
 			name = Debug;
 		};
@@ -582,14 +582,14 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = StreamScout;
+				TEST_TARGET_NAME = WhatsOn;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "StreamScout" */ = {
+		8A852EF52F85DB4A0063D17E /* Build configuration list for PBXProject "WhatsOn" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F222F85DB4C0063D17E /* Debug */,
@@ -598,7 +598,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScout" */ = {
+		8A852F242F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "WhatsOn" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F252F85DB4C0063D17E /* Debug */,
@@ -607,7 +607,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutTests" */ = {
+		8A852F272F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "WhatsOnTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F282F85DB4C0063D17E /* Debug */,
@@ -616,7 +616,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "StreamScoutUITests" */ = {
+		8A852F2A2F85DB4C0063D17E /* Build configuration list for PBXNativeTarget "WhatsOnUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				8A852F2B2F85DB4C0063D17E /* Debug */,
