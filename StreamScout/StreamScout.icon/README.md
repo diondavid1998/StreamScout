@@ -1,5 +1,21 @@
 # StreamScout.icon — Liquid Glass App Icon
 
+> ⛔ **BUILD SETTING WARNING**
+>
+> `ASSETCATALOG_COMPILER_APPICON_NAME` **must remain `AppIcon`** until this `.icon` bundle
+> has been opened in Icon Composer, populated with real layered artwork, and saved.
+>
+> `actool` only recognises a `.icon` bundle that Icon Composer itself generated and saved.
+> The hand-authored `icon.json` in this directory is a best-effort placeholder — `actool`
+> will reject it and the build will fail with:
+>
+> ```
+> None of the input catalogs contained a matching … app icon set, or icon stack named "StreamScout".
+> ```
+>
+> **Only switch the setting to `StreamScout` after completing the Icon Composer workflow
+> described below and confirming the build succeeds locally.**
+
 ## What this bundle is
 
 `StreamScout.icon` is an **Icon Composer** bundle for an iOS 26 Liquid Glass app icon.
@@ -53,14 +69,26 @@ with real layered artwork before the icon looks correct.
 
 ## How it is wired into the Xcode project
 
-`project.pbxproj` sets:
+`project.pbxproj` currently sets:
+
+```
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+```
+
+for all build configurations. This points the asset-catalog compiler at
+`Assets.xcassets/AppIcon.appiconset`, which contains the working flat icon and builds
+successfully today.
+
+Once you have completed the Icon Composer workflow below and saved a valid `.icon` bundle,
+change the setting in **both** the Debug and Release configurations to:
 
 ```
 ASSETCATALOG_COMPILER_APPICON_NAME = StreamScout;
 ```
 
-for all build configurations. This tells the asset-catalog compiler to use
-`StreamScout.icon` (matched by basename) as the primary app icon for iOS 26+.
+That tells the compiler to use `StreamScout.icon` (matched by basename) as the primary
+app icon for iOS 26+. **Do not make this change before Icon Composer has saved the bundle**
+— the hand-authored `icon.json` is not a valid `actool` input and the build will fail.
 
 **The existing `AppIcon.appiconset` is kept unchanged** as the fallback for devices running
 iOS 25 and earlier. No deletion is needed; the build system selects the appropriate icon
