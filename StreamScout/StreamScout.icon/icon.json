@@ -1,0 +1,45 @@
+{
+  "name" : "StreamScout",
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  },
+  "layers" : [
+    {
+      "name" : "Background",
+      "role" : "background",
+      "filename" : "Assets/Background.png",
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "light",
+          "filename" : "Assets/Background.png"
+        },
+        {
+          "appearance" : "luminosity",
+          "value" : "dark",
+          "filename" : "Assets/Background-Dark.png"
+        }
+      ],
+      "fill" : {
+        "type" : "gradient",
+        "colors" : [
+          { "r" : 0.549, "g" : 0.482, "b" : 1.0, "a" : 1.0 },
+          { "r" : 0.357, "g" : 0.549, "b" : 1.0, "a" : 1.0 }
+        ],
+        "angle" : 135
+      }
+    },
+    {
+      "name" : "Foreground",
+      "role" : "foreground",
+      "filename" : "Assets/Foreground.png"
+    }
+  ],
+  "variants" : [
+    { "appearance" : "default" },
+    { "appearance" : "dark" },
+    { "appearance" : "clear" },
+    { "appearance" : "tinted" }
+  ]
+}
