@@ -11,6 +11,7 @@
 		8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F042F85DB4A0063D17E /* ContentView.swift */; };
 		8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F612F85DB4A0063D17E /* APIModels.swift */; };
 		8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F062F85DB4C0063D17E /* Assets.xcassets */; };
+		AA852F012F85DB4C0063D17E /* StreamScout.icon in Resources */ = {isa = PBXBuildFile; fileRef = AA852F002F85DB4C0063D17E /* StreamScout.icon */; };
 		8A852F0B2F85DB4C0063D17E /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F0A2F85DB4C0063D17E /* Preview Assets.xcassets */; };
 		8A852F152F85DB4C0063D17E /* StreamScoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F142F85DB4C0063D17E /* StreamScoutTests.swift */; };
 		8A852F1F2F85DB4C0063D17E /* StreamScoutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */; };
@@ -47,6 +48,7 @@
 		8A852F1E2F85DB4C0063D17E /* StreamScoutUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutUITests.swift; sourceTree = "<group>"; };
 		8A852F202F85DB4C0063D17E /* StreamScoutUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamScoutUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		8A852F612F85DB4A0063D17E /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		AA852F002F85DB4C0063D17E /* StreamScout.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; path = StreamScout.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +103,7 @@
 				8A852F042F85DB4A0063D17E /* ContentView.swift */,
 				8A852F612F85DB4A0063D17E /* APIModels.swift */,
 				8A852F062F85DB4C0063D17E /* Assets.xcassets */,
+				AA852F002F85DB4C0063D17E /* StreamScout.icon */,
 				8A852F082F85DB4C0063D17E /* StreamScout.entitlements */,
 				8A852F092F85DB4C0063D17E /* Preview Content */,
 			);
@@ -238,6 +241,7 @@
 			files = (
 				8A852F0B2F85DB4C0063D17E /* Preview Assets.xcassets in Resources */,
 				8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */,
+				AA852F012F85DB4C0063D17E /* StreamScout.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -419,7 +423,7 @@
 		8A852F252F85DB4C0063D17E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = StreamScout;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
@@ -459,7 +463,7 @@
 		8A852F262F85DB4C0063D17E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = StreamScout;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreamScout/StreamScout.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
