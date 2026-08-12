@@ -27,7 +27,7 @@ struct WhatsOnApp: App {
 // MARK: - Brand
 
 enum Brand {
-    static let wordmark = "WHATSON"
+    static let wordmark = "WhatsOn"
     static let displayName = "WhatsOn"
 }
 
