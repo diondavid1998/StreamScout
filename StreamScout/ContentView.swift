@@ -672,12 +672,13 @@ struct PlatformTile: View {
         Button(action: onTap) {
             VStack(spacing: 6) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(isSelected ? platform.accentColor.opacity(0.18) : Color.mkSurface)
+                    Color.clear
                         .frame(width: 62, height: 62)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(isSelected ? platform.accentColor : Color.mkBorder, lineWidth: isSelected ? 1.8 : 1)
+                        .glassEffect(
+                            isSelected
+                                ? .regular.tint(platform.accentColor).interactive()
+                                : .regular.interactive(),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
 
                     Image(platform.logoAsset)
@@ -689,7 +690,7 @@ struct PlatformTile: View {
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(platform.accentColor)
+                            .foregroundColor(.mkOnAccent)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             .padding(4)
                     }
@@ -961,54 +962,36 @@ struct CatalogView: View {
     /// no full-width plate behind it, so nothing balloons the safe-area inset.
     var dockedTabBar: some View {
         GlassEffectContainer {
-            ZStack(alignment: .leading) {
-                // Active-pill background — lives directly inside GlassEffectContainer
-                // so morphing/merging with the outer bar glass is visible.
-                HStack(spacing: 3) {
-                    ForEach(MainTab.allCases) { tab in
-                        Color.clear
-                            .frame(height: Layout.tabItemHeight)
-                            .frame(minWidth: 56)
-                            .padding(.horizontal, mainTab == tab ? 16 : 8)
-                            .overlay {
-                                if mainTab == tab {
-                                    Capsule()
-                                        .glassEffect(
-                                            .regular.tint(Color.mkAccent).interactive(),
-                                            in: Capsule()
-                                        )
-                                        .glassEffectID("activeTab", in: tabGlass)
-                                }
-                            }
-                            .allowsHitTesting(false)
-                    }
-                }
-
-                // Tap layer — overlays the pill background with full hit areas.
-                HStack(spacing: 3) {
-                    ForEach(MainTab.allCases) { tab in
-                        Button {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                                mainTab = tab
-                            }
-                        } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: tab.systemImage)
-                                    .font(.system(size: 17, weight: .medium))
-                                if mainTab == tab {
-                                    Text(tab.label)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .fixedSize()
-                                }
-                            }
-                            .foregroundStyle(mainTab == tab ? Color.mkOnAccent : Color.mkMuted)
-                            .frame(height: Layout.tabItemHeight)
-                            .frame(minWidth: 56)
-                            .padding(.horizontal, mainTab == tab ? 16 : 8)
-                            .contentShape(Capsule())
+            HStack(spacing: 3) {
+                ForEach(MainTab.allCases) { tab in
+                    let isSelected = mainTab == tab
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                            mainTab = tab
                         }
-                        .buttonStyle(.plain)
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: tab.systemImage)
+                                .font(.system(size: 17, weight: .medium))
+                            if isSelected {
+                                Text(tab.label)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .fixedSize()
+                                    .transition(.opacity.combined(with: .blurReplace))
+                            }
+                        }
+                        .foregroundStyle(isSelected ? Color.mkOnAccent : Color.mkMuted)
+                        .frame(height: Layout.tabItemHeight)
+                        .frame(minWidth: 56)
+                        .padding(.horizontal, isSelected ? 16 : 8)
+                        .contentShape(Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .glassEffect(
+                        isSelected ? .regular.tint(Color.mkAccent).interactive() : .clear,
+                        in: Capsule()
+                    )
+                    .glassEffectID(tab.id, in: tabGlass)
                 }
             }
         }
@@ -1346,15 +1329,10 @@ struct MovieCardView: View {
                 infoColumn
             }
             .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(.ultraThinMaterial)
-                // Frosted-glass tint layer: dominant poster color when available,
-                // otherwise falls back to theme-based tint.
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(cardTint.opacity(dominantColor != nil ? 0.14 : 0.08))
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .glassEffect(
+                .regular.tint(cardTint.opacity(dominantColor != nil ? 0.14 : 0.08)).interactive(),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 18)
                     .stroke(
@@ -1397,7 +1375,8 @@ struct MovieCardView: View {
                         .symbolEffect(.bounce, value: isWatched)
                 }
             }
-            .background(Circle().fill(.ultraThinMaterial).padding(2))
+            .padding(4)
+            .glassEffect(.regular.interactive(), in: Circle())
             .padding(8)
         }
         .buttonStyle(.plain)
@@ -1702,6 +1681,7 @@ struct GenrePickerSheet: View {
     let onApply: () -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    private let genreAccent = Color(red: 0.56, green: 0.38, blue: 1.0)
 
     var body: some View {
         NavigationView {
@@ -1715,36 +1695,32 @@ struct GenrePickerSheet: View {
                             .padding(.horizontal, 20)
                             .padding(.top, 4)
 
-                        LazyVGrid(columns: columns, spacing: 10) {
-                            ForEach(CatalogView.allGenres, id: \.key) { genre in
-                                let isOn = selected.contains(genre.key)
-                                Button {
-                                    withAnimation(.spring(duration: 0.2)) {
-                                        if isOn { selected.remove(genre.key) }
-                                        else     { selected.insert(genre.key) }
+                        GlassEffectContainer {
+                            LazyVGrid(columns: columns, spacing: 10) {
+                                ForEach(CatalogView.allGenres, id: \.key) { genre in
+                                    let isOn = selected.contains(genre.key)
+                                    Button {
+                                        withAnimation(.spring(duration: 0.2)) {
+                                            if isOn { selected.remove(genre.key) }
+                                            else     { selected.insert(genre.key) }
+                                        }
+                                    } label: {
+                                        Text(genre.label)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .multilineTextAlignment(.center)
+                                            .lineLimit(2)
+                                            .minimumScaleFactor(0.8)
+                                            .frame(maxWidth: .infinity, minHeight: 48)
+                                            .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
+                                            .glassEffect(
+                                                isOn
+                                                    ? .regular.tint(genreAccent).interactive()
+                                                    : .regular.interactive(),
+                                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            )
                                     }
-                                } label: {
-                                    Text(genre.label)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .multilineTextAlignment(.center)
-                                        .lineLimit(2)
-                                        .minimumScaleFactor(0.8)
-                                        .frame(maxWidth: .infinity, minHeight: 48)
-                                        .foregroundColor(isOn ? .white : .mkMuted)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(isOn
-                                                    ? Color(red: 0.56, green: 0.38, blue: 1.0).opacity(0.28)
-                                                    : Color.mkSurface)
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(isOn
-                                                    ? Color(red: 0.56, green: 0.38, blue: 1.0).opacity(0.6)
-                                                    : Color.mkBorder, lineWidth: 1)
-                                        )
+                                    .buttonStyle(ScaleButtonStyle())
                                 }
-                                .buttonStyle(ScaleButtonStyle())
                             }
                         }
                         .padding(.horizontal, 16)
@@ -1810,35 +1786,31 @@ struct LanguagePickerSheet: View {
                             .padding(.horizontal, 20)
                             .padding(.top, 4)
 
-                        LazyVGrid(columns: columns, spacing: 10) {
-                            ForEach(displayLanguages) { lang in
-                                let isOn = selected.contains(lang.key)
-                                Button {
-                                    withAnimation(.spring(duration: 0.2)) {
-                                        if isOn { selected.remove(lang.key) }
-                                        else    { selected.insert(lang.key) }
+                        GlassEffectContainer {
+                            LazyVGrid(columns: columns, spacing: 10) {
+                                ForEach(displayLanguages) { lang in
+                                    let isOn = selected.contains(lang.key)
+                                    Button {
+                                        withAnimation(.spring(duration: 0.2)) {
+                                            if isOn { selected.remove(lang.key) }
+                                            else    { selected.insert(lang.key) }
+                                        }
+                                    } label: {
+                                        Text(lang.label)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .multilineTextAlignment(.center)
+                                            .lineLimit(2).minimumScaleFactor(0.8)
+                                            .frame(maxWidth: .infinity, minHeight: 48)
+                                            .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
+                                            .glassEffect(
+                                                isOn
+                                                    ? .regular.tint(.mkAccent).interactive()
+                                                    : .regular.interactive(),
+                                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            )
                                     }
-                                } label: {
-                                    Text(lang.label)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .multilineTextAlignment(.center)
-                                        .lineLimit(2).minimumScaleFactor(0.8)
-                                        .frame(maxWidth: .infinity, minHeight: 48)
-                                        .foregroundColor(isOn ? .white : .mkMuted)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(isOn
-                                                    ? Color.mkAccent.opacity(0.28)
-                                                    : Color.mkSurface)
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(isOn
-                                                    ? Color.mkAccent.opacity(0.6)
-                                                    : Color.mkBorder, lineWidth: 1)
-                                        )
+                                    .buttonStyle(ScaleButtonStyle())
                                 }
-                                .buttonStyle(ScaleButtonStyle())
                             }
                         }
                         .padding(.horizontal, 16)
@@ -2546,6 +2518,7 @@ struct SettingsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .services
+    @Namespace private var tabGlass
 
     var body: some View {
         NavigationStack {
@@ -2578,27 +2551,37 @@ struct SettingsView: View {
     }
 
     var tabPicker: some View {
-        HStack(spacing: 0) {
-            ForEach([(Tab.services, "play.rectangle.on.rectangle", "Services"),
-                     (Tab.appearance, "paintpalette", "Appearance"),
-                     (Tab.profile, "person.crop.circle", "Profile"),
-                     (Tab.watched, "checkmark.circle", "Watched"),
-                     (Tab.watchlistTab, "bookmark.circle", "Watchlist")], id: \.0.rawValue) { t, icon, label in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { tab = t }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: icon).font(.system(size: 16))
-                        Text(label).font(.system(size: 12, weight: .semibold))
+        GlassEffectContainer {
+            HStack(spacing: 4) {
+                ForEach([(Tab.services, "play.rectangle.on.rectangle", "Services"),
+                         (Tab.appearance, "paintpalette", "Appearance"),
+                         (Tab.profile, "person.crop.circle", "Profile"),
+                         (Tab.watched, "checkmark.circle", "Watched"),
+                         (Tab.watchlistTab, "bookmark.circle", "Watchlist")], id: \.0.rawValue) { t, icon, label in
+                    let isSelected = tab == t
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { tab = t }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: icon).font(.system(size: 16))
+                            Text(label).font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
-                    .foregroundColor(tab == t ? .mkAccent : .mkMuted)
-                    .frame(maxWidth: .infinity).padding(.vertical, 10)
-                    .background(tab == t ? Color.mkAccent.opacity(0.1) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .buttonStyle(.plain)
+                    .glassEffect(
+                        isSelected ? .regular.tint(.mkAccent).interactive() : .clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .glassEffectID(t.rawValue, in: tabGlass)
                 }
             }
         }
-        .background(Color.mkSurface).clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(4)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -2746,18 +2729,18 @@ struct PlatformToggle: View {
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10)
-                        .stroke(isSelected ? Color.mkAccent : Color.clear, lineWidth: 2))
+                        .stroke(isSelected ? Color.mkOnAccent.opacity(0.9) : Color.clear, lineWidth: 2))
                 Text(platform.name).font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isSelected ? .mkAccent : .mkMuted)
+                    .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity)
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 80)
-            .background(isSelected ? Color.mkAccent.opacity(0.1) : Color.mkSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(
-                isSelected ? Color.mkAccent.opacity(0.5) : Color.mkBorder, lineWidth: 1))
+            .glassEffect(
+                isSelected ? .regular.tint(.mkAccent).interactive() : .regular.interactive(),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
         }
         .buttonStyle(ScaleButtonStyle())
     }
@@ -2771,12 +2754,12 @@ struct LanguageToggle: View {
         Button(action: action) {
             Text(language.label)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(isSelected ? .mkAccent : .mkMuted)
+                .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(isSelected ? Color.mkAccent.opacity(0.12) : Color.mkSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(
-                    isSelected ? Color.mkAccent.opacity(0.5) : Color.mkBorder, lineWidth: 1))
+                .glassEffect(
+                    isSelected ? .regular.tint(.mkAccent).interactive() : .regular.interactive(),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
         }
         .buttonStyle(ScaleButtonStyle())
     }
