@@ -1026,18 +1026,21 @@ struct CatalogView: View {
                         icon: "theatermasks", active: !genreFilters.isEmpty
                     )
                 }
+                .buttonStyle(ScaleButtonStyle())
                 Button { showLanguagePicker = true } label: {
                     FilterChip(
                         label: languageFilters.isEmpty ? "Language" : "\(languageFilters.count) Lang\(languageFilters.count == 1 ? "" : "s")",
                         icon: "globe", active: !languageFilters.isEmpty
                     )
                 }
+                .buttonStyle(ScaleButtonStyle())
                 Button { showYearFilter = true } label: {
                     FilterChip(
                         label: (yearMin.isEmpty && yearMax.isEmpty) ? "Year" : "\(yearMin.isEmpty ? "…" : yearMin)–\(yearMax.isEmpty ? "…" : yearMax)",
                         icon: "calendar", active: !yearMin.isEmpty || !yearMax.isEmpty
                     )
                 }
+                .buttonStyle(ScaleButtonStyle())
                 if !app.watchedIds.isEmpty {
                     Button {
                         hideWatched.toggle(); page = 1; Task { await fetch() }
@@ -1047,6 +1050,7 @@ struct CatalogView: View {
                             icon: "eye.slash", active: hideWatched
                         )
                     }
+                    .buttonStyle(ScaleButtonStyle())
                 }
                 Button {
                     watchlistOnly.toggle(); page = 1; Task { await fetch() }
@@ -1056,6 +1060,7 @@ struct CatalogView: View {
                         icon: "bookmark.fill", active: watchlistOnly
                     )
                 }
+                .buttonStyle(ScaleButtonStyle())
                 if !app.selectedPlatforms.isEmpty {
                     HStack(spacing: 5) {
                         Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 10))
@@ -1604,12 +1609,13 @@ struct FilterChip: View {
             Text(label).font(.system(size: 13, weight: .medium))
             Image(systemName: "chevron.down").font(.system(size: 9))
         }
-        .foregroundColor(active ? .mkAccent : .mkMuted)
+        .foregroundColor(active ? .mkOnAccent : .mkMuted)
         .padding(.horizontal, 12).padding(.vertical, 8)
         .glassEffect(
-            active ? .regular.tint(Color.mkAccent).interactive() : .regular.interactive(),
+            active ? .regular.tint(Color.mkAccent) : .regular,
             in: Capsule()
         )
+        .contentShape(Capsule())
     }
 }
 
@@ -1714,8 +1720,8 @@ struct GenrePickerSheet: View {
                                             .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
                                             .glassEffect(
                                                 isOn
-                                                    ? .regular.tint(genreAccent).interactive()
-                                                    : .regular.interactive(),
+                                                    ? .regular.tint(genreAccent)
+                                                    : .regular,
                                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                             )
                                     }
@@ -1804,8 +1810,8 @@ struct LanguagePickerSheet: View {
                                             .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
                                             .glassEffect(
                                                 isOn
-                                                    ? .regular.tint(.mkAccent).interactive()
-                                                    : .regular.interactive(),
+                                                    ? .regular.tint(.mkAccent)
+                                                    : .regular,
                                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                             )
                                     }
@@ -1909,17 +1915,35 @@ struct IconButton: View {
     let icon: String
     var spinning: Bool = false
     let action: () -> Void
+    @State private var angle: Double = 0
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17))
                 .foregroundColor(.mkMuted)
+                .rotationEffect(.degrees(angle))
                 .frame(width: 36, height: 36)
-                .glassEffect(.regular.interactive(), in: Circle())
-                .rotationEffect(.degrees(spinning ? 360 : 0))
-                .animation(spinning ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: spinning)
+                .glassEffect(.regular, in: Circle())
+                .contentShape(Circle())
         }
         .buttonStyle(ScaleButtonStyle())
+        .onAppear {
+            if spinning {
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    angle = 360
+                }
+            }
+        }
+        .onChange(of: spinning) { _, nowSpinning in
+            if nowSpinning {
+                angle = 0
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    angle = 360
+                }
+            } else {
+                withAnimation(.default) { angle = 0 }
+            }
+        }
     }
 }
 
