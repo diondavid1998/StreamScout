@@ -942,7 +942,7 @@ struct CatalogView: View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("🎬 \(Brand.wordmark)")
-                    .font(.system(size: 11, weight: .semibold)).tracking(2.0)
+                    .font(.system(size: 11, weight: .semibold)).tracking(0.5)
                     .foregroundColor(.mkAccent)
                 Text(mainTab.title)
                     .font(.system(size: 20, weight: .bold)).foregroundColor(.mkText)
