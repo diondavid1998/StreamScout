@@ -1022,6 +1022,9 @@ function App() {
         });
         setWatchedIds((prev) => new Set([...prev, itemId]));
         setWatchlistItems((prev) => [{ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl, watchedAt: new Date().toISOString() }, ...prev]);
+        if (hideWatched) {
+          setMovies((prev) => prev.filter((m) => m.id !== itemId));
+        }
       } catch { /* silent */ }
     }
   };
@@ -1207,7 +1210,7 @@ function App() {
         query.set('watchlistOnly', 'true');
         if (selected.length) query.set('serviceFilters', selected.join(','));
       } else {
-        if (watchlistOnly && watchlistIds.size > 0) query.set('watchlistOnly', 'true');
+        if (watchlistOnly) query.set('watchlistOnly', 'true');
         if (serviceFilters.length) {
           query.set('serviceFilters', serviceFilters.join(','));
         }

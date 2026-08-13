@@ -138,3 +138,42 @@ describe('getRottenTomatoesType', () => {
     expect(getRottenTomatoesType(undefined, 'movie')).toBeNull();
   });
 });
+
+// ── hide-watched client-side filter helper ────────────────────────────────────
+
+/**
+ * Simulates the filter applied in toggleWatched when hideWatched is true:
+ * movies.filter(m => m.id !== itemId)
+ */
+function filterOutWatched(movies, watchedItemId) {
+  return movies.filter((m) => m.id !== watchedItemId);
+}
+
+describe('filterOutWatched (hide-watched correctness)', () => {
+  const catalog = [
+    { id: 'movie-1', title: 'Alpha' },
+    { id: 'movie-2', title: 'Beta' },
+    { id: 'tv-3',    title: 'Gamma' },
+  ];
+
+  it('removes the newly-watched item from the catalog list', () => {
+    const result = filterOutWatched(catalog, 'movie-1');
+    expect(result).toHaveLength(2);
+    expect(result.find((m) => m.id === 'movie-1')).toBeUndefined();
+  });
+
+  it('leaves other items untouched', () => {
+    const result = filterOutWatched(catalog, 'movie-2');
+    expect(result.map((m) => m.id)).toEqual(['movie-1', 'tv-3']);
+  });
+
+  it('returns the original array unchanged when itemId is not present', () => {
+    const result = filterOutWatched(catalog, 'movie-999');
+    expect(result).toHaveLength(3);
+    expect(result).toEqual(catalog);
+  });
+
+  it('handles an empty catalog gracefully', () => {
+    expect(filterOutWatched([], 'movie-1')).toEqual([]);
+  });
+});

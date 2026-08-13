@@ -369,12 +369,22 @@ function sortCatalog(items, sortBy = 'popularity') {
   const sorted = [...items];
   const compareDesc = (left, right) => (right ?? -Infinity) - (left ?? -Infinity);
 
+  if (sortBy === 'release_date') {
+    // ISO date strings sort correctly with plain comparison; avoid localeCompare overhead.
+    sorted.sort((left, right) => {
+      const l = left.releaseDate || '';
+      const r = right.releaseDate || '';
+      if (r > l) return 1;
+      if (r < l) return -1;
+      return 0;
+    });
+    return sorted;
+  }
+
   sorted.sort((left, right) => {
     switch (sortBy) {
       case 'title':
         return left.title.localeCompare(right.title);
-      case 'release_date':
-        return String(right.releaseDate || '').localeCompare(String(left.releaseDate || ''));
       case 'tmdb':
         return compareDesc(left.sortableRatings.tmdb, right.sortableRatings.tmdb);
       case 'imdb':
@@ -683,4 +693,5 @@ module.exports = {
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,
+  sortCatalog,
 };
