@@ -182,6 +182,27 @@ async function ensureCatalogTables(db) {
     `CREATE INDEX IF NOT EXISTS idx_watchlist_items_item_id ON watchlist_items(item_id)`
   );
 
+  // Composite indexes on (scope_key, <sort_column>) so ORDER BY queries use index
+  // scans instead of full-table sorts, keeping paged catalog responses fast.
+  // These names and column expressions are compile-time constants, never derived
+  // from user input, so templating them here is safe.
+  const sortIndexes = [
+    ['idx_cce_popularity',       'popularity DESC'],
+    ['idx_cce_tmdb_rating',      'tmdb_rating DESC'],
+    ['idx_cce_rating_imdb_num',  'rating_imdb_num DESC'],
+    ['idx_cce_rating_rt_num',    'rating_rt_num DESC'],
+    ['idx_cce_rating_meta_num',  'rating_meta_num DESC'],
+    ['idx_cce_release_date',     'release_date DESC'],
+    ['idx_cce_first_seen_at',    'first_seen_at DESC'],
+  ];
+  for (const [name, col] of sortIndexes) {
+    await run(
+      db,
+      `CREATE INDEX IF NOT EXISTS ${name}
+       ON catalog_cache_entries(scope_key, ${col})`
+    );
+  }
+
   // Per-user streaming availability cache for watchlist items.
   // Keyed by (user_id, item_id) so it never pollutes the shared scope catalog.
   await run(
