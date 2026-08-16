@@ -92,7 +92,8 @@ describe('brand icon assets', () => {
       expect(meta.height).toBe(pixels);
     });
 
-    const marketingIcon = readPngMeta(path.join(iosIconRoot, 'AppIcon.png'));
+    const marketingEntry = contents.images.find((image) => image.idiom === 'ios-marketing');
+    const marketingIcon = readPngMeta(path.join(iosIconRoot, marketingEntry.filename));
     expect(marketingIcon.colorType).toBe(2);
   });
 
