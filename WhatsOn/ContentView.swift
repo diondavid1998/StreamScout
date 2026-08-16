@@ -1893,6 +1893,7 @@ struct MKButton: View {
     let label: String
     let icon: String
     var isLoading: Bool = false
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -1900,14 +1901,17 @@ struct MKButton: View {
             HStack(spacing: 8) {
                 if isLoading { ProgressView().tint(.mkOnAccent).scaleEffect(0.85) }
                 else { Image(systemName: icon).font(.system(size: 15)) }
-                Text(label).font(.system(size: 16, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
         }
-        .disabled(isLoading)
+        .disabled(isLoading || isDisabled)
         .tint(.mkAccent)
         .buttonStyle(.glassProminent)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -2868,11 +2872,15 @@ struct ProfileTabView: View {
                     }
 
                     HStack(spacing: 10) {
-                        MKButton(label: "Import Watched", icon: "eye.fill", isLoading: lbxImportProgress != nil) {
+                        MKButton(label: "Import Watched", icon: "eye.fill",
+                                 isLoading: lbxImportProgress != nil && lbxIntendedType == "watched",
+                                 isDisabled: lbxImportProgress != nil) {
                             lbxIntendedType = "watched"
                             showFileImporter = true
                         }
-                        MKButton(label: "Import Watchlist", icon: "bookmark.fill", isLoading: lbxImportProgress != nil) {
+                        MKButton(label: "Import Watchlist", icon: "bookmark.fill",
+                                 isLoading: lbxImportProgress != nil && lbxIntendedType == "watchlist",
+                                 isDisabled: lbxImportProgress != nil) {
                             lbxIntendedType = "watchlist"
                             showFileImporter = true
                         }
