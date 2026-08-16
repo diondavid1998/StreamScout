@@ -2578,7 +2578,7 @@ struct SettingsView: View {
         GlassEffectContainer {
             HStack(spacing: 4) {
                 ForEach([(Tab.services, "play.rectangle.on.rectangle", "Services"),
-                         (Tab.appearance, "paintpalette", "Appearance"),
+                         (Tab.appearance, "paintpalette", "Color"),
                          (Tab.profile, "person.crop.circle", "Profile"),
                          (Tab.watched, "checkmark.circle", "Watched"),
                          (Tab.watchlistTab, "bookmark.circle", "Watchlist")], id: \.0.rawValue) { t, icon, label in
@@ -2622,7 +2622,7 @@ struct AppearanceTabView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Appearance").font(.title3).bold().foregroundColor(.mkText).padding(.top, 4)
+                Text("Color").font(.title3).bold().foregroundColor(.mkText).padding(.top, 4)
                 Text("Choose a color theme for WhatsOn.")
                     .font(.subheadline)
                     .foregroundColor(.mkMuted)
