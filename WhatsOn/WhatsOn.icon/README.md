@@ -19,11 +19,8 @@
 ## What this bundle is
 
 `WhatsOn.icon` is an **Icon Composer** bundle for an iOS 26 Liquid Glass app icon.
-It contains a layered manifest (`icon.json`) and placeholder layer art that you must replace
-with real layered artwork before the icon looks correct.
-
-> ⚠️ **The placeholder files in `Assets/` are solid-colour fills.** They exist only to
-> satisfy the build and to demonstrate the layer structure. Replace them before shipping.
+It contains a layered manifest (`icon.json`) plus generated orange-gradient background and
+gold eye/play foreground artwork that matches the current brand direction.
 
 ---
 
@@ -42,13 +39,13 @@ with real layered artwork before the icon looks correct.
    In Xcode 26: *File ▶ Open* → select `WhatsOn/WhatsOn.icon`.
    Icon Composer will read `icon.json` and display the layer stack.
 
-2. **Replace placeholder layers**
+2. **Refine the included layers if needed**
 
    | Layer | What to put here |
    |-------|-----------------|
-   | **Background** (Default / Light) | A gradient or solid fill using the app's signature violet palette: `#8C7BFF` → `#5B8CFF` at 135 °. A 1024 × 1024 transparent PNG or a vector fill works best. |
-   | **Background** (Dark) | Deeper version of the same palette (`#5B8CFF` → `#3B5BDB`). |
-   | **Foreground** | The WhatsOn logo glyph with a transparent background (PNG or vector). Place it centred with adequate safe-area margin so it isn't clipped by the squircle mask. |
+   | **Background** (Default / Light) | Orange gradient glass base: `#FFAA58` → `#AA4C0C` with soft highlights. |
+   | **Background** (Dark) | Darker amber version of the same gradient for dark appearance. |
+   | **Foreground** | Gold/bronze eye-outline with centered play triangle, exported on transparency for Liquid Glass treatment. |
 
 3. **Tune per-layer glass settings**
    Select each layer and adjust the *Specular*, *Refraction*, and *Shadow* sliders in the
@@ -96,23 +93,23 @@ automatically based on the OS version.
 
 ---
 
-## Colour reference (Signature Violet theme)
+## Colour reference (Sunset Amber brand mark)
 
 | Token | Hex | Use |
 |-------|-----|-----|
-| `mkAccent` / accent | `#8C7BFF` | Background gradient start, foreground tint |
-| `mkAccentAlt` / accentAlt | `#5B8CFF` | Background gradient end |
-| `mkBackground` | `#0A0B14` | Dark-mode canvas background |
+| `brandOrangeLight` | `#FFAA58` | Background gradient start |
+| `brandOrangeDark` | `#AA4C0C` | Background gradient end |
+| `brandGold` | `#E2AE58` | Eye/play motif tint |
 
-These values come from `AppTheme.signatureViolet` in `WhatsOnApp.swift`.
+These values are used by the generated icon assets in this folder and the fallback flat icon.
 
 ---
 
 ## Notes for reviewers / maintainers
 
-- **This PR sets up scaffolding only.** The `.icon` bundle **must** be opened in Icon
-  Composer and supplied with real layered artwork before the Liquid Glass effect appears on
-  device.
+- The included PNG layers already match the current orange/gold brand mark, but opening and
+  re-saving the bundle in Icon Composer is still recommended if you want Xcode to emit the
+  final system-authored Liquid Glass variant.
 - The `icon.json` manifest schema used here is a best-effort representation of the Icon
   Composer format as documented for Xcode 26 beta. Open and re-save the bundle in Icon
   Composer to normalise the format to whatever schema Xcode currently expects.
