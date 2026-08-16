@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsOn icon — size test</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 500 13px/1.4 ui-sans-serif, -apple-system, system-ui, sans-serif;
+    letter-spacing: .01em;
+    background: #0B0C0F;
+    color: #8A8F98;
+  }
+  .surface { padding: 32px 20px 40px; }
+  .light { background: #E9EAEC; color: #5C6068; }
+  h2 {
+    margin: 0 0 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .row {
+    display: flex;
+    align-items: flex-end;
+    gap: 22px;
+    flex-wrap: wrap;
+  }
+  .item { text-align: center; }
+  .icon {
+    border-radius: 22.37%;
+    background: linear-gradient(135deg, #FFAA58, #AA4C0C);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+  .icon svg { width: 100%; height: 100%; display: block; }
+  .cap { margin-top: 8px; font-size: 10px; opacity: .7; }
+  .note {
+    max-width: 460px;
+    margin: 28px auto 0;
+    padding: 0 20px 36px;
+    font-size: 12px;
+    line-height: 1.65;
+    color: #6E737C;
+  }
+</style>
+</head>
+<body>
+
+<template id="mark">
+  <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+    <path d="M192 512 A416.3 416.3 0 0 1 832 512 A416.3 416.3 0 0 1 192 512 Z"
+          fill="none" stroke="#FF8A2B" stroke-width="56"
+          stroke-linejoin="miter" stroke-miterlimit="6"/>
+    <path d="M466 436 L604 512 L466 588 Z"
+          fill="#FF8A2B" stroke="#FF8A2B" stroke-width="20"
+          stroke-linejoin="round"/>
+  </svg>
+</template>
+
+<section class="surface">
+  <h2>On a dark home screen</h2>
+  <div class="row" id="dark-row"></div>
+</section>
+
+<section class="surface light">
+  <h2>On a light home screen</h2>
+  <div class="row" id="light-row"></div>
+</section>
+
+<p class="note">
+  Sizes are the real ones: 180&nbsp;px is the home screen at 3&times;, 120&nbsp;px is Spotlight,
+  60&nbsp;px is Settings, 40&nbsp;px is a notification. If the play shape still reads at 40,
+  the mark is doing its job. Corner radius here is a plain 22.37&nbsp;% approximation &mdash;
+  the real squircle and the glass material come from Icon&nbsp;Composer.
+</p>
+
+<script>
+  const sizes = [180, 120, 87, 60, 40];
+  const tpl = document.getElementById('mark');
+  for (const rowId of ['dark-row', 'light-row']) {
+    const row = document.getElementById(rowId);
+    for (const s of sizes) {
+      const item = document.createElement('div');
+      item.className = 'item';
+      const box = document.createElement('div');
+      box.className = 'icon';
+      box.style.width = box.style.height = s + 'px';
+      box.appendChild(tpl.content.cloneNode(true));
+      const cap = document.createElement('div');
+      cap.className = 'cap';
+      cap.textContent = s + 'px';
+      item.append(box, cap);
+      row.appendChild(item);
+    }
+  }
+</script>
+
+</body>
+</html>
