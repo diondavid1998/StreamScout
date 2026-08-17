@@ -1,4 +1,12 @@
 {
+  "name": "StreamScout",
+  "scripts": {
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "devDependencies": {
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.3"
+  },
   "dependencies": {
     "node-fetch": "^2.7.0",
     "react": "^19.2.5",
