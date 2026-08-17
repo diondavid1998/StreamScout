@@ -11,6 +11,7 @@ const DOCUMENTARY_GENRE_ID = 99;
 const DEFAULT_PAGE_SIZE = 24;
 const PREFETCH_DISCOVER_PAGES = 5;
 const SNAPSHOT_DISCOVER_PAGES = 25;
+const SNAPSHOT_LANGUAGE_DISCOVER_PAGES = 3;
 const MAX_SNAPSHOT_ITEMS = 1000;
 
 // OMDB circuit breaker — trips when the daily request limit is hit.
@@ -451,9 +452,21 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
   const selectedMediaTypes = mediaType === 'all' || mediaType === 'documentary' ? ['movie', 'tv'] : [mediaType];
   const { providerIds, providerMapById } = buildProviderSelection(platforms);
   const selectedLanguages = Array.isArray(options.languages)
-    ? options.languages.filter(Boolean)
+    ? [...new Set(options.languages.filter(Boolean))]
     : [];
   const extraDiscoverParams = mediaType === 'documentary' ? { with_genres: DOCUMENTARY_GENRE_ID } : {};
+  const requestedLanguagePageCount = options.languagePageCount != null
+    ? Number(options.languagePageCount)
+    : (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1);
+  const languagePageCount = Math.min(
+    pageCount,
+    Math.max(
+      Number.isFinite(requestedLanguagePageCount)
+        ? requestedLanguagePageCount
+        : (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1),
+      1
+    )
+  );
 
   if (!providerIds.length) {
     return {
@@ -469,8 +482,8 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
 
   const discoveredBatches = await Promise.all(
     selectedMediaTypes.flatMap((type) =>
-      ((options.restrictLanguages && selectedLanguages.length) ? selectedLanguages : [null]).flatMap((languageCode) =>
-        Array.from({ length: pageCount }, (_, index) =>
+      [null, ...((options.restrictLanguages && selectedLanguages.length) ? selectedLanguages : [])].flatMap((languageCode) =>
+        Array.from({ length: languageCode ? languagePageCount : pageCount }, (_, index) =>
           discoverTitles(type, providerIds, index + 1, region, {
             ...extraDiscoverParams,
             ...(languageCode ? { with_original_language: languageCode } : {}),

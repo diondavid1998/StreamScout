@@ -26,6 +26,7 @@ if (!JWT_SECRET) {
   throw new Error('FATAL: JWT_SECRET environment variable must be set');
 }
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+const DEFAULT_REGION = 'US';
 
 function createEmailTransporter() {
   if (!process.env.EMAIL_FROM || !process.env.EMAIL_PASS) return null;
@@ -89,6 +90,15 @@ function createApp(db, { disableRateLimit = false } = {}) {
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: 'Too many attempts. Please try again later.' },
+      });
+  const catalogLimiter = disableRateLimit
+    ? (_req, _res, next) => next()
+    : rateLimit({
+        windowMs: 60 * 1000,
+        max: 120,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many catalog requests. Please try again later.' },
       });
 
   // ── Health check ──────────────────────────────────────────────────────────
@@ -344,12 +354,14 @@ function createApp(db, { disableRateLimit = false } = {}) {
   });
 
   // ── Catalog status ────────────────────────────────────────────────────────
-  app.get('/catalog-status', authenticateToken, (req, res) => {
-    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], (err, row) => {
+  app.get('/catalog-status', catalogLimiter, authenticateToken, (req, res) => {
+    db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
       if (err || !row) return res.status(500).json({ error: 'Database error' });
       let platforms = [];
+      let languages = [];
       try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
-      const scopeKey = buildScopeKey(platforms);
+      try { languages = JSON.parse(row.languages || '[]'); } catch { /* ignore */ }
+      const scopeKey = buildScopeKey(platforms, DEFAULT_REGION, languages);
       db.get(
         'SELECT last_synced_at, item_count FROM catalog_cache_state WHERE scope_key = ?',
         [scopeKey],
@@ -365,7 +377,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
   });
 
   // ── Catalog force-refresh ─────────────────────────────────────────────────
-  app.post('/catalog/refresh', authenticateToken, (req, res) => {
+  app.post('/catalog/refresh', catalogLimiter, authenticateToken, (req, res) => {
     db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
       if (err || !row) return res.status(500).json({ error: 'Database error' });
       let platforms = [], languages = [];
@@ -374,14 +386,14 @@ function createApp(db, { disableRateLimit = false } = {}) {
       if (platforms.length === 0) {
         return res.status(400).json({ error: 'No streaming services configured. Add services first.' });
       }
-      const scopeKey = buildScopeKey(platforms);
+      const scopeKey = buildScopeKey(platforms, DEFAULT_REGION, languages);
       // Invalidate cache so syncScope treats it as stale, then fire in background
       db.run(
         'UPDATE catalog_cache_state SET last_synced_at = NULL WHERE scope_key = ?',
         [scopeKey],
         (err2) => {
           if (err2) return res.status(500).json({ error: 'Database error' });
-          syncScope(db, { platforms, languages, region: 'US', forceRatingsRefresh: true }).catch((e) =>
+          syncScope(db, { platforms, languages, region: DEFAULT_REGION, forceRatingsRefresh: true }).catch((e) =>
             console.error('[catalog/refresh] background sync failed:', e)
           );
           res.json({ success: true, message: 'Catalog refresh started' });

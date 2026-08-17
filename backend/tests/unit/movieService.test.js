@@ -5,7 +5,14 @@
  * No network calls, no database — all deterministic.
  */
 
-const { buildRatingsPayload, toSortableRating, sortCatalog } = require('../../movieService');
+process.env.TMDB_API_KEY = process.env.TMDB_API_KEY || 'test-key';
+
+const {
+  buildRatingsPayload,
+  toSortableRating,
+  sortCatalog,
+  fetchCatalogByPlatforms,
+} = require('../../movieService');
 
 describe('buildRatingsPayload', () => {
   it('returns null fields when OMDB data has no Ratings array', () => {
@@ -131,6 +138,103 @@ describe('sortCatalog', () => {
       const sorted = sortCatalog(items, 'release_date');
       expect(sorted[0].title).toBe('Has Date');
       expect(sorted[1].title).toBe('No Date');
+    });
+  });
+
+  describe('fetchCatalogByPlatforms language discover union', () => {
+    beforeEach(() => {
+      global.fetch = jest.fn(async (url) => {
+        const parsed = new URL(url);
+        const path = parsed.pathname;
+        const page = Number(parsed.searchParams.get('page') || 1);
+        const language = parsed.searchParams.get('with_original_language');
+
+        if (path === '/3/discover/movie') {
+          let results = [];
+          if (!language && page === 1) {
+            results = [{ id: 1, title: 'English Hit', popularity: 100, vote_average: 8.0, vote_count: 1000, original_language: 'en' }];
+          } else if (!language && page === 2) {
+            results = [{ id: 2, title: 'Global Title', popularity: 95, vote_average: 7.5, vote_count: 900, original_language: 'ta' }];
+          } else if (language === 'ta' && page === 1) {
+            results = [
+              { id: 3, title: 'Tamil Gem', popularity: 90, vote_average: 8.4, vote_count: 800, original_language: 'ta' },
+              { id: 2, title: 'Global Title', popularity: 95, vote_average: 7.5, vote_count: 900, original_language: 'ta' },
+            ];
+          } else if (language === 'hi' && page === 1) {
+            results = [{ id: 4, title: 'Hindi Gem', popularity: 85, vote_average: 8.1, vote_count: 700, original_language: 'hi' }];
+          }
+
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ results }),
+          };
+        }
+
+        const detailsMatch = path.match(/^\/3\/movie\/(\d+)$/);
+        if (detailsMatch) {
+          const id = Number(detailsMatch[1]);
+          return {
+            ok: true,
+            status: 200,
+            text: async () =>
+              JSON.stringify({
+                id,
+                title: `Title ${id}`,
+                release_date: '2024-01-01',
+                vote_average: 7.0,
+                vote_count: 500,
+                overview: `Overview ${id}`,
+                genres: [],
+                external_ids: {},
+                'watch/providers': {
+                  results: {
+                    US: {
+                      flatrate: [{ provider_id: 8 }],
+                    },
+                  },
+                },
+              }),
+          };
+        }
+
+        throw new Error(`Unhandled URL in test: ${url}`);
+      });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+      delete global.fetch;
+    });
+
+    it('sends with_original_language for configured languages while keeping default discover pass', async () => {
+      const result = await fetchCatalogByPlatforms(['netflix'], {
+        mediaType: 'movie',
+        sortBy: 'popularity',
+        region: 'US',
+        includeRatings: false,
+        includeExternalIds: true,
+        snapshotMode: true,
+        pageCount: 2,
+        languages: ['ta', 'hi'],
+        restrictLanguages: true,
+        languagePageCount: 1,
+      });
+
+      const discoverCalls = global.fetch.mock.calls
+        .map(([url]) => new URL(url))
+        .filter((url) => url.pathname === '/3/discover/movie');
+      const languageValues = discoverCalls
+        .map((url) => url.searchParams.get('with_original_language'))
+        .filter(Boolean)
+        .sort();
+      const defaultPassCount = discoverCalls.filter((url) => !url.searchParams.get('with_original_language')).length;
+
+      expect(defaultPassCount).toBe(2);
+      expect(languageValues).toEqual(['hi', 'ta']);
+      expect(result.items.map((item) => item.originalLanguage)).toEqual(
+        expect.arrayContaining(['en', 'ta', 'hi'])
+      );
     });
   });
 

@@ -4,12 +4,22 @@
  * Unit tests for pure utility functions in catalogCache.js
  */
 
-const { buildScopeKey, mapWithConcurrency, isRateLimitError } = require('../../catalogCache');
+const { createTestDb, closeDb } = require('../testHelpers');
+const { buildScopeKey, mapWithConcurrency, isRateLimitError, readCachedCatalog } = require('../../catalogCache');
+
+function run(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+}
 
 describe('buildScopeKey', () => {
   it('builds a deterministic key from platforms and region', () => {
     const key = buildScopeKey(['netflix', 'hulu'], 'US');
-    expect(key).toBe('region:US|platforms:hulu,netflix');
+    expect(key).toBe('region:US|platforms:hulu,netflix|languages:');
   });
 
   it('sorts platforms so order does not matter', () => {
@@ -20,7 +30,7 @@ describe('buildScopeKey', () => {
 
   it('deduplicates platforms', () => {
     const key = buildScopeKey(['netflix', 'netflix', 'hulu'], 'US');
-    expect(key).toBe('region:US|platforms:hulu,netflix');
+    expect(key).toBe('region:US|platforms:hulu,netflix|languages:');
   });
 
   it('includes region in the key', () => {
@@ -34,6 +44,22 @@ describe('buildScopeKey', () => {
   it('defaults region to US when not supplied', () => {
     const key = buildScopeKey(['netflix']);
     expect(key).toContain('region:US');
+  });
+
+  it('includes languages in the key', () => {
+    const key = buildScopeKey(['netflix'], 'US', ['ta', 'hi']);
+    expect(key).toBe('region:US|platforms:netflix|languages:hi,ta');
+  });
+
+  it('sorts languages so order does not matter', () => {
+    const a = buildScopeKey(['netflix'], 'US', ['ta', 'hi']);
+    const b = buildScopeKey(['netflix'], 'US', ['hi', 'ta']);
+    expect(a).toBe(b);
+  });
+
+  it('deduplicates languages', () => {
+    const key = buildScopeKey(['netflix'], 'US', ['ta', 'hi', 'ta']);
+    expect(key).toBe('region:US|platforms:netflix|languages:hi,ta');
   });
 });
 
@@ -89,5 +115,50 @@ describe('isRateLimitError', () => {
     expect(isRateLimitError('rate limit')).toBe(true);
     expect(isRateLimitError(null)).toBe(false);
     expect(isRateLimitError(undefined)).toBe(false);
+  });
+});
+
+describe('readCachedCatalog language filters', () => {
+  let db;
+
+  beforeEach(async () => {
+    db = await createTestDb();
+  });
+
+  afterEach(async () => {
+    await closeDb(db);
+  });
+
+  it('returns Tamil/Hindi rows when those language filters are applied', async () => {
+    const scopeKey = buildScopeKey(['netflix'], 'US', ['ta', 'hi']);
+    const now = new Date().toISOString();
+
+    await run(
+      db,
+      `INSERT INTO catalog_cache_entries (scope_key, media_type, tmdb_id, title, original_language, popularity, imdb_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [scopeKey, 'movie', 101, 'Tamil Title', 'ta', 10, 'tt0000101', now]
+    );
+    await run(
+      db,
+      `INSERT INTO catalog_cache_entries (scope_key, media_type, tmdb_id, title, original_language, popularity, imdb_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [scopeKey, 'movie', 102, 'Hindi Title', 'hi', 9, 'tt0000102', now]
+    );
+    await run(
+      db,
+      `INSERT INTO catalog_cache_entries (scope_key, media_type, tmdb_id, title, original_language, popularity, imdb_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [scopeKey, 'movie', 103, 'English Title', 'en', 11, 'tt0000103', now]
+    );
+
+    const result = await readCachedCatalog(db, {
+      scopeKey,
+      languageFilters: ['ta', 'hi'],
+      page: 1,
+      pageSize: 24,
+    });
+
+    expect(result.items.map((item) => item.title).sort()).toEqual(['Hindi Title', 'Tamil Title']);
   });
 });

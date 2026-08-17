@@ -81,9 +81,10 @@ function isRateLimitError(error) {
   return /too many requests|rate limit|request limit/i.test(String(error?.message || error));
 }
 
-function buildScopeKey(platforms, region = DEFAULT_REGION) {
+function buildScopeKey(platforms, region = DEFAULT_REGION, languages = []) {
   const normalizedPlatforms = [...new Set(platforms)].sort();
-  return `region:${region}|platforms:${normalizedPlatforms.join(',')}`;
+  const normalizedLanguages = [...new Set((Array.isArray(languages) ? languages : []).filter(Boolean))].sort();
+  return `region:${region}|platforms:${normalizedPlatforms.join(',')}|languages:${normalizedLanguages.join(',')}`;
 }
 
 async function ensureCatalogTables(db) {
@@ -279,7 +280,7 @@ async function syncScope(
   db,
   { platforms, languages, region = DEFAULT_REGION, forceRatingsRefresh = false }
 ) {
-  const scopeKey = buildScopeKey(platforms, region);
+  const scopeKey = buildScopeKey(platforms, region, languages);
   if (syncLocks.has(scopeKey)) {
     return syncLocks.get(scopeKey);
   }
@@ -291,6 +292,9 @@ async function syncScope(
       limit: 1000,
       page: 1,
       pageCount: 25,
+      languagePageCount: 3,
+      languages,
+      restrictLanguages: Array.isArray(languages) && languages.length > 0,
       region,
       includeRatings: false,   // always skip inline OMDB — background hydration handles ratings
       includeExternalIds: true,
@@ -458,7 +462,7 @@ async function syncScope(
 }
 
 async function ensureScopeSynced(db, { platforms, languages, region = DEFAULT_REGION }) {
-  const scopeKey = buildScopeKey(platforms, region);
+  const scopeKey = buildScopeKey(platforms, region, languages);
   const stateRow = await get(db, 'SELECT * FROM catalog_cache_state WHERE scope_key = ?', [scopeKey]);
 
   if (!stateRow) {
