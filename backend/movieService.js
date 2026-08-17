@@ -455,11 +455,15 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
     ? [...new Set(options.languages.filter(Boolean))]
     : [];
   const extraDiscoverParams = mediaType === 'documentary' ? { with_genres: DOCUMENTARY_GENRE_ID } : {};
+  const requestedLanguagePageCount = options.languagePageCount != null
+    ? Number(options.languagePageCount)
+    : (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1);
   const languagePageCount = Math.min(
     pageCount,
     Math.max(
-      Number(options.languagePageCount) ||
-        (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1),
+      Number.isFinite(requestedLanguagePageCount)
+        ? requestedLanguagePageCount
+        : (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1),
       1
     )
   );
