@@ -165,6 +165,7 @@ cd web-frontend
 npm install
 npm start        # dev server at http://localhost:3000
 npm run build    # production build
+npm run icons    # regenerate PWA/home-screen icons from public/whatson-logo.svg
 ```
 
 ---

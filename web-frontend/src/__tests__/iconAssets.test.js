@@ -49,22 +49,25 @@ describe('brand icon assets', () => {
 
     expect(manifest.icons).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ src: 'favicon.ico', sizes: '64x64 32x32 24x24 16x16', type: 'image/x-icon' }),
         expect.objectContaining({ src: 'logo192.png', sizes: '192x192', type: 'image/png' }),
         expect.objectContaining({ src: 'logo512.png', sizes: '512x512', type: 'image/png' }),
         expect.objectContaining({ src: 'apple-touch-icon.png', sizes: '180x180', type: 'image/png' }),
       ])
     );
     expect(indexHtml).toContain('%PUBLIC_URL%/favicon.ico');
+    expect(indexHtml).toContain('sizes="180x180"');
     expect(indexHtml).toContain('%PUBLIC_URL%/apple-touch-icon.png');
+    expect(indexHtml).toContain('content="#AA4C0C"');
   });
 
-  it('ships the expected web icon sizes', () => {
-    expect(readPngMeta(path.join(publicRoot, 'logo192.png'))).toMatchObject({ width: 192, height: 192 });
-    expect(readPngMeta(path.join(publicRoot, 'logo512.png'))).toMatchObject({ width: 512, height: 512 });
-    expect(readPngMeta(path.join(publicRoot, 'apple-touch-icon.png'))).toMatchObject({ width: 180, height: 180 });
+  it('ships opaque web icon assets generated from the SVG source', () => {
+    expect(fs.existsSync(path.join(publicRoot, 'whatson-logo.svg'))).toBe(true);
+    expect(readPngMeta(path.join(publicRoot, 'whatson-logo.png'))).toMatchObject({ width: 1024, height: 1024, colorType: 2 });
+    expect(readPngMeta(path.join(publicRoot, 'logo192.png'))).toMatchObject({ width: 192, height: 192, colorType: 2 });
+    expect(readPngMeta(path.join(publicRoot, 'logo512.png'))).toMatchObject({ width: 512, height: 512, colorType: 2 });
+    expect(readPngMeta(path.join(publicRoot, 'apple-touch-icon.png'))).toMatchObject({ width: 180, height: 180, colorType: 2 });
     expect(readIcoSizes(path.join(publicRoot, 'favicon.ico'))).toEqual(
-      expect.arrayContaining(['16x16', '32x32', '48x48', '64x64'])
+      expect.arrayContaining(['16x16', '32x32', '48x48'])
     );
   });
 
