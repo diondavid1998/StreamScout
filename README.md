@@ -126,6 +126,26 @@ WhatsOn/
 
 ---
 
+## Icon Asset Regeneration
+
+The icon source of truth is `/design/whatson-icon.svg`.
+
+Rebuild native iOS and web/PWA icons from that file with:
+
+```bash
+npm run icons
+```
+
+This regenerates:
+- `WhatsOn/Assets.xcassets/AppIcon.appiconset/*.png`
+- `web-frontend/public/apple-touch-icon.png`
+- `web-frontend/public/logo192.png`
+- `web-frontend/public/logo512.png`
+- `web-frontend/public/whatson-logo.png`
+- `web-frontend/public/favicon.ico`
+
+---
+
 ## Getting Started
 
 ### Prerequisites
