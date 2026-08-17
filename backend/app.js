@@ -345,11 +345,13 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
   // ── Catalog status ────────────────────────────────────────────────────────
   app.get('/catalog-status', authenticateToken, (req, res) => {
-    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], (err, row) => {
+    db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
       if (err || !row) return res.status(500).json({ error: 'Database error' });
       let platforms = [];
+      let languages = [];
       try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
-      const scopeKey = buildScopeKey(platforms);
+      try { languages = JSON.parse(row.languages || '[]'); } catch { /* ignore */ }
+      const scopeKey = buildScopeKey(platforms, 'US', languages);
       db.get(
         'SELECT last_synced_at, item_count FROM catalog_cache_state WHERE scope_key = ?',
         [scopeKey],
@@ -374,7 +376,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
       if (platforms.length === 0) {
         return res.status(400).json({ error: 'No streaming services configured. Add services first.' });
       }
-      const scopeKey = buildScopeKey(platforms);
+      const scopeKey = buildScopeKey(platforms, 'US', languages);
       // Invalidate cache so syncScope treats it as stale, then fire in background
       db.run(
         'UPDATE catalog_cache_state SET last_synced_at = NULL WHERE scope_key = ?',
