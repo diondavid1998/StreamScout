@@ -34,6 +34,25 @@ db.all('PRAGMA table_info(users)', [], (err, columns) => {
   if (!columns.some((col) => col.name === 'profile_pic')) {
     db.run('ALTER TABLE users ADD COLUMN profile_pic TEXT');
   }
+  if (!columns.some((col) => col.name === 'token_version')) {
+    db.run('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // Password reset resolves an account by email, so two accounts sharing one
+  // address makes that flow ambiguous — it would always reset whichever row
+  // SQLite reached first. The partial index ignores NULLs, since email is
+  // optional. Existing duplicates must be cleared before it can be created;
+  // log and carry on rather than refusing to boot.
+  db.run(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email) WHERE email IS NOT NULL',
+    (indexErr) => {
+      if (!indexErr) return;
+      console.warn(
+        `Could not enforce unique emails: ${indexErr.message}. ` +
+          'Resolve duplicate email addresses in the users table, then restart.'
+      );
+    }
+  );
 });
 
 db.run(`CREATE TABLE IF NOT EXISTS watched_items (

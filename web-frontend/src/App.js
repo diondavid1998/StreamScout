@@ -339,6 +339,68 @@ const styles = {
     objectPosition: 'center',
     display: 'block',
   },
+  searchRow: {
+    width: '100%',
+    display: 'flex',
+    gap: 10,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    padding: '13px 16px',
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.1)',
+    fontSize: 15,
+    background: 'rgba(255,255,255,0.05)',
+    color: '#eef0f7',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  },
+  searchBanner: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    flexWrap: 'wrap',
+    padding: '10px 14px',
+    marginBottom: 14,
+    borderRadius: 10,
+    background: 'rgba(108,99,255,0.1)',
+    border: '1px solid rgba(108,99,255,0.28)',
+    color: '#c0c8d8',
+    fontSize: 13,
+  },
+  cardActions: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    display: 'flex',
+    gap: 6,
+    zIndex: 2,
+  },
+  watchlistBtnActive: {
+    background: 'rgba(108,99,255,0.22)',
+    border: '1px solid rgba(108,99,255,0.55)',
+    color: '#c4b8ff',
+  },
+  // Stand-in for services with no bundled logo asset.
+  platformMonogram: {
+    width: 70,
+    height: 70,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    background: 'rgba(255,255,255,0.07)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    color: '#c0c8d8',
+    fontSize: 22,
+    fontWeight: 800,
+    letterSpacing: '0.02em',
+  },
   sectionActions: {
     width: '100%',
     display: 'flex',
@@ -671,7 +733,8 @@ const styles = {
   settingsTabBtn: { padding: '10px 18px', background: 'none', border: 'none', color: '#6e7a93', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', borderBottom: '2px solid transparent', marginBottom: -1, transition: 'color 0.18s' },
   settingsTabBtnActive: { color: '#e94560', borderBottomColor: '#e94560' },
   // ── Watched button on card ────────────────────────────────────────────────
-  watchedBtn: { position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 999, width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#8a93a8', transition: 'all 0.18s ease' },
+  // Placement comes from the cardActions row this sits in, not from the button.
+  watchedBtn: { background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 999, width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#8a93a8', transition: 'all 0.18s ease', padding: 0, flexShrink: 0 },
   watchedBtnActive: { background: 'rgba(1,210,119,0.22)', border: '1px solid rgba(1,210,119,0.45)', color: '#01d277' },
   // ── Watchlist in settings ─────────────────────────────────────────────────
   watchlistRow: { display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' },
@@ -690,18 +753,50 @@ const styles = {
   filterPanelHeader: { width: '100%', background: 'none', border: 'none', padding: '13px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#c0c8d8', fontSize: 11, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'inherit' },
 };
 
+// Keys and names must match PLATFORM_CONFIG in backend/movieService.js — the
+// key is what the API stores, and availability chips are matched on the name.
+// `logo: null` renders a monogram tile; services with no bundled logo asset are
+// still selectable rather than being hidden from the picker.
 const streamingPlatforms = [
-  { key: 'netflix',     name: 'Netflix',     logo: require('./logos/netflix.png') },
-  { key: 'hulu',        name: 'Hulu',        logo: require('./logos/hulu.jpeg') },
-  { key: 'prime',       name: 'Prime Video', logo: require('./logos/prime.png') },
-  { key: 'disney',      name: 'Disney+',     logo: require('./logos/disney+.png') },
-  { key: 'apple',       name: 'Apple TV+',   logo: require('./logos/appletv.png') },
-  { key: 'paramount',   name: 'Paramount+',  logo: require('./logos/paramount+.png') },
-  { key: 'peacock',     name: 'Peacock',     logo: require('./logos/peacock.png') },
-  { key: 'max',         name: 'Max',         logo: require('./logos/max.png') },
-  { key: 'crunchyroll', name: 'Crunchyroll', logo: require('./logos/crunchyroll.png') },
-  { key: 'tubi',        name: 'Tubi',        logo: require('./logos/tubi.jpeg') },
+  { key: 'netflix',     name: 'Netflix',              logo: require('./logos/netflix.png') },
+  { key: 'hulu',        name: 'Hulu',                 logo: require('./logos/hulu.jpeg') },
+  { key: 'prime',       name: 'Prime Video',          logo: require('./logos/prime.png') },
+  { key: 'disney',      name: 'Disney+',              logo: require('./logos/disney+.png') },
+  { key: 'apple',       name: 'Apple TV+',            logo: require('./logos/appletv.png') },
+  { key: 'paramount',   name: 'Paramount+',           logo: require('./logos/paramount+.png') },
+  { key: 'peacock',     name: 'Peacock',              logo: require('./logos/peacock.png') },
+  { key: 'max',         name: 'Max',                  logo: require('./logos/max.png') },
+  { key: 'crunchyroll', name: 'Crunchyroll',          logo: require('./logos/crunchyroll.png') },
+  { key: 'tubi',        name: 'Tubi',                 logo: require('./logos/tubi.jpeg') },
+  { key: 'starz',       name: 'Starz',                logo: null },
+  { key: 'showtime',    name: 'Showtime',             logo: null },
+  { key: 'amc',         name: 'AMC+',                 logo: null },
+  { key: 'pluto',       name: 'Pluto TV',             logo: null },
+  { key: 'roku',        name: 'The Roku Channel',     logo: null },
+  { key: 'youtube',     name: 'YouTube Premium',      logo: null },
+  { key: 'mubi',        name: 'MUBI',                 logo: null },
+  { key: 'britbox',     name: 'BritBox',              logo: null },
+  { key: 'hayu',        name: 'Hayu',                 logo: null },
+  { key: 'shudder',     name: 'Shudder',              logo: null },
+  { key: 'acorn',       name: 'Acorn TV',             logo: null },
+  { key: 'curiosity',   name: 'Curiosity Stream',     logo: null },
+  { key: 'sling',       name: 'Sling TV',             logo: null },
+  { key: 'philo',       name: 'Philo',                logo: null },
+  { key: 'fubo',        name: 'fuboTV',               logo: null },
+  { key: 'viu',         name: 'Viu',                  logo: null },
+  { key: 'kanopy',      name: 'Kanopy',               logo: null },
+  { key: 'crave',       name: 'Crave',                logo: null },
+  { key: 'ifc',         name: 'IFC Films Unlimited',  logo: null },
+  { key: 'criterion',   name: 'Criterion Channel',    logo: null },
+  { key: 'hidive',      name: 'HiDive',               logo: null },
 ];
+
+/** First letters of a service name, for tiles with no logo asset. */
+function platformMonogram(name) {
+  const words = String(name).split(/[\s+]+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+}
 
 const ratingLogos = {
   tmdb: require('./logos/tmdb.jpeg'),
@@ -772,7 +867,9 @@ function App() {
   const [editUsername, setEditUsername] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
-  const [watchlistItems, setWatchlistItems] = useState([]);
+  // The user's *watched* history, from GET /watched. Distinct from
+  // watchlistOnlyItems, which holds the saved-for-later watchlist.
+  const [watchedItems, setWatchedItems] = useState([]);
   const [watchlistOnlyItems, setWatchlistOnlyItems] = useState([]);
   const [watchlistIds, setWatchlistIds] = useState(new Set());
   const [watchlistOnly, setWatchlistOnly] = useState(false);
@@ -789,7 +886,19 @@ function App() {
   const [resetNewPass, setResetNewPass] = useState('');
   const [openFilters, setOpenFilters] = useState({ service: false, language: false, genre: false, year: false });
   const [catalogStatus, setCatalogStatus] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const abortRef = useRef(null);
+  // Read inside runSearch to discard responses for a query the user has
+  // already typed past — a ref, so the callback identity stays stable.
+  const searchQueryRef = useRef('');
+
+  // fetchMovies must not depend on the watchlistIds Set itself: loadWatchlist
+  // rebuilds it on every call, and the new object identity would change the
+  // callback identity and re-fire the catalog effect, doubling every request.
+  // A sorted string changes only when the membership actually changes.
+  const watchlistKey = useMemo(() => [...watchlistIds].sort().join(','), [watchlistIds]);
 
   // buildApiErrorMessage imported from utils.js
 
@@ -821,7 +930,7 @@ function App() {
     setMovieDetails(null);
     setSettingsTab('services');
     setAccountData({ username: '', email: '', profilePic: null });
-    setWatchlistItems([]);
+    setWatchedItems([]);
     setWatchlistOnlyItems([]);
     setWatchlistIds(new Set());
     setWatchlistOnly(false);
@@ -834,6 +943,9 @@ function App() {
     setEditPassword('');
     setResetStep(0);
     setOpenFilters({ service: false, language: false, genre: false, year: false });
+    setSearchQuery('');
+    setSearchResults([]);
+    setStreamingWatchlist(false);
   };
 
   const logout = (message = 'You have been signed out.') => {
@@ -912,7 +1024,7 @@ function App() {
       const data = await parseResponseBody(response);
       const items = Array.isArray(data.items) ? data.items : [];
       setWatchedIds(new Set(items.map((item) => item.itemId)));
-      setWatchlistItems(items);
+      setWatchedItems(items);
     } catch { /* silent */ }
   }, [token]); // eslint-disable-line
 
@@ -934,6 +1046,87 @@ function App() {
       setWatchlistOnlyItems((prev) => prev.filter((i) => i.itemId !== itemId));
       setWatchlistIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
     } catch { /* silent */ }
+  };
+
+  const toggleWatchlist = async (movie) => {
+    const itemId = movie.id;
+    const isWatchlisted = watchlistIds.has(itemId);
+    // Optimistic: the control reflects the change immediately and is reverted
+    // if the request fails, so a slow network never looks like a dead button.
+    setWatchlistIds((prev) => {
+      const next = new Set(prev);
+      if (isWatchlisted) next.delete(itemId); else next.add(itemId);
+      return next;
+    });
+    try {
+      if (isWatchlisted) {
+        await apiFetch(`/watchlist/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+        setWatchlistOnlyItems((prev) => prev.filter((i) => i.itemId !== itemId));
+      } else {
+        await apiFetch('/watchlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemId,
+            mediaType: movie.mediaType,
+            title: movie.title,
+            posterUrl: movie.posterUrl,
+          }),
+        });
+        setWatchlistOnlyItems((prev) => [
+          { itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl, addedAt: new Date().toISOString() },
+          ...prev,
+        ]);
+      }
+    } catch (err) {
+      setWatchlistIds((prev) => {
+        const next = new Set(prev);
+        if (isWatchlisted) next.add(itemId); else next.delete(itemId);
+        return next;
+      });
+      if (err.message !== 'Unauthorized') {
+        setError('Could not update your watchlist. Try again.');
+      }
+    }
+  };
+
+  const runSearch = useCallback(async (rawQuery) => {
+    const query = rawQuery.trim();
+    if (query.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    try {
+      const response = await apiFetch(`/search?q=${encodeURIComponent(query)}`);
+      const data = await parseResponseBody(response);
+      // Drop the response if the box has moved on since this request started.
+      if (searchQueryRef.current.trim() !== query) return;
+      setSearchResults(response.ok && Array.isArray(data.items) ? data.items : []);
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setSearchResults([]);
+    } finally {
+      if (searchQueryRef.current.trim() === query) setSearchLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const requestCatalogRefresh = async () => {
+    clearFeedback();
+    try {
+      const response = await apiFetch('/catalog/refresh', { method: 'POST' });
+      const data = await parseResponseBody(response);
+      if (!response.ok) {
+        setError(buildApiErrorMessage(data, 'Could not start a catalog refresh.'));
+        return;
+      }
+      setInfo('Refreshing your catalog from TMDB — new titles appear as they arrive.');
+      fetchMovies();
+    } catch (err) {
+      if (err.message !== 'Unauthorized') {
+        setError(`Network error: ${err.message}.`);
+      }
+    }
   };
 
   const handleLbxFileChange = async (e, intendedType) => {
@@ -1011,7 +1204,7 @@ function App() {
       try {
         await apiFetch(`/watched/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
         setWatchedIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
-        setWatchlistItems((prev) => prev.filter((item) => item.itemId !== itemId));
+        setWatchedItems((prev) => prev.filter((item) => item.itemId !== itemId));
       } catch { /* silent */ }
     } else {
       try {
@@ -1021,7 +1214,7 @@ function App() {
           body: JSON.stringify({ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl }),
         });
         setWatchedIds((prev) => new Set([...prev, itemId]));
-        setWatchlistItems((prev) => [{ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl, watchedAt: new Date().toISOString() }, ...prev]);
+        setWatchedItems((prev) => [{ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl, watchedAt: new Date().toISOString() }, ...prev]);
         if (hideWatched) {
           setMovies((prev) => prev.filter((m) => m.id !== itemId));
         }
@@ -1101,7 +1294,15 @@ function App() {
     canvas.width = 256; canvas.height = 256;
     const ctx = canvas.getContext('2d');
     const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    // Both handlers release the blob; without this the source image stays
+    // pinned in memory for the lifetime of the tab.
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setError('That image could not be read. Try a different file.');
+    };
     img.onload = async () => {
+      URL.revokeObjectURL(objectUrl);
       const size = Math.min(img.width, img.height);
       const sx = (img.width - size) / 2;
       const sy = (img.height - size) / 2;
@@ -1119,7 +1320,7 @@ function App() {
         }
       } catch { /* silent */ }
     };
-    img.src = URL.createObjectURL(file);
+    img.src = objectUrl;
   };
 
   const handleForgotPassword = async (e) => {
@@ -1206,14 +1407,17 @@ function App() {
         page: String(catalogPage),
       });
 
-      if (streamingWatchlist && watchlistIds.size > 0) {
+      // Two distinct watchlist views: "From watchlist" mirrors the whole
+      // watchlist, "Streaming watchlist" narrows it to the user's services.
+      // The server tells them apart by streamingOnly, not by the filters sent.
+      if (streamingWatchlist) {
         query.set('watchlistOnly', 'true');
-        if (selected.length) query.set('serviceFilters', selected.join(','));
-      } else {
-        if (watchlistOnly) query.set('watchlistOnly', 'true');
-        if (serviceFilters.length) {
-          query.set('serviceFilters', serviceFilters.join(','));
-        }
+        query.set('streamingOnly', 'true');
+      } else if (watchlistOnly) {
+        query.set('watchlistOnly', 'true');
+      }
+      if (serviceFilters.length) {
+        query.set('serviceFilters', serviceFilters.join(','));
       }
       if (languageFilters.length) {
         query.set('languageFilters', languageFilters.join(','));
@@ -1254,9 +1458,13 @@ function App() {
         setError(`Network error: ${err.message}. Make sure the backend is running at ${API_BASE}.`);
       }
     } finally {
-      setLoadingMovies(false);
+      // Only the newest request owns the loading flag. An aborted one clearing
+      // it here would hide the skeleton while its replacement is still loading.
+      if (abortRef.current === controller) {
+        setLoadingMovies(false);
+      }
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, watchlistIds, streamingWatchlist, selected, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, streamingWatchlist, selected, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatMediaType = (value) => {
     if (value === 'documentary') {
@@ -1438,6 +1646,12 @@ function App() {
     }
   }, [page, fetchMovies]);
 
+  useEffect(() => {
+    if (page !== 'movies') return;
+    if (!watchlistOnly && !streamingWatchlist) return;
+    fetchMovies();
+  }, [watchlistKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load watched list when on catalog page
   useEffect(() => {
     if (page === 'movies' && token) {
@@ -1464,13 +1678,34 @@ function App() {
     return () => clearTimeout(timer);
   }, [catalogMeta, page, loadingMovies, movies.length, fetchMovies]);
 
+  // Debounced search: one request per pause in typing, not one per keystroke.
   useEffect(() => {
-    setServiceFilters((current) => current.filter((key) => selected.includes(key)));
-  }, [selected]);
+    searchQueryRef.current = searchQuery;
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => runSearch(searchQuery), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery, runSearch]);
+
+  // Drop filters for services/languages the user no longer has selected.
+  // Returning `current` unchanged when nothing was pruned matters: a fresh []
+  // is not Object.is-equal to the old one, so React would re-render, change
+  // fetchMovies' identity, and fire a second identical catalog request.
+  const pruneMissing = (allowed) => (current) => {
+    const next = current.filter((key) => allowed.includes(key));
+    return next.length === current.length ? current : next;
+  };
 
   useEffect(() => {
-    setLanguageFilters((current) => current.filter((key) => languages.includes(key)));
-  }, [languages]);
+    setServiceFilters(pruneMissing(selected));
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setLanguageFilters(pruneMissing(languages));
+  }, [languages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handler = (event) => {
@@ -1638,7 +1873,13 @@ function App() {
                 ...(isSelected ? styles.platformCardSelected : {}),
               }}
             >
-              <img src={platform.logo} alt={platform.name} style={styles.platformLogo} className="platform-tile-logo" />
+              {platform.logo ? (
+                <img src={platform.logo} alt={platform.name} style={styles.platformLogo} className="platform-tile-logo" />
+              ) : (
+                <span style={styles.platformMonogram} className="platform-tile-logo">
+                  {platformMonogram(platform.name)}
+                </span>
+              )}
               <span style={styles.platformLabel} className="platform-tile-label">{platform.name}</span>
             </label>
           </div>
@@ -1980,11 +2221,11 @@ function App() {
               <div style={{ width: '100%' }}>
                 {/* Watched section */}
                 <div style={{ fontWeight: 700, color: '#01d277', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                  ✓ Watched ({watchlistItems.length})
+                  ✓ Watched ({watchedItems.length})
                 </div>
-                {watchlistItems.length === 0
+                {watchedItems.length === 0
                   ? <p style={{ ...styles.emptyState, marginBottom: 16 }}>No watched content yet.</p>
-                  : watchlistItems.map((item) => (
+                  : watchedItems.map((item) => (
                     <div key={item.itemId} style={styles.watchlistRow}>
                       {item.posterUrl
                         ? <img src={item.posterUrl} alt={item.title} style={styles.watchlistPoster} />
@@ -2003,10 +2244,10 @@ function App() {
 
                 {/* Letterboxd Watchlist section */}
                 <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 24, marginBottom: 10 }}>
-                  🔖 Letterboxd Watchlist ({watchlistOnlyItems.length})
+                  🔖 Watchlist ({watchlistOnlyItems.length})
                 </div>
                 {watchlistOnlyItems.length === 0
-                  ? <p style={styles.emptyState}>No watchlist items. Import from Letterboxd in the Profile tab.</p>
+                  ? <p style={styles.emptyState}>No watchlist items yet. Add titles from the catalog or search, or import from Letterboxd in the Profile tab.</p>
                   : watchlistOnlyItems.map((item) => (
                     <div key={item.itemId} style={styles.watchlistRow}>
                       {item.posterUrl
@@ -2034,6 +2275,93 @@ function App() {
   }
 
   if (page === 'movies') {
+  /**
+   * One catalog card. Shared by the catalog grid and the search results, so a
+   * title looks and behaves the same wherever it appears.
+   */
+  const renderMovieCard = (movie) => {
+    const ratingEntries = ratingEntriesForItem(movie);
+    const isTV = movie.mediaType === 'tv';
+    const isWatched = watchedIds.has(movie.id);
+    const isWatchlisted = watchlistIds.has(movie.id);
+    return (
+      <div key={movie.id} style={{ ...styles.movieCard, ...styles.movieCardClickable }} className="movie-card-wrap"
+        data-media={movie.mediaType} onClick={() => fetchMovieDetails(movie)}>
+        <div style={styles.cardActions}>
+          <button type="button"
+            style={{ ...styles.watchedBtn, ...(isWatchlisted ? styles.watchlistBtnActive : {}) }}
+            onClick={(e) => { e.stopPropagation(); toggleWatchlist(movie); }}
+            title={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+            aria-label={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}>
+            {isWatchlisted ? '🔖' : '🏷'}
+          </button>
+          <button type="button"
+            style={{ ...styles.watchedBtn, ...(isWatched ? styles.watchedBtnActive : {}) }}
+            onClick={(e) => { e.stopPropagation(); toggleWatched(movie); }}
+            title={isWatched ? 'Remove from watched' : 'Mark as watched'}
+            aria-label={isWatched ? 'Remove from watched' : 'Mark as watched'}>
+            {isWatched ? '✓' : '○'}
+          </button>
+        </div>
+        {movie.posterUrl ? (
+          <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster}
+            className="movie-poster-el" loading="lazy"
+            onError={(e) => { e.currentTarget.style.display = 'none'; const ph = e.currentTarget.nextSibling; if (ph) ph.style.display = 'flex'; }} />
+        ) : null}
+        <div style={{ ...styles.moviePosterPlaceholder, display: movie.posterUrl ? 'none' : 'flex' }} className="movie-poster-ph">🎬</div>
+        <div style={styles.movieBody}>
+          <div style={styles.movieTitle} className="movie-title-el">{movie.title}</div>
+          <div style={styles.movieSubhead}>
+            <span style={{ ...styles.chip, ...(isTV ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(movie.mediaType)}</span>
+            {movie.year ? <span style={styles.chip}>{movie.year}</span> : null}
+          </div>
+          {movie.overview ? <div style={styles.movieOverview}>{movie.overview}</div> : null}
+          {movie.genres?.length ? (
+            <div style={styles.providerRow}>
+              {movie.genres.slice(0, 4).map((genre) => <span key={genre} style={styles.chipGenre}>{genre}</span>)}
+            </div>
+          ) : null}
+          {movie.availableOn?.length ? (
+            <div style={styles.providerRow}>
+              {movie.availableOn.map((providerName) => {
+                const platform = providerNameToPlatform[providerName];
+                return (
+                  <span key={providerName} style={styles.providerChip}>
+                    {platform?.logo ? <img src={platform.logo} alt={providerName} style={styles.providerLogo} /> : null}
+                    <span>{providerName}</span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
+          {ratingEntries.length ? (
+            <div style={styles.ratingGrid} className="rating-row">
+              {ratingEntries.map((entry) => {
+                const visual = getRatingVisual(movie, entry.key);
+                const chipAccent = getRatingChipStyle(entry.key, entry.value);
+                return (
+                  <span key={entry.key} style={{ ...styles.ratingChip, ...chipAccent }}>
+                    {visual ? <img src={visual} alt={entry.label} style={styles.ratingLogo} /> : null}
+                    <span style={styles.ratingContent}>
+                      <span style={styles.ratingLabel}>{entry.label}</span>
+                      <span style={styles.ratingValue}>{entry.value}</span>
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : catalogMeta?.refreshing ? (
+            <div style={{ fontSize: 11, color: 'rgba(110,122,147,0.7)', marginTop: 8 }}>⏳ Ratings loading…</div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+    // A live search replaces the catalog grid rather than filtering it — the
+    // results come from all of TMDB, not from the cached snapshot.
+    const isSearching = searchQuery.trim().length >= 2;
+
     const renderFilterPanel = (key, label, metaText, children) => (
       <div style={styles.filterPanel} key={key}>
         <button type="button" style={styles.filterPanelHeader} onClick={() => toggleFilterPanel(key)}>
@@ -2068,6 +2396,12 @@ function App() {
                 </button>
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
+                  className="btn-tap" onClick={requestCatalogRefresh} type="button"
+                  title="Rebuild the catalog from TMDB — takes a few minutes">
+                  ⟳ Rebuild
+                </button>
+                <button
+                  style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
                   className="btn-tap"
                   onClick={() => { clearFeedback(); setShowSettings(true); setSettingsTab('services'); }}
                   type="button">⚙ Settings</button>
@@ -2085,6 +2419,25 @@ function App() {
                   style={{ ...styles.inlineButton, fontSize: 18, lineHeight: 1, flexShrink: 0 }} aria-label="Dismiss">✕</button>
               </div>
             )}
+
+            <div style={styles.searchRow}>
+              <input
+                style={styles.searchInput}
+                className="mk-input"
+                type="search"
+                placeholder="Search all movies & shows…"
+                aria-label="Search all movies and shows"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery ? (
+                <button
+                  style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
+                  className="btn-tap" type="button" onClick={() => setSearchQuery('')}>
+                  Clear
+                </button>
+              ) : null}
+            </div>
 
             <div style={styles.controlRow} className="control-row-wrap">
               <div style={styles.controlGroup}>
@@ -2115,7 +2468,7 @@ function App() {
             </div>
 
             {/* Hide Watched toggle */}
-            {watchedIds.size > 0 && (
+            {!isSearching && watchedIds.size > 0 && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(hideWatched ? { background: 'rgba(1,210,119,0.15)', border: '1px solid rgba(1,210,119,0.35)', color: '#01d277' } : {}) }}
@@ -2126,20 +2479,20 @@ function App() {
               </div>
             )}
 
-            {/* From Watchlist toggle */}
-            {watchlistIds.size > 0 && (
+            {/* From Watchlist toggle — the whole watchlist, streaming or not */}
+            {!isSearching && watchlistIds.size > 0 && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(watchlistOnly ? { background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.5)', color: '#8b82ff' } : {}) }}
                   onClick={() => { const next = !watchlistOnly; setWatchlistOnly(next); if (next) setStreamingWatchlist(false); setCatalogPage(1); }}>
                   {watchlistOnly ? '🔖 From watchlist' : '○ From watchlist'}
                 </button>
-                <span style={{ color: '#6e7a93', fontSize: 12 }}>{watchlistIds.size} saved</span>
+                <span style={{ color: '#6e7a93', fontSize: 12 }}>all {watchlistIds.size} saved</span>
               </div>
             )}
 
-            {/* Streaming Watchlist toggle — watchlist items available on configured services */}
-            {watchlistIds.size > 0 && selected.length > 0 && (
+            {/* Streaming Watchlist toggle — only the ones you can watch now */}
+            {!isSearching && watchlistIds.size > 0 && selected.length > 0 && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(streamingWatchlist ? { background: 'rgba(1,210,119,0.12)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277' } : {}) }}
@@ -2160,7 +2513,9 @@ function App() {
                       <button key={platform.key} type="button" onClick={() => toggleServiceFilter(platform.key)}
                         className="btn-tap"
                         style={{ ...styles.serviceFilterButton, ...(isActive ? styles.serviceFilterButtonActive : {}) }}>
-                        <img src={platform.logo} alt={platform.name} style={styles.serviceLogoTiny} />
+                        {platform.logo ? (
+                          <img src={platform.logo} alt={platform.name} style={styles.serviceLogoTiny} />
+                        ) : null}
                         <span>{platform.name}</span>
                       </button>
                     );
@@ -2253,13 +2608,26 @@ function App() {
               )}
             </div>
 
-            {catalogMeta ? (
+            {isSearching ? (
+              <div style={styles.searchBanner}>
+                <span>
+                  {searchLoading
+                    ? `Searching for “${searchQuery.trim()}”…`
+                    : `${searchResults.length} result${searchResults.length === 1 ? '' : 's'} for “${searchQuery.trim()}” · results not on your services can still be added to your watchlist`}
+                </span>
+                <button type="button" style={styles.inlineButton} onClick={() => setSearchQuery('')}>
+                  Back to catalog
+                </button>
+              </div>
+            ) : null}
+
+            {!isSearching && catalogMeta ? (
               <div style={styles.catalogMeta}>
                 Showing {catalogMeta.visibleCount || movies.length} titles · page {catalogMeta.page || catalogPage} of {catalogMeta.totalPages || 1}{catalogMeta.lastUpdatedAt ? ` · Updated ${new Date(catalogMeta.lastUpdatedAt).toLocaleString()}` : ''}{catalogMeta.refreshing ? ' · ⟳ Syncing…' : ''}
               </div>
             ) : null}
 
-            {(loadingMovies || (!movies.length && catalogMeta?.refreshing)) ? (
+            {((isSearching && searchLoading) || (!isSearching && (loadingMovies || (!movies.length && catalogMeta?.refreshing)))) ? (
               <div style={styles.movieList}>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} style={{ ...styles.movieCard, opacity: 0.45 }} className="movie-card-wrap">
@@ -2274,82 +2642,19 @@ function App() {
               </div>
             ) : (
               <div style={styles.movieList}>
-                {movies.map((movie) => {
-                  const ratingEntries = ratingEntriesForItem(movie);
-                  const isTV = movie.mediaType === 'tv';
-                  const isWatched = watchedIds.has(movie.id);
-                  return (
-                    <div key={movie.id} style={{ ...styles.movieCard, ...styles.movieCardClickable }} className="movie-card-wrap"
-                      data-media={movie.mediaType} onClick={() => fetchMovieDetails(movie)}>
-                      {/* Watched toggle button */}
-                      <button type="button"
-                        style={{ ...styles.watchedBtn, ...(isWatched ? styles.watchedBtnActive : {}) }}
-                        onClick={(e) => { e.stopPropagation(); toggleWatched(movie); }}
-                        title={isWatched ? 'Remove from watched' : 'Mark as watched'}>
-                        {isWatched ? '✓' : '○'}
-                      </button>
-                      {movie.posterUrl ? (
-                        <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster}
-                          className="movie-poster-el" loading="lazy"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; const ph = e.currentTarget.nextSibling; if (ph) ph.style.display = 'flex'; }} />
-                      ) : null}
-                      <div style={{ ...styles.moviePosterPlaceholder, display: movie.posterUrl ? 'none' : 'flex' }} className="movie-poster-ph">🎬</div>
-                      <div style={styles.movieBody}>
-                        <div style={styles.movieTitle} className="movie-title-el">{movie.title}</div>
-                        <div style={styles.movieSubhead}>
-                          <span style={{ ...styles.chip, ...(isTV ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(movie.mediaType)}</span>
-                          {movie.year ? <span style={styles.chip}>{movie.year}</span> : null}
-                        </div>
-                        {movie.overview ? <div style={styles.movieOverview}>{movie.overview}</div> : null}
-                        {movie.genres?.length ? (
-                          <div style={styles.providerRow}>
-                            {movie.genres.slice(0, 4).map((genre) => <span key={genre} style={styles.chipGenre}>{genre}</span>)}
-                          </div>
-                        ) : null}
-                        {movie.availableOn?.length ? (
-                          <div style={styles.providerRow}>
-                            {movie.availableOn.map((providerName) => {
-                              const platform = providerNameToPlatform[providerName];
-                              return (
-                                <span key={providerName} style={styles.providerChip}>
-                                  {platform ? <img src={platform.logo} alt={providerName} style={styles.providerLogo} /> : null}
-                                  <span>{providerName}</span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                        {ratingEntries.length ? (
-                          <div style={styles.ratingGrid} className="rating-row">
-                            {ratingEntries.map((entry) => {
-                              const visual = getRatingVisual(movie, entry.key);
-                              const chipAccent = getRatingChipStyle(entry.key, entry.value);
-                              return (
-                                <span key={entry.key} style={{ ...styles.ratingChip, ...chipAccent }}>
-                                  {visual ? <img src={visual} alt={entry.label} style={styles.ratingLogo} /> : null}
-                                  <span style={styles.ratingContent}>
-                                    <span style={styles.ratingLabel}>{entry.label}</span>
-                                    <span style={styles.ratingValue}>{entry.value}</span>
-                                  </span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        ) : catalogMeta?.refreshing ? (
-                          <div style={{ fontSize: 11, color: 'rgba(110,122,147,0.7)', marginTop: 8 }}>⏳ Ratings loading…</div>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
+                {(isSearching ? searchResults : movies).map((movie) => renderMovieCard(movie))}
               </div>
             )}
 
-            {!movies.length && !loadingMovies && !catalogMeta?.refreshing ? (
+            {isSearching && !searchLoading && !searchResults.length ? (
+              <div style={styles.emptyState}>Nothing matched “{searchQuery.trim()}”.</div>
+            ) : null}
+
+            {!isSearching && !movies.length && !loadingMovies && !catalogMeta?.refreshing ? (
               <div style={styles.emptyState}>No catalog titles match the current filters.</div>
             ) : null}
 
-            {totalPages > 1 ? (
+            {!isSearching && totalPages > 1 ? (
               <div style={styles.paginationRow}>
                 <span style={styles.paginationSummary}>Page {catalogPage} of {totalPages}</span>
                 <button type="button" style={styles.pageButton} className="btn-tap page-btn"
@@ -2455,12 +2760,17 @@ function App() {
                   </div>
                 ) : null}
 
-                {/* Watched toggle in modal */}
-                <div style={{ marginTop: 20 }}>
+                {/* Watched + watchlist toggles in modal */}
+                <div style={{ marginTop: 20, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   <button type="button"
-                    style={{ ...styles.button, ...(watchedIds.has(selectedMovie.id) ? { background: 'rgba(1,210,119,0.18)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277', boxShadow: 'none' } : {}) }}
+                    style={{ ...styles.button, flex: '1 1 200px', width: 'auto', margin: 0, ...(watchedIds.has(selectedMovie.id) ? { background: 'rgba(1,210,119,0.18)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277', boxShadow: 'none' } : {}) }}
                     onClick={() => toggleWatched(selectedMovie)}>
                     {watchedIds.has(selectedMovie.id) ? '✓ Watched — Click to Remove' : '○ Mark as Watched'}
+                  </button>
+                  <button type="button"
+                    style={{ ...styles.button, ...styles.buttonSecondary, flex: '1 1 200px', width: 'auto', margin: 0, ...(watchlistIds.has(selectedMovie.id) ? { background: 'rgba(108,99,255,0.18)', border: '1px solid rgba(108,99,255,0.45)', color: '#c4b8ff' } : {}) }}
+                    onClick={() => toggleWatchlist(selectedMovie)}>
+                    {watchlistIds.has(selectedMovie.id) ? '🔖 On Watchlist — Click to Remove' : '🏷 Add to Watchlist'}
                   </button>
                 </div>
               </div>

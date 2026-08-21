@@ -186,12 +186,14 @@ describe('Authentication middleware', () => {
     expect(res.body.error).toMatch(/missing/i);
   });
 
+  // 401, not 403: an invalid or expired token means "authenticate", and clients
+  // key their sign-out-and-retry behaviour off that status.
   it('rejects requests with an invalid token', async () => {
     const res = await request(app)
       .get('/platforms')
       .set('Authorization', 'Bearer invalid.token.here');
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/invalid or expired/i);
   });
 });
@@ -309,6 +311,8 @@ describe('PUT /account', () => {
   afterAll(() => closeDb(db));
 
   it('updates the password and allows login with new password', async () => {
+    const staleToken = token;
+
     const updateRes = await request(app)
       .put('/account')
       .set('Authorization', `Bearer ${token}`)
@@ -316,6 +320,10 @@ describe('PUT /account', () => {
 
     expect(updateRes.status).toBe(200);
     expect(updateRes.body.success).toBe(true);
+    // The caller gets a re-issued token so the change it just made doesn't
+    // sign it out. Adopt it for the rest of this block.
+    expect(updateRes.body).toHaveProperty('token');
+    token = updateRes.body.token;
 
     const loginRes = await request(app)
       .post('/login')
@@ -323,6 +331,13 @@ describe('PUT /account', () => {
 
     expect(loginRes.status).toBe(200);
     expect(loginRes.body).toHaveProperty('token');
+
+    // Every other session ends: the token minted before the change is dead.
+    const staleRes = await request(app)
+      .get('/account')
+      .set('Authorization', `Bearer ${staleToken}`);
+
+    expect(staleRes.status).toBe(401);
   });
 
   it('rejects missing password field with 400', async () => {

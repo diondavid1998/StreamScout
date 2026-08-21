@@ -651,8 +651,21 @@ struct PlatformsView: View {
                 body: ["platforms": platforms, "languages": languages],
                 token: app.token
             ) as GenericResponse
+        } catch let err as APIError {
+            isSaving = false
+            if case .unauthorized = err {
+                app.logout()
+                return
+            }
+            // Stay on this screen so the message is visible and the user can
+            // retry. Navigating away here left the catalog built from the old
+            // server-side selection with nothing explaining the mismatch.
+            errorMsg = "Couldn't save your services. Tap Save to try again."
+            return
         } catch {
-            errorMsg = "Couldn't save your services. Changes saved locally — try again later."
+            isSaving = false
+            errorMsg = "Couldn't save your services. Tap Save to try again."
+            return
         }
         isSaving = false
         if app.page == .platforms {
@@ -660,6 +673,38 @@ struct PlatformsView: View {
         } else {
             dismiss()
         }
+    }
+}
+
+/// A service's logo, or a tinted monogram when no artwork is bundled for it.
+/// The backend supports more services than the app ships logos for; those are
+/// still selectable rather than being hidden from the picker.
+struct PlatformArtwork: View {
+    let platform: StreamingPlatform
+    var size: CGFloat = 46
+    var cornerRadius: CGFloat = 10
+
+    var body: some View {
+        Group {
+            if let asset = platform.logoAsset {
+                Image(asset)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(platform.accentColor.opacity(0.28))
+                    .overlay(
+                        Text(platform.monogram)
+                            .font(.system(size: size * 0.36, weight: .bold, design: .rounded))
+                            .foregroundColor(.mkText)
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                            .padding(2)
+                    )
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 
@@ -681,11 +726,7 @@ struct PlatformTile: View {
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
 
-                    Image(platform.logoAsset)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 46, height: 46)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    PlatformArtwork(platform: platform, size: 46, cornerRadius: 10)
 
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
@@ -774,6 +815,9 @@ struct CatalogView: View {
     @State private var yearMax = ""
     @State private var hideWatched = false
     @State private var watchlistOnly = false
+    /// Narrows the watchlist view to titles currently streaming on the user's
+    /// services. Mutually exclusive with `watchlistOnly`.
+    @State private var streamingWatchlistOnly = false
     @State private var selectedDetail: CatalogItem? = nil
     @State private var pollingTask: Task<Void, Never>?
     @State private var searchText = ""
@@ -1053,7 +1097,10 @@ struct CatalogView: View {
                     .buttonStyle(ScaleButtonStyle())
                 }
                 Button {
-                    watchlistOnly.toggle(); page = 1; Task { await fetch() }
+                    watchlistOnly.toggle()
+                    // The two watchlist views are alternatives, not layers.
+                    if watchlistOnly { streamingWatchlistOnly = false }
+                    page = 1; Task { await fetch() }
                 } label: {
                     FilterChip(
                         label: "From Watchlist",
@@ -1061,6 +1108,19 @@ struct CatalogView: View {
                     )
                 }
                 .buttonStyle(ScaleButtonStyle())
+                if !app.selectedPlatforms.isEmpty {
+                    Button {
+                        streamingWatchlistOnly.toggle()
+                        if streamingWatchlistOnly { watchlistOnly = false }
+                        page = 1; Task { await fetch() }
+                    } label: {
+                        FilterChip(
+                            label: "Streaming Watchlist",
+                            icon: "antenna.radiowaves.left.and.right", active: streamingWatchlistOnly
+                        )
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                }
                 if !app.selectedPlatforms.isEmpty {
                     HStack(spacing: 5) {
                         Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 10))
@@ -1258,7 +1318,10 @@ struct CatalogView: View {
         if !yearMin.isEmpty               { params["yearMin"] = yearMin }
         if !yearMax.isEmpty               { params["yearMax"] = yearMax }
         if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "true" }
-        if watchlistOnly { params["watchlistOnly"] = "true" }
+        if watchlistOnly || streamingWatchlistOnly {
+            params["watchlistOnly"] = "true"
+            if streamingWatchlistOnly { params["streamingOnly"] = "true" }
+        }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
             if let serverError = resp.error, resp.catalog.isEmpty {
@@ -1638,12 +1701,16 @@ struct PillChip: View {
 struct ProviderChip: View {
     let name: String
     var platform: StreamingPlatform? {
-        allPlatforms.first { name.lowercased().contains($0.key) || $0.name.lowercased() == name.lowercased() }
+        let lowered = name.lowercased()
+        // Exact name first: with 31 services in the list, a substring match can
+        // land on the wrong one (TMDB returns variants like "Netflix with Ads").
+        return allPlatforms.first { $0.name.lowercased() == lowered }
+            ?? allPlatforms.first { lowered.contains($0.key) }
     }
     var body: some View {
         HStack(spacing: 4) {
-            if let p = platform {
-                Image(p.logoAsset).resizable().scaledToFit()
+            if let p = platform, let asset = p.logoAsset {
+                Image(asset).resizable().scaledToFit()
                     .frame(width: 14, height: 14)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
             }
@@ -2753,9 +2820,7 @@ struct PlatformToggle: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Image(platform.logoAsset).resizable().scaledToFit()
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                PlatformArtwork(platform: platform, size: 44, cornerRadius: 10)
                     .overlay(RoundedRectangle(cornerRadius: 10)
                         .stroke(isSelected ? Color.mkOnAccent.opacity(0.9) : Color.clear, lineWidth: 2))
                 Text(platform.name).font(.system(size: 11, weight: .semibold))

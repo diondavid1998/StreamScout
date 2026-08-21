@@ -24,7 +24,7 @@ Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on *
 
 ### Step 2 — Deploy the frontend on Netlify
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/diondavid1998/WhatsOn)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/diondavid1998/StreamScout)
 
 1. Click the button above and sign in / create a free [Netlify](https://netlify.com) account.
 2. Netlify will detect `netlify.toml` and use `web-frontend/` as the build root automatically.
@@ -45,12 +45,14 @@ Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on *
 
 ## Features
 
-- **Streaming service picker** — select from Netflix, Hulu, Prime Video, Disney+, Paramount+, Peacock, Max, and Crunchyroll
+- **Streaming service picker** — 31 services, from Netflix, Hulu, Prime Video, Disney+, Max and Paramount+ through to Criterion Channel, MUBI, Shudder and HiDive
 - **Movies & TV Shows** — browse a live catalog pulled from TMDB and enriched with OMDB ratings
 - **Multi-source ratings** — IMDb, Rotten Tomatoes, Metacritic, and TMDb scores shown per title
 - **Genre filter** — multi-select genre filtering including Anime
 - **Language filter** — filter catalog by original language
-- **Sort & filter** — sort by rating, release date, or alphabetically; filter by media type
+- **Search** — live TMDB search across every title, not just the cached catalog
+- **Watchlist** — save titles from the catalog, search, or a Letterboxd import; view the whole list or just what's streaming on your services
+- **Sort & filter** — sort by rating, release date, recently added, or alphabetically; filter by media type
 - **Pagination** — smooth page-based browsing with a background sync indicator
 - **Progressive Web App (PWA)** — installable on iPhone via Safari, works offline via service worker
 - **User accounts** — JWT-based auth with register/login; preferences saved per user
@@ -76,6 +78,19 @@ WhatsOn is a Progressive Web App — you can add it to your iPhone Home Screen a
 > ℹ️ The app runs in standalone mode (no Safari address bar), caches content for offline use, and behaves like a native app.
 
 ---
+
+## A note on names
+
+Three names appear in this repository, and all three are load-bearing:
+
+| Name | Where it appears | Why |
+|---|---|---|
+| **WhatsOn** | The product — app title, PWA manifest, iOS bundle, `WhatsOn/` sources | The current, user-facing brand |
+| **StreamScout** | The GitHub repository and the root `package.json` | The original project name; renaming the repo would break existing clones and the Netlify/Railway links |
+| **streamscore** | The Railway hostname in `netlify.toml` | The deployed backend's actual URL — changing it means re-pointing the service |
+
+New user-facing strings should say **WhatsOn**. The other two are infrastructure
+identifiers; leave them alone unless you are also updating the service they name.
 
 ## Tech Stack
 
@@ -201,15 +216,66 @@ npm run build    # production build
 
 ## API Endpoints
 
+All paths except the auth ones below require an `Authorization: Bearer <jwt>` header.
+
+### Auth
+
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/register` | Create account |
-| `POST` | `/login` | Login, returns JWT |
-| `GET` | `/movies` | Fetch catalog (auth required) |
-| `GET` | `/platforms` | Get saved platform preferences |
-| `POST` | `/platforms` | Save platform preferences |
-| `GET` | `/languages` | Get saved language preferences |
-| `POST` | `/languages` | Save language preferences |
+| `POST` | `/register` | Create an account; returns a JWT |
+| `POST` | `/login` | Sign in; returns a JWT |
+| `POST` | `/auth/forgot-password` | Email a 6-digit reset code |
+| `POST` | `/auth/reset-password` | Consume the code and set a new password |
+
+### Account & preferences
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/account` | Username, email, profile picture |
+| `PUT` | `/account` | Update username, email, password, or profile picture |
+| `GET` | `/platforms` | Saved streaming services **and** languages |
+| `PUT` | `/platforms` | Save streaming services and languages |
+
+> There is no separate `/languages` endpoint — language preferences are read and
+> written alongside platforms on `/platforms`.
+
+### Catalog
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/movies` | Paged catalog. See the query parameters below |
+| `GET` | `/catalog-status` | When the cache last synced, and how many titles it holds |
+| `POST` | `/catalog/refresh` | Force a full rebuild from TMDB (runs in the background) |
+| `GET` | `/search?q=` | Live TMDB search across all titles, annotated with availability |
+| `GET` | `/titles/:mediaType/:tmdbId/details` | Cast, crew, runtime, seasons |
+| `GET` | `/titles/person/:personId` | A person's filmography, filtered to your services |
+
+`GET /movies` accepts: `mediaType` (`all` \| `movie` \| `tv` \| `documentary`),
+`sortBy` (`popularity`, `recently_added`, `release_date`, `release_date_asc`,
+`tmdb`, `imdb`, `rotten_tomatoes`, `metacritic`, `title`), `page`, `limit`,
+`region`, `serviceFilters`, `languageFilters`, `genreFilters`, `yearMin`,
+`yearMax`, `hideWatched`, `watchlistOnly`, and `streamingOnly`.
+
+`watchlistOnly=true` returns your whole watchlist; adding `streamingOnly=true`
+narrows it to titles currently streaming on your services.
+
+### Watched & watchlist
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/watched` | Titles marked watched |
+| `POST` | `/watched` | Mark a title watched |
+| `DELETE` | `/watched/:itemId` | Unmark a title |
+| `GET` | `/watchlist` | Saved-for-later titles |
+| `POST` | `/watchlist` | Add a title to the watchlist |
+| `DELETE` | `/watchlist/:itemId` | Remove a title from the watchlist |
+
+### Letterboxd import
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/import/letterboxd/preview` | Parse a CSV and report what it contains |
+| `POST` | `/import/letterboxd` | Import up to 50 items per call |
 
 ---
 

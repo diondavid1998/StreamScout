@@ -28,8 +28,14 @@ async function createTestDb() {
     email TEXT,
     profile_pic TEXT,
     platforms TEXT DEFAULT '[]',
-    languages TEXT DEFAULT '[]'
+    languages TEXT DEFAULT '[]',
+    token_version INTEGER NOT NULL DEFAULT 0
   )`);
+
+  // Mirrors the production index created in index.js.
+  await exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email) WHERE email IS NOT NULL`
+  );
 
   await exec(`CREATE TABLE IF NOT EXISTS watched_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
