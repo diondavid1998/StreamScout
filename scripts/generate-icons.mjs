@@ -49,7 +49,8 @@ for (const output of pngOutputs) {
   await fs.writeFile(output.file, png);
 }
 
-const faviconPngs = await Promise.all([16, 32, 48].map((size) => buildOpaquePng(size)));
+// Sizes mirror the `favicon.ico` entry in web-frontend/public/manifest.json.
+const faviconPngs = await Promise.all([16, 32, 48, 64].map((size) => buildOpaquePng(size)));
 const faviconIco = await pngToIco(faviconPngs);
 await fs.writeFile(path.join(webPublicDir, 'favicon.ico'), faviconIco);
 

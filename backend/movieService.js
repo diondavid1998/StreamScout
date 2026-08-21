@@ -7,6 +7,10 @@ const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 const DEFAULT_REGION = 'US';
 const DISCOVER_PAGE_COUNT = 1;
 const CACHE_TTL_MS = 10 * 60 * 1000;
+// Hard ceiling on each in-memory response cache. A full snapshot sync touches
+// ~1,000 titles, so this holds a couple of syncs' worth of hot keys without
+// letting the process grow unbounded across daily refreshes.
+const MAX_CACHE_ENTRIES = 2500;
 const DOCUMENTARY_GENRE_ID = 99;
 const DEFAULT_PAGE_SIZE = 24;
 const PREFETCH_DISCOVER_PAGES = 5;
@@ -75,14 +79,35 @@ function getCacheEntry(cache, key) {
     return null;
   }
 
+  // Move to the back so eviction targets genuinely cold keys.
+  cache.delete(key);
+  cache.set(key, entry);
+
   return entry.value;
 }
 
+/**
+ * Insert with LRU eviction.
+ *
+ * These caches are long-lived on a server process, and a single catalog sync
+ * writes a detail payload per title under a URL that is never requested again.
+ * Without a bound the maps only grow: expiry alone never frees anything,
+ * because getCacheEntry can only evict a key something asks for a second time.
+ * Map preserves insertion order, so deleting the first key drops the oldest
+ * entry; re-inserting on read (below) keeps hot keys at the back.
+ */
 function setCacheEntry(cache, key, value, ttlMs = CACHE_TTL_MS) {
+  cache.delete(key);
   cache.set(key, {
     value,
     expiresAt: Date.now() + ttlMs,
   });
+
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
 }
 
 function decodeJwtPayload(token) {

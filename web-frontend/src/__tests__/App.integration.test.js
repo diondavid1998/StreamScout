@@ -1,10 +1,10 @@
 /**
- * Integration tests for the StreamScore React app.
+ * Integration tests for the WhatsOn React app.
  * The backend API is mocked via jest.fn() / global.fetch mock.
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App';
 
@@ -176,6 +176,31 @@ describe('Auth page', () => {
 
 // ── Logged-in session: catalog view ──────────────────────────────────────────
 
+/**
+ * Routes by URL rather than by call order. The catalog page fires several
+ * requests concurrently (/movies, /watched, /watchlist), so an index-based
+ * mock hands the wrong body to whichever happens to land second.
+ */
+function setupApiMock({ platforms = ['netflix'], catalog = EMPTY_CATALOG, watchlist = [], watched = [], search = [] } = {}) {
+  global.fetch = jest.fn((url, options = {}) => {
+    const href = String(url);
+    if (href.includes('/platforms')) {
+      return Promise.resolve(
+        options.method === 'PUT'
+          ? mockResponse({ success: true })
+          : mockResponse({ platforms, languages: [] })
+      );
+    }
+    if (href.includes('/search')) return Promise.resolve(mockResponse({ items: search }));
+    if (href.includes('/movies')) return Promise.resolve(mockResponse(catalog));
+    if (href.includes('/watchlist')) return Promise.resolve(mockResponse({ items: watchlist }));
+    if (href.includes('/watched')) return Promise.resolve(mockResponse({ items: watched }));
+    if (href.includes('/catalog-status')) return Promise.resolve(mockResponse({ lastSyncedAt: null, itemCount: 0 }));
+    return Promise.resolve(mockResponse({}));
+  });
+  return global.fetch;
+}
+
 describe('Logged-in catalog view', () => {
   function setupLoggedInSession() {
     localStorage.setItem('whatsOn.authToken', 'mock-jwt');
@@ -183,46 +208,77 @@ describe('Logged-in catalog view', () => {
   }
 
   /**
-   * Full flow: session restore (GET /platforms) → platforms page →
-   * click "Save and Continue" (PUT /platforms) → movies page (GET /movies)
+   * A user with saved platforms lands on the catalog directly — session restore
+   * reads /platforms and skips the picker when the list is non-empty.
    */
-  async function renderToCatalog(catalogResponse = EMPTY_CATALOG) {
+  async function renderToCatalog(catalog = EMPTY_CATALOG, extra = {}) {
     setupLoggedInSession();
-    setupFetchMock([
-      mockResponse({ platforms: ['netflix'], languages: [] }), // GET /platforms (session restore)
-      mockResponse({ success: true }),                          // PUT /platforms (Save and Continue)
-      catalogResponse,                                          // GET /movies
-    ]);
+    const fetchMock = setupApiMock({ catalog, ...extra });
 
     render(<App />);
 
-    // Wait for loadingSession=false and page='platforms' (Save and Continue appears)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Settings/i })).toBeInTheDocument();
+    }, { timeout: 8000 });
+
+    return fetchMock;
+  }
+
+  it('restores the session and loads the catalog without visiting the picker', async () => {
+    await renderToCatalog();
+
+    const urls = global.fetch.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes('/platforms'))).toBe(true);
+    expect(urls.some((u) => u.includes('/movies'))).toBe(true);
+    // Platforms are already saved, so the setup screen is skipped entirely.
+    expect(screen.queryByRole('button', { name: /Save and Continue/i })).not.toBeInTheDocument();
+  });
+
+  it('sends the user to the picker when no platforms are saved', async () => {
+    setupLoggedInSession();
+    setupApiMock({ platforms: [] });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Save and Continue/i })).toBeInTheDocument();
+    }, { timeout: 8000 });
+  });
+
+  it('PUTs /platforms and loads the catalog on Save and Continue', async () => {
+    setupLoggedInSession();
+    setupApiMock({ platforms: [], catalog: SAMPLE_CATALOG });
+
+    render(<App />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Save and Continue/i })).toBeInTheDocument();
     }, { timeout: 8000 });
 
-    // Click Save and Continue to navigate to catalog
+    fireEvent.click(screen.getByLabelText('Netflix'));
     fireEvent.click(screen.getByRole('button', { name: /Save and Continue/i }));
 
-    // Wait for the transition away from platforms page (page='movies' renders, Save btn gone)
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Save and Continue/i })).not.toBeInTheDocument();
+      const methods = global.fetch.mock.calls.map((c) => c[1]?.method);
+      expect(methods).toContain('PUT');
     }, { timeout: 8000 });
 
-    return global.fetch;
-  }
+    await waitFor(() => {
+      expect(screen.getByText('Test Movie')).toBeInTheDocument();
+    }, { timeout: 8000 });
+  });
 
-  it('fetches /platforms then PUT /platforms then /movies on Save and Continue', async () => {
-    await renderToCatalog();
+  it('requests the catalog exactly once when entering it', async () => {
+    // The watchlistIds Set is rebuilt on every load; depending on its identity
+    // used to change fetchMovies' identity and fire a second, identical request.
+    await renderToCatalog(SAMPLE_CATALOG, {
+      watchlist: [{ itemId: 'movie-999', title: 'Saved', mediaType: 'movie' }],
+    });
 
-    // Verify GET /platforms (session restore), PUT /platforms (save), GET /movies
-    const calls = global.fetch.mock.calls;
-    expect(calls.length).toBeGreaterThanOrEqual(3);
-    const urls = calls.map((c) => c[0]);
-    const methods = calls.map((c) => c[1]?.method);
-    expect(urls.some((u) => u.includes('/platforms'))).toBe(true);
-    expect(methods.some((m) => m === 'PUT')).toBe(true);
-    expect(urls.some((u) => u.includes('/movies'))).toBe(true);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const movieCalls = global.fetch.mock.calls.filter((c) => String(c[0]).includes('/movies'));
+    expect(movieCalls).toHaveLength(1);
   });
 
   it('renders movie cards returned from the API', async () => {
@@ -241,7 +297,6 @@ describe('Logged-in catalog view', () => {
       expect(screen.getByText('Test Movie')).toBeInTheDocument();
     }, { timeout: 8000 });
 
-    // TMDb 8.5 should appear (formatted to 1dp)
     expect(screen.getByText('8.5')).toBeInTheDocument();
   });
 
@@ -262,17 +317,21 @@ describe('Logged-in catalog view', () => {
       expect(screen.getByText('Test Movie')).toBeInTheDocument();
     }, { timeout: 8000 });
 
-    expect(screen.getByText(/Page 1 of 3/i)).toBeInTheDocument();
+    // Exact, case-sensitive: the meta line above also reads "page 1 of 3".
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Prev/i })).toBeDisabled();
   });
 
-  it('shows All / Movies / Shows filter buttons', async () => {
+  it('offers the media-type options as a select', async () => {
     await renderToCatalog();
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^All$/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^Shows$/i })).toBeInTheDocument();
-    }, { timeout: 8000 });
+    // The All / Movies / Shows buttons were replaced by a dropdown.
+    const typeSelect = await screen.findByDisplayValue('Movies + TV');
+    expect(typeSelect).toBeInTheDocument();
+    expect(within(typeSelect).getByRole('option', { name: 'Movies' })).toBeInTheDocument();
+    expect(within(typeSelect).getByRole('option', { name: 'TV Shows' })).toBeInTheDocument();
+    expect(within(typeSelect).getByRole('option', { name: 'Documentary' })).toBeInTheDocument();
   });
 
   it('shows a Genre filter option', async () => {
@@ -284,13 +343,7 @@ describe('Logged-in catalog view', () => {
   });
 
   it('uses 1950 as the default lower bound for the year range filter', async () => {
-    setupLoggedInSession();
-    setupFetchMock([
-      mockResponse({ platforms: ['netflix'], languages: [] }),
-      mockResponse(EMPTY_CATALOG),
-    ]);
-
-    render(<App />);
+    await renderToCatalog();
 
     const yearRangeButton = await screen.findByRole('button', { name: /Year Range/i });
     fireEvent.click(yearRangeButton);
@@ -301,5 +354,134 @@ describe('Logged-in catalog view', () => {
     expect(minSlider).toHaveValue('1950');
     expect(maxSlider).toHaveAttribute('min', '1950');
     expect(maxSlider).toHaveValue(String(new Date().getFullYear()));
+  });
+});
+
+// ── Search and watchlist ─────────────────────────────────────────────────────
+
+describe('Search', () => {
+  const SEARCH_RESULT = {
+    id: 'movie-777',
+    title: 'Obscure Indie Film',
+    mediaType: 'movie',
+    year: 1998,
+    overview: 'Not in the popular snapshot.',
+    genres: [],
+    availableOn: [],
+    popularity: 1,
+    ratings: {},
+  };
+
+  beforeEach(() => {
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
+  });
+
+  async function renderCatalog(extra = {}) {
+    setupApiMock({ catalog: SAMPLE_CATALOG, ...extra });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+  }
+
+  it('queries /search and shows results in place of the catalog', async () => {
+    await renderCatalog({ search: [SEARCH_RESULT] });
+
+    fireEvent.change(screen.getByLabelText(/Search all movies/i), {
+      target: { value: 'obscure' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Obscure Indie Film')).toBeInTheDocument();
+    }, { timeout: 8000 });
+
+    const searchCalls = global.fetch.mock.calls.filter((c) => String(c[0]).includes('/search'));
+    expect(searchCalls.length).toBeGreaterThan(0);
+    expect(String(searchCalls[0][0])).toContain('q=obscure');
+    // The catalog grid is replaced while a search is active.
+    expect(screen.queryByText('Test Movie')).not.toBeInTheDocument();
+  });
+
+  it('does not search for a single character', async () => {
+    await renderCatalog({ search: [SEARCH_RESULT] });
+
+    fireEvent.change(screen.getByLabelText(/Search all movies/i), { target: { value: 'o' } });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const searchCalls = global.fetch.mock.calls.filter((c) => String(c[0]).includes('/search'));
+    expect(searchCalls).toHaveLength(0);
+  });
+
+  it('returns to the catalog when the search is cleared', async () => {
+    await renderCatalog({ search: [SEARCH_RESULT] });
+
+    const input = screen.getByLabelText(/Search all movies/i);
+    fireEvent.change(input, { target: { value: 'obscure' } });
+    await waitFor(() => expect(screen.getByText('Obscure Indie Film')).toBeInTheDocument(), { timeout: 8000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /Back to catalog/i }));
+
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+  });
+});
+
+describe('Watchlist from the catalog', () => {
+  beforeEach(() => {
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
+  });
+
+  it('POSTs to /watchlist when the bookmark control is used', async () => {
+    setupApiMock({ catalog: SAMPLE_CATALOG });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+
+    const addButtons = screen.getAllByRole('button', { name: /Add to watchlist/i });
+    fireEvent.click(addButtons[0]);
+
+    await waitFor(() => {
+      const posted = global.fetch.mock.calls.find(
+        (c) => String(c[0]).includes('/watchlist') && c[1]?.method === 'POST'
+      );
+      expect(posted).toBeTruthy();
+      expect(JSON.parse(posted[1].body).itemId).toBe('movie-123');
+    }, { timeout: 8000 });
+  });
+
+  it('shows both watchlist views when the user has saved titles', async () => {
+    setupApiMock({
+      catalog: SAMPLE_CATALOG,
+      watchlist: [{ itemId: 'movie-999', title: 'Saved', mediaType: 'movie' }],
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /From watchlist/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Streaming watchlist/i })).toBeInTheDocument();
+    }, { timeout: 8000 });
+  });
+
+  it('asks for the whole watchlist, and for only the streamable part, separately', async () => {
+    setupApiMock({
+      catalog: SAMPLE_CATALOG,
+      watchlist: [{ itemId: 'movie-999', title: 'Saved', mediaType: 'movie' }],
+    });
+    render(<App />);
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /From watchlist/i })).toBeInTheDocument(),
+      { timeout: 8000 }
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /From watchlist/i }));
+    await waitFor(() => {
+      const urls = global.fetch.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('watchlistOnly=true') && !u.includes('streamingOnly'))).toBe(true);
+    }, { timeout: 8000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /Streaming watchlist/i }));
+    await waitFor(() => {
+      const urls = global.fetch.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes('watchlistOnly=true') && u.includes('streamingOnly=true'))).toBe(true);
+    }, { timeout: 8000 });
   });
 });

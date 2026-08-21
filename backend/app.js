@@ -15,7 +15,7 @@ const nodemailer = require('nodemailer');
 const {
   ensureScopeSynced,
   readCachedCatalog,
-  getStreamableWatchlistItems,
+  getWatchlistItemsWithAvailability,
   buildScopeKey,
   syncScope,
 } = require('./catalogCache');
@@ -27,6 +27,89 @@ if (!JWT_SECRET) {
 }
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const DEFAULT_REGION = 'US';
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Small promise wrappers over the sqlite3 callback API ────────────────────
+
+function getRow(db, sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)))
+  );
+}
+
+function getRows(db, sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])))
+  );
+}
+
+function runSql(db, sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.run(sql, params, function onRun(err) { err ? reject(err) : resolve(this); })
+  );
+}
+
+/**
+ * Mint a session token. `tokenVersion` is compared against the stored column on
+ * every authenticated request — bumping it in the database invalidates every
+ * token issued before, which is how a password change ends other sessions.
+ */
+function signUserToken({ id, username, tokenVersion = 0 }) {
+  return jwt.sign({ id, username, tokenVersion: tokenVersion || 0 }, JWT_SECRET, {
+    expiresIn: '30d',
+  });
+}
+
+/** Split a comma-separated query parameter into a clean list of values. */
+function parseCsvParam(value) {
+  return String(value || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Comparator for the in-memory watchlist view. Mirrors buildSortExpression in
+ * catalogCache.js so the same sort option means the same thing whether the
+ * results come from the cached catalog or from the watchlist path.
+ */
+function compareWatchlistItems(sortBy) {
+  const byPopularity = (a, b) => (b.popularity || 0) - (a.popularity || 0);
+  const byRating = (key) => (a, b) => {
+    const delta = (b.sortableRatings?.[key] || 0) - (a.sortableRatings?.[key] || 0);
+    return delta !== 0 ? delta : byPopularity(a, b);
+  };
+
+  switch (sortBy) {
+    case 'title':
+      return (a, b) => String(a.title || '').localeCompare(String(b.title || ''));
+    case 'release_date':
+      return (a, b) => String(b.releaseDate || '').localeCompare(String(a.releaseDate || ''));
+    case 'release_date_asc':
+      return (a, b) => {
+        // Undated titles sort last, matching the SQL CASE expression.
+        const left = a.releaseDate || '';
+        const right = b.releaseDate || '';
+        if (!left && !right) return 0;
+        if (!left) return 1;
+        if (!right) return -1;
+        return left.localeCompare(right);
+      };
+    case 'recently_added':
+      return (a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || ''));
+    case 'tmdb':
+      return byRating('tmdb');
+    case 'imdb':
+      return byRating('imdb');
+    case 'rotten_tomatoes':
+      return byRating('rottenTomatoes');
+    case 'metacritic':
+      return byRating('metacritic');
+    case 'popularity':
+    default:
+      return byPopularity;
+  }
+}
 
 function createEmailTransporter() {
   if (!process.env.EMAIL_FROM || !process.env.EMAIL_PASS) return null;
@@ -74,7 +157,12 @@ function createApp(db, { disableRateLimit = false } = {}) {
         if (!origin || allowedOrigins.includes(normalised)) {
           callback(null, true);
         } else {
-          callback(new Error(`CORS: origin ${origin} not allowed`));
+          // Tagged so the error handler can answer 403 rather than 500. A
+          // misconfigured FRONTEND_URL is the most common deploy mistake here,
+          // and it should read as a rejection, not a server fault.
+          const error = new Error(`CORS: origin ${origin} not allowed`);
+          error.status = 403;
+          callback(error);
         }
       },
       credentials: true,
@@ -118,6 +206,9 @@ function createApp(db, { disableRateLimit = false } = {}) {
     }
     const cleanUsername = username.trim().toLowerCase();
     const cleanEmail = email ? email.trim().toLowerCase() : null;
+    if (cleanEmail && !EMAIL_PATTERN.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
     const hash = await bcrypt.hash(password, 10);
     db.run(
       'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
@@ -125,15 +216,18 @@ function createApp(db, { disableRateLimit = false } = {}) {
       function (err) {
         if (err) {
           if (err.message && err.message.includes('UNIQUE')) {
-            return res.status(400).json({ error: 'Username already exists' });
+            // Both username and email are unique; say which one collided so the
+            // user can act on it. Password reset resolves an account by email,
+            // so a shared address would make that flow ambiguous.
+            return res.status(400).json({
+              error: /email/i.test(err.message)
+                ? 'An account already uses that email address'
+                : 'Username already exists',
+            });
           }
           return res.status(500).json({ error: 'Registration failed' });
         }
-        const token = jwt.sign(
-          { id: this.lastID, username: cleanUsername },
-          JWT_SECRET,
-          { expiresIn: '30d' }
-        );
+        const token = signUserToken({ id: this.lastID, username: cleanUsername, tokenVersion: 0 });
         res.json({ token });
       }
     );
@@ -157,25 +251,53 @@ function createApp(db, { disableRateLimit = false } = {}) {
       if (!match) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
-      const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+      const token = signUserToken({
+        id: user.id,
+        username: user.username,
+        tokenVersion: user.token_version || 0,
+      });
       res.json({ token });
     });
   });
 
   // ── Auth middleware ───────────────────────────────────────────────────────
-  function authenticateToken(req, res, next) {
+  async function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) {
       return res.status(401).json({ error: 'Missing authentication token' });
     }
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-      if (err) {
-        return res.status(403).json({ error: 'Invalid or expired authentication token' });
-      }
-      req.user = user;
-      next();
-    });
+
+    // Verified synchronously: an async callback passed to jwt.verify returns a
+    // promise the library ignores, so anything thrown inside it would surface
+    // as an unhandled rejection instead of a response.
+    let user;
+    try {
+      user = jwt.verify(token, JWT_SECRET);
+    } catch {
+      // 401, not 403: this means "authenticate", and it is what both clients
+      // key their sign-out-and-retry behaviour off.
+      return res.status(401).json({ error: 'Invalid or expired authentication token' });
+    }
+
+    // A valid signature alone isn't enough — a token minted before a password
+    // change must stop working. Compare the version it carries with the stored
+    // one, which also catches tokens for accounts that have since been deleted.
+    let row;
+    try {
+      row = await getRow(db, 'SELECT token_version FROM users WHERE id = ?', [user.id]);
+    } catch {
+      return res.status(500).json({ error: 'Database error' });
+    }
+    if (!row) {
+      return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+    }
+    if ((user.tokenVersion || 0) !== (row.token_version || 0)) {
+      return res.status(401).json({ error: 'Session ended. Sign in again.' });
+    }
+
+    req.user = user;
+    next();
   }
 
   // ── Account GET ───────────────────────────────────────────────────────────
@@ -196,7 +318,10 @@ function createApp(db, { disableRateLimit = false } = {}) {
     const { username, email, password, profilePic } = req.body || {};
     const updates = [];
     const values = [];
-    let newToken = null;
+    let usernameChangedTo = null;
+    // Set when the password changes: every previously issued token carries the
+    // old value and stops verifying, so changing a password ends other sessions.
+    let nextTokenVersion = null;
 
     if (username !== undefined) {
       const cleaned = String(username).trim().toLowerCase();
@@ -205,11 +330,11 @@ function createApp(db, { disableRateLimit = false } = {}) {
       }
       updates.push('username = ?');
       values.push(cleaned);
-      newToken = jwt.sign({ id: req.user.id, username: cleaned }, JWT_SECRET, { expiresIn: '30d' });
+      usernameChangedTo = cleaned;
     }
 
     if (email !== undefined) {
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (email && !EMAIL_PATTERN.test(email)) {
         return res.status(400).json({ error: 'Invalid email address' });
       }
       updates.push('email = ?');
@@ -231,6 +356,19 @@ function createApp(db, { disableRateLimit = false } = {}) {
       const hash = await bcrypt.hash(password, 10);
       updates.push('password = ?');
       values.push(hash);
+
+      let current;
+      try {
+        current = await getRow(db, 'SELECT token_version FROM users WHERE id = ?', [req.user.id]);
+      } catch {
+        return res.status(500).json({ error: 'Update failed' });
+      }
+      if (!current) {
+        return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+      }
+      nextTokenVersion = (current.token_version || 0) + 1;
+      updates.push('token_version = ?');
+      values.push(nextTokenVersion);
     }
 
     if (!updates.length) {
@@ -241,32 +379,44 @@ function createApp(db, { disableRateLimit = false } = {}) {
     db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values, function (err) {
       if (err) {
         if (err.message && err.message.includes('UNIQUE')) {
-          return res.status(400).json({ error: 'Username already taken' });
+          return res.status(400).json({
+            error: /email/i.test(err.message)
+              ? 'An account already uses that email address'
+              : 'Username already taken',
+          });
         }
         return res.status(500).json({ error: 'Update failed' });
       }
+      if (this.changes === 0) {
+        return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+      }
       const response = { success: true };
-      if (newToken) response.token = newToken;
+      // Re-issue whenever a claim this token carries has changed, so the caller
+      // isn't logged out by the change it just made.
+      if (usernameChangedTo || nextTokenVersion !== null) {
+        response.token = signUserToken({
+          id: req.user.id,
+          username: usernameChangedTo || req.user.username,
+          tokenVersion: nextTokenVersion !== null ? nextTokenVersion : req.user.tokenVersion,
+        });
+      }
       res.json(response);
     });
   });
 
   // ── Platforms GET ─────────────────────────────────────────────────────────
   app.get('/platforms', authenticateToken, (req, res) => {
-    db.run(
-      'INSERT OR IGNORE INTO users (id, username, password) VALUES (?, ?, ?)',
-      [req.user.id, req.user.username, ''],
-      () => {
-        db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
-          if (err || !row) return res.status(500).json({ error: 'Database error' });
-          let platforms = [];
-          let languages = [];
-          try { platforms = JSON.parse(row.platforms); } catch { platforms = []; }
-          try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
-          res.json({ platforms, languages });
-        });
+    db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      if (!row) {
+        return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
       }
-    );
+      let platforms = [];
+      let languages = [];
+      try { platforms = JSON.parse(row.platforms); } catch { platforms = []; }
+      try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+      res.json({ platforms, languages });
+    });
   });
 
   // ── Platforms PUT ─────────────────────────────────────────────────────────
@@ -278,17 +428,19 @@ function createApp(db, { disableRateLimit = false } = {}) {
     if (languages !== undefined && !Array.isArray(languages)) {
       return res.status(400).json({ error: 'Languages must be an array' });
     }
+    // UPDATE, not upsert: a token for a deleted account must not recreate it.
     db.run(
-      `INSERT INTO users (id, username, password, platforms, languages) VALUES (?, ?, '', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET platforms = excluded.platforms, languages = excluded.languages`,
+      'UPDATE users SET platforms = ?, languages = ? WHERE id = ?',
       [
-        req.user.id,
-        req.user.username,
         JSON.stringify(platforms),
         JSON.stringify(Array.isArray(languages) ? languages : []),
+        req.user.id,
       ],
       function (err) {
         if (err) return res.status(500).json({ error: 'Update failed' });
+        if (this.changes === 0) {
+          return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+        }
         res.json({ success: true });
       }
     );
@@ -296,9 +448,16 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
   // ── Title details (cast, crew, etc.) ─────────────────────────────────────
   app.get('/titles/:mediaType/:tmdb_id/details', authenticateToken, async (req, res) => {
-    const { mediaType, tmdb_id } = req.params;
+    const { mediaType } = req.params;
     if (!['movie', 'tv'].includes(mediaType)) {
       return res.status(400).json({ error: 'mediaType must be movie or tv' });
+    }
+    // This value becomes a path segment in the outbound TMDB URL. Express
+    // decodes %2F in route params and the URL parser then resolves `..`, so an
+    // unvalidated id lets a caller steer the request to another TMDB endpoint.
+    const tmdb_id = parseInt(req.params.tmdb_id, 10);
+    if (!Number.isInteger(tmdb_id) || tmdb_id <= 0 || String(tmdb_id) !== req.params.tmdb_id) {
+      return res.status(400).json({ error: 'tmdb_id must be a positive integer' });
     }
     try {
       const data = await fetchTitleWithCredits(mediaType, tmdb_id);
@@ -524,10 +683,12 @@ function createApp(db, { disableRateLimit = false } = {}) {
       if (claimed === 0) return res.status(400).json({ error: 'Invalid or expired reset code' });
 
       const hash = await bcrypt.hash(newPassword, 10);
-      await new Promise((resolve, reject) =>
-        db.run('UPDATE users SET password = ? WHERE id = ?', [hash, user.id], (err) =>
-          err ? reject(err) : resolve()
-        )
+      // Bump token_version in the same statement: a reset is the one moment we
+      // are most sure the user wants every other session terminated.
+      await runSql(
+        db,
+        'UPDATE users SET password = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?',
+        [hash, user.id]
       );
       res.json({ success: true, message: 'Password has been reset successfully.' });
     } catch (e) {
@@ -537,178 +698,165 @@ function createApp(db, { disableRateLimit = false } = {}) {
   });
 
   // ── Movies (catalog) ─────────────────────────────────────────────────────
-  app.get('/movies', authenticateToken, async (req, res) => {
-    const serviceFiltersFromQuery = String(req.query.serviceFilters || '')
-      .split(',').map((v) => v.trim()).filter(Boolean);
+  app.get('/movies', catalogLimiter, authenticateToken, async (req, res) => {
+    const serviceFiltersFromQuery = parseCsvParam(req.query.serviceFilters);
 
-    db.run(
-      'INSERT OR IGNORE INTO users (id, username, password) VALUES (?, ?, ?)',
-      [req.user.id, req.user.username, ''],
-      () => {
-        db.get(
-          'SELECT platforms, languages FROM users WHERE id = ?',
-          [req.user.id],
-          async (err, row) => {
-            if (err || !row) {
-              return res.status(500).json({ error: 'Database error' });
-            }
+    let row;
+    try {
+      row = await getRow(db, 'SELECT platforms, languages FROM users WHERE id = ?', [req.user.id]);
+    } catch {
+      return res.status(500).json({ error: 'Database error' });
+    }
+    // A valid token for an account that no longer exists is not a reason to
+    // recreate the account — it is a reason to re-authenticate.
+    if (!row) {
+      return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+    }
 
-            let platforms = [];
-            let languages = [];
-            try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
-            try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+    let platforms = [];
+    let savedLanguages = [];
+    try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
+    try { savedLanguages = JSON.parse(row.languages || '[]'); } catch { savedLanguages = []; }
 
-            const scopePlatforms = platforms.length > 0 ? platforms : serviceFiltersFromQuery;
+    const scopePlatforms = platforms.length > 0 ? platforms : serviceFiltersFromQuery;
 
-            const mediaType = req.query.mediaType || 'all';
-            const sortBy = req.query.sortBy || 'popularity';
-            const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 24), 100);
-            const region = req.query.region || 'US';
-            const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-            const languageFilters = String(req.query.languageFilters || '')
-              .split(',').map((v) => v.trim()).filter(Boolean);
-            const genreFilters = String(req.query.genreFilters || '')
-              .split(',').map((v) => v.trim()).filter(Boolean);
-            const yearMin = req.query.yearMin ? parseInt(req.query.yearMin, 10) : null;
-            const yearMax = req.query.yearMax ? parseInt(req.query.yearMax, 10) : null;
-            const hideWatched = req.query.hideWatched === 'true';
-            const watchlistOnly = req.query.watchlistOnly === 'true';
+    const mediaType = req.query.mediaType || 'all';
+    const sortBy = req.query.sortBy || 'popularity';
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 24), 100);
+    const region = req.query.region || DEFAULT_REGION;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const explicitLanguageFilters = parseCsvParam(req.query.languageFilters);
+    // A language preference saved in Settings is a statement about what the
+    // user wants to see, so it filters the catalog on its own. An explicit
+    // filter chosen on the catalog page is narrower and wins.
+    const languageFilters = explicitLanguageFilters.length ? explicitLanguageFilters : savedLanguages;
+    const genreFilters = parseCsvParam(req.query.genreFilters);
+    const yearMin = req.query.yearMin ? parseInt(req.query.yearMin, 10) : null;
+    const yearMax = req.query.yearMax ? parseInt(req.query.yearMax, 10) : null;
+    const hideWatched = req.query.hideWatched === 'true';
+    const watchlistOnly = req.query.watchlistOnly === 'true';
+    // Narrows the watchlist view to titles currently streaming on the user's
+    // platforms. Without it, `watchlistOnly` mirrors the whole watchlist.
+    const streamingOnly = req.query.streamingOnly === 'true';
 
-            let excludeItemIds = [];
-            if (hideWatched) {
-              excludeItemIds = await new Promise((resolve) =>
-                db.all('SELECT item_id FROM watched_items WHERE user_id = ?', [req.user.id], (e, rows) =>
-                  resolve(rows ? rows.map((r) => r.item_id) : [])
-                )
-              );
-            }
-
-            // watchlistOnly: bypass the shared catalog and query TMDB directly for
-            // each watchlist item, with a per-user 24-hour streaming-availability cache.
-            // This ensures obscure titles (not in the top-300 popular snapshot) are found.
-            if (watchlistOnly) {
-              const watchlistDetailRows = await new Promise((resolve) =>
-                db.all(
-                  'SELECT item_id, title, poster_url FROM watchlist_items WHERE user_id = ?',
-                  [req.user.id],
-                  (e, rows) => resolve(rows || [])
-                )
-              );
-
-              if (!watchlistDetailRows.length) {
-                return res.json({
-                  items: [],
-                  meta: {
-                    mediaType, sortBy, region,
-                    page: 1, pageSize: Number(limit), resultCount: 0, visibleCount: 0,
-                    totalPages: 1, hasMore: false, cacheMode: 'watchlist',
-                  },
-                });
-              }
-
-              try {
-                let streamable = await getStreamableWatchlistItems(
-                  db, req.user.id, watchlistDetailRows, scopePlatforms, region
-                );
-
-                // In-memory filters
-                if (serviceFiltersFromQuery.length) {
-                  streamable = streamable.filter((item) =>
-                    item.availableOnKeys.some((k) => serviceFiltersFromQuery.includes(k))
-                  );
-                }
-                if (genreFilters.length) {
-                  streamable = streamable.filter((item) =>
-                    genreFilters.some((g) => item.genres.includes(g))
-                  );
-                }
-                if (languageFilters.length) {
-                  streamable = streamable.filter((item) =>
-                    languageFilters.includes(item.originalLanguage)
-                  );
-                }
-                if (yearMin) {
-                  streamable = streamable.filter((item) =>
-                    item.year && parseInt(item.year, 10) >= yearMin
-                  );
-                }
-                if (yearMax) {
-                  streamable = streamable.filter((item) =>
-                    item.year && parseInt(item.year, 10) <= yearMax
-                  );
-                }
-                if (hideWatched && excludeItemIds.length) {
-                  const excludeSet = new Set(excludeItemIds);
-                  streamable = streamable.filter((item) => !excludeSet.has(item.id));
-                }
-                if (mediaType === 'movie' || mediaType === 'tv') {
-                  streamable = streamable.filter((item) => item.mediaType === mediaType);
-                } else if (mediaType === 'documentary') {
-                  streamable = streamable.filter(
-                    (item) => Array.isArray(item.genres) && item.genres.includes('Documentary')
-                  );
-                }
-
-                // Sort
-                streamable = [...streamable].sort((a, b) => {
-                  switch (sortBy) {
-                    case 'title': return a.title.localeCompare(b.title);
-                    case 'release_date':
-                      return String(b.releaseDate || '').localeCompare(String(a.releaseDate || ''));
-                    case 'tmdb':
-                      return (b.sortableRatings.tmdb || 0) - (a.sortableRatings.tmdb || 0);
-                    default: return (b.popularity || 0) - (a.popularity || 0);
-                  }
-                });
-
-                // Paginate
-                const pageNum = Math.max(1, Number(page));
-                const pageSize = Math.min(Math.max(1, Number(limit)), 100);
-                const totalCount = streamable.length;
-                const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-                const currentPage = Math.min(pageNum, totalPages);
-                const paged = streamable.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-                return res.json({
-                  items: paged,
-                  meta: {
-                    mediaType, sortBy, region,
-                    page: currentPage, pageSize,
-                    resultCount: totalCount,
-                    visibleCount: paged.length,
-                    totalPages,
-                    hasMore: currentPage < totalPages,
-                    cacheMode: 'watchlist',
-                  },
-                });
-              } catch (e) {
-                return res.status(500).json({ error: 'Failed to load watchlist', details: e.message });
-              }
-            }
-
-            try {
-              const scopeKey = await ensureScopeSynced(db, { platforms: scopePlatforms, languages, region });
-              const catalog = await readCachedCatalog(db, {
-                scopeKey,
-                mediaType,
-                sortBy,
-                page: Number(page),
-                pageSize: Number(limit),
-                serviceFilters: serviceFiltersFromQuery,
-                languageFilters,
-                genreFilters,
-                yearMin,
-                yearMax,
-                excludeItemIds,
-              });
-              res.json(catalog);
-            } catch (e) {
-              res.status(500).json({ error: 'Failed to load cached catalog', details: e.message });
-            }
-          }
+    // watchlistOnly: bypass the shared catalog and query TMDB directly for each
+    // watchlist item, with a per-user 24-hour streaming-availability cache. This
+    // ensures obscure titles (not in the popular snapshot) are still found.
+    if (watchlistOnly) {
+      let watchlistDetailRows = [];
+      let watchedIds = new Set();
+      try {
+        watchlistDetailRows = await getRows(
+          db,
+          'SELECT item_id, title, poster_url, added_at FROM watchlist_items WHERE user_id = ?',
+          [req.user.id]
         );
+        if (hideWatched) {
+          const watchedRows = await getRows(
+            db,
+            'SELECT item_id FROM watched_items WHERE user_id = ?',
+            [req.user.id]
+          );
+          watchedIds = new Set(watchedRows.map((r) => r.item_id));
+        }
+      } catch {
+        return res.status(500).json({ error: 'Database error' });
       }
-    );
+
+      if (!watchlistDetailRows.length) {
+        return res.json({
+          items: [],
+          meta: {
+            mediaType, sortBy, region,
+            page: 1, pageSize: Number(limit), resultCount: 0, visibleCount: 0,
+            totalPages: 1, hasMore: false, cacheMode: 'watchlist', streamingOnly,
+          },
+        });
+      }
+
+      try {
+        let items = await getWatchlistItemsWithAvailability(
+          db, req.user.id, watchlistDetailRows, scopePlatforms, region, { streamingOnly }
+        );
+
+        // In-memory filters
+        if (serviceFiltersFromQuery.length) {
+          items = items.filter((item) =>
+            item.availableOnKeys.some((k) => serviceFiltersFromQuery.includes(k))
+          );
+        }
+        if (genreFilters.length) {
+          items = items.filter((item) => genreFilters.some((g) => item.genres.includes(g)));
+        }
+        if (languageFilters.length) {
+          items = items.filter((item) => languageFilters.includes(item.originalLanguage));
+        }
+        if (yearMin) {
+          items = items.filter((item) => item.year && parseInt(item.year, 10) >= yearMin);
+        }
+        if (yearMax) {
+          items = items.filter((item) => item.year && parseInt(item.year, 10) <= yearMax);
+        }
+        if (hideWatched && watchedIds.size) {
+          items = items.filter((item) => !watchedIds.has(item.id));
+        }
+        if (mediaType === 'movie' || mediaType === 'tv') {
+          items = items.filter((item) => item.mediaType === mediaType);
+        } else if (mediaType === 'documentary') {
+          items = items.filter(
+            (item) => Array.isArray(item.genres) && item.genres.includes('Documentary')
+          );
+        }
+
+        items = [...items].sort(compareWatchlistItems(sortBy));
+
+        const pageSize = Math.min(Math.max(1, Number(limit)), 100);
+        const totalCount = items.length;
+        const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+        const currentPage = Math.min(Math.max(1, Number(page)), totalPages);
+        const paged = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+        return res.json({
+          items: paged,
+          meta: {
+            mediaType, sortBy, region,
+            page: currentPage, pageSize,
+            resultCount: totalCount,
+            visibleCount: paged.length,
+            totalPages,
+            hasMore: currentPage < totalPages,
+            cacheMode: 'watchlist',
+            streamingOnly,
+          },
+        });
+      } catch (e) {
+        return res.status(500).json({ error: 'Failed to load watchlist', details: e.message });
+      }
+    }
+
+    try {
+      const scopeKey = await ensureScopeSynced(db, {
+        platforms: scopePlatforms,
+        languages: savedLanguages,
+        region,
+      });
+      const catalog = await readCachedCatalog(db, {
+        scopeKey,
+        mediaType,
+        sortBy,
+        page: Number(page),
+        pageSize: Number(limit),
+        serviceFilters: serviceFiltersFromQuery,
+        languageFilters,
+        genreFilters,
+        yearMin,
+        yearMax,
+        excludeWatchedForUserId: hideWatched ? req.user.id : null,
+      });
+      res.json(catalog);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to load cached catalog', details: e.message });
+    }
   });
 
   // ── Watchlist GET ─────────────────────────────────────────────────────────
@@ -892,6 +1040,24 @@ function createApp(db, { disableRateLimit = false } = {}) {
     }
 
     res.json({ matched, notFound, processed: batch.length });
+  });
+
+  // ── Error handler ─────────────────────────────────────────────────────────
+  // Must be last, and must take four arguments for Express to treat it as an
+  // error handler. Without it, a rejected CORS origin or a malformed JSON body
+  // falls through to Express's default handler, which answers with an HTML page
+  // (and a stack trace outside production) — every client here calls
+  // JSON.parse on the response and would choke on it.
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => {
+    const status = err.status || err.statusCode || 500;
+    if (status >= 500) {
+      console.error('Unhandled request error:', err);
+    }
+    if (res.headersSent) return;
+    res.status(status).json({
+      error: status >= 500 ? 'Internal server error' : err.message || 'Request failed',
+    });
   });
 
   return app;

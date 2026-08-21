@@ -14,6 +14,13 @@ const identifierBackfillLocks = new Map();
 let writeQueue = Promise.resolve();
 const HYDRATION_BATCH_SIZE = 40;
 const HYDRATION_CONCURRENCY = 8;
+// Written to catalog_cache_entries.imdb_id when TMDB has been asked and has no
+// IMDb ID to give. Distinguishes "resolved, nothing found" from "not yet asked"
+// (NULL), so the backfill can never re-select the same unresolvable row forever.
+const NO_IMDB_ID = '';
+// Upper bound on backfill batches per scope — a healthy drain of a full
+// MAX_SNAPSHOT_ITEMS scope takes ~25.
+const MAX_BACKFILL_ITERATIONS = 200;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -172,6 +179,24 @@ async function ensureCatalogTables(db) {
       title TEXT,
       poster_url TEXT,
       added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, item_id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`
+  );
+
+  // User watched list — created here too so readCachedCatalog's "hide watched"
+  // subquery can always reference it. Also created in index.js and
+  // testHelpers.js; those are harmlessly idempotent.
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS watched_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      item_id TEXT NOT NULL,
+      media_type TEXT,
+      title TEXT,
+      poster_url TEXT,
+      watched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, item_id),
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`
@@ -616,8 +641,21 @@ async function backfillScopeIdentifiers(db, scopeKey) {
   const backfillPromise = (async () => {
     let consecutiveErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 5;
+    let iterations = 0;
 
     while (true) {
+      // Safety net: a scope holds at most MAX_SNAPSHOT_ITEMS rows, so a healthy
+      // backfill drains in ~25 batches. Anything beyond MAX_BACKFILL_ITERATIONS
+      // means rows are being re-selected without making progress — bail rather
+      // than spin against TMDB.
+      iterations += 1;
+      if (iterations > MAX_BACKFILL_ITERATIONS) {
+        console.warn(
+          `Identifier backfill for ${scopeKey} stopped after ${MAX_BACKFILL_ITERATIONS} batches without draining the queue.`
+        );
+        return;
+      }
+
       const rows = await all(
         db,
         `SELECT scope_key, media_type, tmdb_id
@@ -639,9 +677,13 @@ async function backfillScopeIdentifiers(db, scopeKey) {
             includeExternalIds: true,
           });
 
+          // NO_IMDB_ID (not null) when TMDB has no IMDb ID for this title —
+          // plenty of smaller TV series and regional films have none. Writing
+          // null back would leave the row matching `imdb_id IS NULL`, so the
+          // next SELECT would return it again and the loop would never end.
           return {
             ...row,
-            imdbId: details.external_ids?.imdb_id || null,
+            imdbId: details.external_ids?.imdb_id || NO_IMDB_ID,
           };
         })).filter(Boolean);
         consecutiveErrors = 0;
@@ -752,8 +794,7 @@ async function readCachedCatalog(
     genreFilters = [],
     yearMin = null,
     yearMax = null,
-    excludeItemIds = [],
-    watchlistItemIds = [],
+    excludeWatchedForUserId = null,
   }
 ) {
   const filters = ['scope_key = ?'];
@@ -761,8 +802,6 @@ async function readCachedCatalog(
   const normalizedServiceFilters = [...new Set(serviceFilters.filter(Boolean))];
   const normalizedLanguageFilters = [...new Set(languageFilters.filter(Boolean))];
   const normalizedGenreFilters = [...new Set(genreFilters.filter(Boolean))];
-  const normalizedExcludeIds = [...new Set(excludeItemIds.filter(Boolean))];
-  const normalizedWatchlistIds = [...new Set(watchlistItemIds.filter(Boolean))];
 
   if (mediaType === 'movie' || mediaType === 'tv') {
     filters.push('media_type = ?');
@@ -807,28 +846,33 @@ async function readCachedCatalog(
     params.push(Number(yearMax));
   }
 
-  if (normalizedExcludeIds.length) {
+  // "Hide watched" as a correlated subquery rather than a NOT IN list of every
+  // watched item_id. A Letterboxd import can run to five figures, and SQLite
+  // caps a statement at 32,766 bound variables — and this WHERE clause is bound
+  // three times per request. One parameter holds regardless of list size, and
+  // watched_items' UNIQUE(user_id, item_id) index serves the lookup.
+  if (excludeWatchedForUserId !== null && excludeWatchedForUserId !== undefined) {
     filters.push(
-      `(media_type || '-' || CAST(tmdb_id AS TEXT)) NOT IN (${normalizedExcludeIds.map(() => '?').join(', ')})`
+      `NOT EXISTS (
+         SELECT 1 FROM watched_items w
+         WHERE w.user_id = ?
+           AND w.item_id = catalog_cache_entries.media_type || '-' || CAST(catalog_cache_entries.tmdb_id AS TEXT)
+       )`
     );
-    params.push(...normalizedExcludeIds);
-  }
-
-  if (normalizedWatchlistIds.length) {
-    filters.push(
-      `(media_type || '-' || CAST(tmdb_id AS TEXT)) IN (${normalizedWatchlistIds.map(() => '?').join(', ')})`
-    );
-    params.push(...normalizedWatchlistIds);
+    params.push(excludeWatchedForUserId);
   }
 
   const whereClause = filters.join(' AND ');
 
+  // Must use the same predicate as backfillScopeIdentifiers. An entry already
+  // resolved to NO_IMDB_ID is not "missing" — counting it here would re-fire the
+  // backfill on every page load for a title TMDB will never have an ID for.
   const missingImdbIdsRow = await get(
     db,
     `SELECT COUNT(*) AS count
      FROM catalog_cache_entries
      WHERE ${whereClause}
-       AND COALESCE(imdb_id, '') = ''`,
+       AND imdb_id IS NULL`,
     params
   );
 
@@ -996,12 +1040,16 @@ function extractAvailability(watchProviders, providerMap, region) {
 /**
  * For each item in `watchlistRows`, fetch current streaming availability from
  * TMDB (with 24-hour per-user cache in `watchlist_streaming_cache`) and return
- * only those items streamable on at least one of the user's platforms.
+ * the items with `availableOn` / `availableOnKeys` annotated.
  *
- * NOTE: This is "Streaming watchlist" semantics — items on the watchlist that
- * are not currently available on any of the user's selected platforms are
- * intentionally excluded. This means the result is a filtered subset of the
- * user's watchlist, not a 1:1 mirror of it.
+ * `streamingOnly` selects between the two watchlist views the clients offer:
+ *   false — every watchlist item, whether or not it is streaming anywhere.
+ *           This is a 1:1 mirror of the user's watchlist ("From watchlist").
+ *   true  — only items available on at least one of the user's platforms
+ *           ("Streaming watchlist"). A filtered subset, by design.
+ *
+ * With `streamingOnly: false` and no platforms selected, items still come back;
+ * they simply carry empty availability.
  *
  * Scoping guarantees:
  *  - `watchlistRows` is pre-filtered to `user_id` by the caller.
@@ -1014,8 +1062,18 @@ function extractAvailability(watchProviders, providerMap, region) {
  * This intentionally bypasses `catalog_cache_entries` so obscure / non-popular
  * titles that never appear in the top-300 discover snapshot are still found.
  */
-async function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, region) {
-  if (!watchlistRows.length || !platforms.length) return [];
+async function getWatchlistItemsWithAvailability(
+  db,
+  userId,
+  watchlistRows,
+  platforms,
+  region,
+  { streamingOnly = true } = {}
+) {
+  if (!watchlistRows.length) return [];
+  // Availability can only be judged against a set of platforms; with none
+  // selected there is nothing to filter by, so the streaming view is empty.
+  if (streamingOnly && !platforms.length) return [];
 
   const providerMap = buildProviderLookupMap(platforms);
   const platformSet = new Set(platforms);
@@ -1090,13 +1148,15 @@ async function getStreamableWatchlistItems(db, userId, watchlistRows, platforms,
     if (!cached) continue;
 
     const availableKeys = JSON.parse(cached.available_on_keys_json || '[]');
-    if (!availableKeys.some((k) => platformSet.has(k))) continue;
+    if (streamingOnly && !availableKeys.some((k) => platformSet.has(k))) continue;
 
     result.push({
       id: row.item_id,
       tmdbId,
       mediaType,
-      title: cached.title || row.title,
+      // Surfaced so the "recently added" sort means something in this view.
+      addedAt: row.added_at || null,
+      title: cached.title || row.title || 'Unknown',
       overview: cached.overview || null,
       releaseDate: cached.release_date || null,
       year: cached.year ? parseInt(cached.year, 10) : null,
@@ -1154,11 +1214,19 @@ async function getStreamableWatchlistItems(db, userId, watchlistRows, platforms,
   });
 }
 
+/** "Streaming watchlist" view — watchlist items available on the user's platforms. */
+function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, region) {
+  return getWatchlistItemsWithAvailability(db, userId, watchlistRows, platforms, region, {
+    streamingOnly: true,
+  });
+}
+
 module.exports = {
   DAILY_SYNC_MS,
   ensureCatalogTables,
   ensureScopeSynced,
   readCachedCatalog,
+  getWatchlistItemsWithAvailability,
   getStreamableWatchlistItems,
   refreshAllCachedScopes,
   startDailyCatalogRefresh,
@@ -1168,4 +1236,6 @@ module.exports = {
   mapWithConcurrency,
   isRateLimitError,
   hydrateScopeRatings,
+  backfillScopeIdentifiers,
+  NO_IMDB_ID,
 };

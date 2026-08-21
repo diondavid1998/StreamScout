@@ -23,7 +23,7 @@ npm-debug.log*
 yarn-debug.log*
 
 # iOS build artifacts
-StreamScout/build/
+WhatsOn/build/
 WhatsOn.xcodeproj/xcuserdata/
 *.xcuserstate
 DerivedData/

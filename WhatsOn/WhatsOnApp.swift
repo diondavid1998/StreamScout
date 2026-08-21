@@ -326,8 +326,17 @@ struct StreamingPlatform: Identifiable {
     let id: String
     let key: String
     let name: String
-    let logoAsset: String   // Must match name in Assets.xcassets
+    /// Must match an image set in Assets.xcassets. `nil` for services with no
+    /// bundled artwork — the UI draws `monogram` instead.
+    let logoAsset: String?
     let accentColor: Color
+
+    /// First letters of the service name, for tiles with no logo asset.
+    var monogram: String {
+        let words = name.split(whereSeparator: { $0 == " " || $0 == "+" })
+        if words.count == 1 { return String(words[0].prefix(2)).uppercased() }
+        return words.prefix(2).map { String($0.prefix(1)) }.joined().uppercased()
+    }
 }
 
 // MARK: - Languages
@@ -357,17 +366,40 @@ let allLanguages: [AppLanguage] = [
 
 // MARK: - Streaming Platforms
 
+// Keys and names must match PLATFORM_CONFIG in backend/movieService.js — the key
+// is what the API stores, and availability chips are matched on the name.
 let allPlatforms: [StreamingPlatform] = [
-    .init(id: "netflix",     key: "netflix",     name: "Netflix",     logoAsset: "netflix",      accentColor: Color(red: 0.898, green: 0.031, blue: 0.078)),
-    .init(id: "hulu",        key: "hulu",        name: "Hulu",        logoAsset: "hulu",         accentColor: Color(red: 0.110, green: 0.910, blue: 0.514)),
-    .init(id: "prime",       key: "prime",       name: "Prime Video", logoAsset: "prime",        accentColor: Color(red: 0.000, green: 0.659, blue: 0.882)),
-    .init(id: "disney",      key: "disney",      name: "Disney+",     logoAsset: "disneyplus",   accentColor: Color(red: 0.067, green: 0.235, blue: 0.812)),
-    .init(id: "apple",       key: "apple",       name: "Apple TV+",   logoAsset: "appletv",      accentColor: Color(red: 0.800, green: 0.800, blue: 0.800)),
-    .init(id: "max",         key: "max",         name: "Max",         logoAsset: "max",          accentColor: Color(red: 0.000, green: 0.169, blue: 0.906)),
-    .init(id: "peacock",     key: "peacock",     name: "Peacock",     logoAsset: "peacock",      accentColor: Color(red: 0.000, green: 0.784, blue: 1.000)),
-    .init(id: "paramount",   key: "paramount",   name: "Paramount+",  logoAsset: "paramountplus", accentColor: Color(red: 0.000, green: 0.392, blue: 1.000)),
-    .init(id: "crunchyroll", key: "crunchyroll", name: "Crunchyroll", logoAsset: "crunchyroll",  accentColor: Color(red: 0.957, green: 0.459, blue: 0.129)),
-    .init(id: "tubi",        key: "tubi",        name: "Tubi",        logoAsset: "tubi",         accentColor: Color(red: 0.949, green: 0.318, blue: 0.071)),
+    .init(id: "netflix",     key: "netflix",     name: "Netflix",             logoAsset: "netflix",       accentColor: Color(red: 0.898, green: 0.031, blue: 0.078)),
+    .init(id: "hulu",        key: "hulu",        name: "Hulu",                logoAsset: "hulu",          accentColor: Color(red: 0.110, green: 0.910, blue: 0.514)),
+    .init(id: "prime",       key: "prime",       name: "Prime Video",         logoAsset: "prime",         accentColor: Color(red: 0.000, green: 0.659, blue: 0.882)),
+    .init(id: "disney",      key: "disney",      name: "Disney+",             logoAsset: "disneyplus",    accentColor: Color(red: 0.067, green: 0.235, blue: 0.812)),
+    .init(id: "apple",       key: "apple",       name: "Apple TV+",           logoAsset: "appletv",       accentColor: Color(red: 0.800, green: 0.800, blue: 0.800)),
+    .init(id: "max",         key: "max",         name: "Max",                 logoAsset: "max",           accentColor: Color(red: 0.000, green: 0.169, blue: 0.906)),
+    .init(id: "peacock",     key: "peacock",     name: "Peacock",             logoAsset: "peacock",       accentColor: Color(red: 0.000, green: 0.784, blue: 1.000)),
+    .init(id: "paramount",   key: "paramount",   name: "Paramount+",          logoAsset: "paramountplus", accentColor: Color(red: 0.000, green: 0.392, blue: 1.000)),
+    .init(id: "crunchyroll", key: "crunchyroll", name: "Crunchyroll",         logoAsset: "crunchyroll",   accentColor: Color(red: 0.957, green: 0.459, blue: 0.129)),
+    .init(id: "tubi",        key: "tubi",        name: "Tubi",                logoAsset: "tubi",          accentColor: Color(red: 0.949, green: 0.318, blue: 0.071)),
+    .init(id: "starz",       key: "starz",       name: "Starz",               logoAsset: nil,             accentColor: Color(red: 0.145, green: 0.145, blue: 0.145)),
+    .init(id: "showtime",    key: "showtime",    name: "Showtime",            logoAsset: nil,             accentColor: Color(red: 0.800, green: 0.000, blue: 0.000)),
+    .init(id: "amc",         key: "amc",         name: "AMC+",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.800)),
+    .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
+    .init(id: "roku",        key: "roku",        name: "The Roku Channel",    logoAsset: nil,             accentColor: Color(red: 0.431, green: 0.196, blue: 0.639)),
+    .init(id: "youtube",     key: "youtube",     name: "YouTube Premium",     logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.000, blue: 0.000)),
+    .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.000, blue: 0.000)),
+    .init(id: "britbox",     key: "britbox",     name: "BritBox",             logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.180, blue: 0.400)),
+    .init(id: "hayu",        key: "hayu",        name: "Hayu",                logoAsset: nil,             accentColor: Color(red: 0.851, green: 0.000, blue: 0.502)),
+    .init(id: "shudder",     key: "shudder",     name: "Shudder",             logoAsset: nil,             accentColor: Color(red: 0.400, green: 0.000, blue: 0.000)),
+    .init(id: "acorn",       key: "acorn",       name: "Acorn TV",            logoAsset: nil,             accentColor: Color(red: 0.200, green: 0.400, blue: 0.200)),
+    .init(id: "curiosity",   key: "curiosity",   name: "Curiosity Stream",    logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.478, blue: 0.800)),
+    .init(id: "sling",       key: "sling",       name: "Sling TV",            logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.400)),
+    .init(id: "philo",       key: "philo",       name: "Philo",               logoAsset: nil,             accentColor: Color(red: 0.980, green: 0.310, blue: 0.310)),
+    .init(id: "fubo",        key: "fubo",        name: "fuboTV",              logoAsset: nil,             accentColor: Color(red: 0.910, green: 0.298, blue: 0.153)),
+    .init(id: "viu",         key: "viu",         name: "Viu",                 logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.827, blue: 0.000)),
+    .init(id: "kanopy",      key: "kanopy",      name: "Kanopy",              logoAsset: nil,             accentColor: Color(red: 0.851, green: 0.310, blue: 0.204)),
+    .init(id: "crave",       key: "crave",       name: "Crave",               logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.400, blue: 0.800)),
+    .init(id: "ifc",         key: "ifc",         name: "IFC Films Unlimited", logoAsset: nil,             accentColor: Color(red: 0.400, green: 0.400, blue: 0.400)),
+    .init(id: "criterion",   key: "criterion",   name: "Criterion Channel",   logoAsset: nil,             accentColor: Color(red: 0.086, green: 0.180, blue: 0.325)),
+    .init(id: "hidive",      key: "hidive",      name: "HiDive",              logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.702, blue: 0.898)),
 ]
 
 // MARK: - Image Cache

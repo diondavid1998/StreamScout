@@ -369,7 +369,10 @@ final class APIService {
             throw APIError.networkError(error)
         }
         if let http = response as? HTTPURLResponse {
-            if http.statusCode == 401 { throw APIError.unauthorized }
+            // 403 as well as 401: the backend answers 403 for a token that fails
+            // an authorization check, and treating it as a plain client error
+            // left an expired session with no way back to the sign-in screen.
+            if http.statusCode == 401 || http.statusCode == 403 { throw APIError.unauthorized }
             if (400...499).contains(http.statusCode) {
                 let message = (try? JSONDecoder().decode(GenericResponse.self, from: data))?.error
                 throw APIError.clientError(http.statusCode, message)
