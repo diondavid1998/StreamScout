@@ -1230,7 +1230,8 @@ function App() {
     if (!lbxPreview || !lbxFile) return;
     const { items } = lbxPreview;
     const importType = lbxIntendedType;  // use the button the user pressed, not server detection
-    const batchSize = 50;
+    // Matches MAX_IMPORT_BATCH on the server.
+    const batchSize = 100;
     let offset = 0;
     let totalMatched = 0;
     let totalNotFound = 0;

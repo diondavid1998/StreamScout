@@ -475,8 +475,8 @@ describe('Clearing and importing saved lists', () => {
     await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
 
     // Drive the import loop directly through the API contract the UI uses:
-    // 60 items across two batches of 50 and 10.
-    const items = Array.from({ length: 60 }, (_, i) => ({ name: `Film ${i}`, year: 2024 }));
+    // 120 items across two batches of 100 and 20.
+    const items = Array.from({ length: 120 }, (_, i) => ({ name: `Film ${i}`, year: 2024 }));
     const file = new File(
       [['Name,Year', ...items.map((i) => `${i.name},${i.year}`)].join('\n')],
       'watchlist.csv',
@@ -492,7 +492,7 @@ describe('Clearing and importing saved lists', () => {
         return Promise.resolve(mockResponse({ importType: 'watchlist', count: items.length, items }));
       }
       if (href.includes('/import/letterboxd')) {
-        return Promise.resolve(mockResponse({ matched: 50, notFound: 0, processed: 50, replaced: 0 }));
+        return Promise.resolve(mockResponse({ matched: 100, notFound: 0, processed: 100, replaced: 0 }));
       }
       if (href.includes('/watchlist')) return Promise.resolve(mockResponse({ items: [] }));
       if (href.includes('/watched')) return Promise.resolve(mockResponse({ items: [] }));
