@@ -300,7 +300,7 @@ struct AuthView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                             .background(mode == m ? Color.mkAccent : Color.clear)
-                            .foregroundColor(mode == m ? .white : .mkMuted)
+                            .foregroundColor(mode == m ? .mkOnAccent : .mkMuted)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                 }
@@ -733,7 +733,7 @@ struct PlatformTile: View {
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(.mkOnAccent)
+                            .foregroundColor(.mkText)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             .padding(4)
                     }
@@ -1026,7 +1026,7 @@ struct CatalogView: View {
                                     .transition(.opacity.combined(with: .blurReplace))
                             }
                         }
-                        .foregroundStyle(isSelected ? Color.mkOnAccent : Color.mkMuted)
+                        .foregroundStyle(isSelected ? Color.mkText : Color.mkMuted)
                         .frame(height: Layout.tabItemHeight)
                         .frame(minWidth: 56)
                         .padding(.horizontal, isSelected ? 16 : 8)
@@ -1463,9 +1463,6 @@ struct MovieCardView: View {
             }
         }
         .frame(width: 96, height: 144)
-        // Overlay before clipShape, so the scrim is clipped to the poster's
-        // corners rather than spilling past them.
-        .overlay(alignment: .bottom) { providerMarks }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1480,38 +1477,41 @@ struct MovieCardView: View {
         }
     }
 
-    /// Service logos sit on the poster, where the eye already is, instead of taking
-    /// a full text row in the info column. Beyond three, the rest become a count.
+    /// Services get their own row above the scores.
+    ///
+    /// They used to sit as 13pt marks in the poster's bottom corner, over a
+    /// scrim, capped at three with a "+2". At that size a logo is a coloured
+    /// smudge — you could tell a title was streaming somewhere but not where,
+    /// which is the one question the app exists to answer. Named chips, and the
+    /// row scrolls rather than truncating, so a title on six services shows six.
     @ViewBuilder
-    var providerMarks: some View {
+    var serviceBar: some View {
         let providers = movie.availableOn ?? []
         if !providers.isEmpty {
-            let shown = Array(providers.prefix(3))
-            let overflow = providers.count - shown.count
-            HStack(spacing: 3) {
-                ForEach(shown, id: \.self) { name in
-                    ProviderMark(name: name)
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(providers, id: \.self) { name in
+                        HStack(spacing: 5) {
+                            // The chip's own text carries the name for VoiceOver.
+                            ProviderMark(name: name, size: 15)
+                                .accessibilityHidden(true)
+                            Text(name)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.mkText)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.mkSubtleFill, in: Capsule())
+                        .overlay(Capsule().stroke(Color.mkHairline, lineWidth: 1))
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
-                if overflow > 0 {
-                    Text("+\(overflow)")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.white.opacity(0.75))
-                }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 7)
-            .padding(.bottom, 6)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                LinearGradient(
-                    colors: [Color.black.opacity(0), Color.black.opacity(0.72)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 42),
-                alignment: .bottom
-            )
-            .allowsHitTesting(false)
+            .padding(.bottom, 7)
         }
     }
 
@@ -1545,6 +1545,8 @@ struct MovieCardView: View {
             }
 
             Spacer(minLength: 8)
+
+            serviceBar
 
             ScoreStrip(entries: buildRatings())
         }
@@ -1771,13 +1773,13 @@ struct ProviderMark: View {
                     .overlay(
                         Text(p.monogram)
                             .font(.system(size: size * 0.5, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
+                            .foregroundColor(p.onAccentColor)
                             .minimumScaleFactor(0.5)
                             .lineLimit(1)
                     )
             } else {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color.white.opacity(0.28))
+                    .fill(Color.mkPlaceholderFill)
             }
         }
         .frame(width: size, height: size)
@@ -1794,15 +1796,34 @@ struct ProviderMark: View {
 struct FlowRow: Layout {
     var spacing: CGFloat = 6
 
+    /// Size a child against the width actually available, never against infinity.
+    ///
+    /// Asking with `.unspecified` let a long service or genre name report its full
+    /// single-line width. One such chip was then wider than the row, and this
+    /// layout reported that width as its own — pushing its container past the
+    /// screen edge. `sizeThatFits` and `placeSubviews` have to measure children
+    /// identically or placement drifts from the reported size, so both go through
+    /// here.
+    private func childSize(_ subview: LayoutSubview, available: CGFloat) -> CGSize {
+        let proposal = available.isFinite
+            ? ProposedViewSize(width: available, height: nil)
+            : ProposedViewSize.unspecified
+        var size = subview.sizeThatFits(proposal)
+        size.width = min(size.width, available)
+        return size
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         var rowWidth: CGFloat = 0
         var rowHeight: CGFloat = 0
         var totalHeight: CGFloat = 0
+        var widestRow: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = childSize(subview, available: maxWidth)
             if rowWidth > 0 && rowWidth + spacing + size.width > maxWidth {
+                widestRow = max(widestRow, rowWidth)
                 totalHeight += rowHeight + spacing
                 rowWidth = size.width
                 rowHeight = size.height
@@ -1812,7 +1833,12 @@ struct FlowRow: Layout {
             }
         }
         totalHeight += rowHeight
-        return CGSize(width: maxWidth == .infinity ? rowWidth : maxWidth, height: totalHeight)
+        widestRow = max(widestRow, rowWidth)
+
+        // Report the proposed width when there is one, so the layout fills its
+        // column; otherwise the widest row, which by construction is the least
+        // width that holds the content.
+        return CGSize(width: maxWidth.isFinite ? maxWidth : widestRow, height: totalHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -1821,7 +1847,7 @@ struct FlowRow: Layout {
         var rowHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = childSize(subview, available: bounds.width)
             if x > bounds.minX && x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
@@ -1845,9 +1871,13 @@ struct MetaDot: View {
 
 /// Every score on one shared surface, divided rather than boxed.
 ///
-/// Replaces a horizontally scrolling row of individually-bordered chips, where the
-/// fourth score was usually off-screen and so never compared against anything.
-/// Fixed slots mean scores line up down the feed.
+/// Replaces a row of individually-bordered chips, each with its own outline, that
+/// read as four unrelated badges. One surface with rules between the scores makes
+/// them comparable at a glance.
+///
+/// Cells size to their own content and the row scrolls horizontally. Splitting the
+/// card's width into equal slots left roughly 30pt per score, so "100%" and "8.4"
+/// were scaled down and then truncated mid-number once a title had all four.
 struct ScoreStrip: View {
     let entries: [MovieCardView.RatingEntry]
     var compact: Bool = true
@@ -1857,35 +1887,44 @@ struct ScoreStrip: View {
         if entries.isEmpty {
             EmptyView()
         } else {
-            HStack(spacing: 0) {
-                ForEach(entries.indices, id: \.self) { index in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(Color.white.opacity(0.07))
-                            .frame(width: 1)
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(entries.indices, id: \.self) { index in
+                        scoreCell(entries[index])
+                            .overlay(alignment: .leading) { rule(index > 0) }
                     }
-                    scoreCell(entries[index])
-                }
-                // Ratings arrive from OMDB after the catalog does. Say so rather
-                // than leaving a lone TMDb score looking like the whole answer.
-                if entries.count == 1 && entries[0].label == "TMDb" {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.07))
-                        .frame(width: 1)
-                    Text("Scoring…")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundColor(.mkMuted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+                    // Ratings arrive from OMDB after the catalog does. Say so rather
+                    // than leaving a lone TMDb score looking like the whole answer.
+                    if entries.count == 1 && entries[0].label == "TMDb" {
+                        Text("Scoring…")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundColor(.mkMuted)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, compact ? 6 : 12)
+                            .overlay(alignment: .leading) { rule(true) }
+                    }
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .background(Color.white.opacity(0.045))
+            .scrollIndicators(.hidden)
+            // Nothing to scroll when every score already fits, so don't rubber-band.
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.mkSubtleFill)
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                    .stroke(Color.mkHairline, lineWidth: 1)
             )
+        }
+    }
+
+    /// Drawn as an overlay on the cell's leading edge rather than as a sibling in
+    /// the stack: a bare `Rectangle` between content-sized cells has no ideal
+    /// height to adopt inside a scroll view, and collapses to 10pt.
+    @ViewBuilder
+    func rule(_ visible: Bool) -> some View {
+        if visible {
+            Rectangle().fill(Color.mkHairline).frame(width: 1)
         }
     }
 
@@ -1900,9 +1939,9 @@ struct ScoreStrip: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 11)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: true, vertical: false)
         } else {
             VStack(spacing: 6) {
                 scoreMark(entry, size: 18)
@@ -1916,9 +1955,10 @@ struct ScoreStrip: View {
                     .kerning(0.6)
                     .foregroundColor(.mkMuted)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: 74)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -1972,7 +2012,7 @@ struct GenrePickerSheet: View {
                                             .lineLimit(2)
                                             .minimumScaleFactor(0.8)
                                             .frame(maxWidth: .infinity, minHeight: 48)
-                                            .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
+                                            .foregroundColor(isOn ? .mkText : .mkMuted)
                                             .glassEffect(
                                                 isOn
                                                     ? .regular.tint(genreAccent)
@@ -2062,7 +2102,7 @@ struct LanguagePickerSheet: View {
                                             .multilineTextAlignment(.center)
                                             .lineLimit(2).minimumScaleFactor(0.8)
                                             .frame(maxWidth: .infinity, minHeight: 48)
-                                            .foregroundColor(isOn ? .mkOnAccent : .mkMuted)
+                                            .foregroundColor(isOn ? .mkText : .mkMuted)
                                             .glassEffect(
                                                 isOn
                                                     ? .regular.tint(.mkAccent)
@@ -2455,7 +2495,7 @@ struct DetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.mkText)
                             .frame(width: 30, height: 30)
                             .glassEffect(.regular.interactive(), in: Circle())
                     }
@@ -2484,6 +2524,12 @@ struct DetailSheet: View {
 
     // MARK: Hero
 
+    /// Height of the hero. It was 330 — roughly the top 40% of a phone — which
+    /// meant opening a title landed you on artwork and had you scrolling to
+    /// reach the answer you tapped for. 272 still clears a three-line title,
+    /// a two-line tagline and the 156pt poster without clipping.
+    static let heroHeight: CGFloat = 272
+
     /// The one place the poster's dominant colour earns a full wash — a single
     /// screen showing a single title, rather than a feed where every row would
     /// pull in a different direction.
@@ -2498,7 +2544,7 @@ struct DetailSheet: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 330)
+            .frame(height: Self.heroHeight)
 
             backdropWash
 
@@ -2526,20 +2572,34 @@ struct DetailSheet: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
-        .frame(height: 330)
+        .frame(height: Self.heroHeight)
         .clipped()
     }
 
     /// The backdrop image, blurred into the wash rather than shown as a framed
     /// picture — it is atmosphere here, not content.
+    ///
+    /// Backdrops only. This used to fall back to the poster, and since `details`
+    /// arrives after the sheet does, every title opened on its own poster scaled
+    /// up to fill the hero — the tapped card, enlarged. Without a backdrop the
+    /// dominant-colour gradient underneath stands on its own.
+    ///
+    /// The image is an overlay on a fixed-height `Color.clear`, not a framed
+    /// image. `scaledToFill` reports a layout size that *fills* the proposal, so
+    /// it overflows in one axis; `.frame(height:)` then adopts its child's width,
+    /// and `.clipped()` only clips pixels, never layout. A 16:9 backdrop in a
+    /// 393pt hero reported roughly 484pt of width, and that width propagated up
+    /// through the ZStack into the scroll content — the whole detail page laid
+    /// out wider than the screen, clipped, with no way to reach what fell off the
+    /// right edge. An overlay is sized by its parent and never feeds size back.
     @ViewBuilder
     var backdropWash: some View {
-        if let urlStr = details?.backdropUrl ?? movie.posterUrl, let url = URL(string: urlStr) {
+        if let urlStr = details?.backdropUrl, let url = URL(string: urlStr) {
             CachedAsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let img):
-                    img.resizable().scaledToFill()
-                        .frame(height: 330)
+                    Color.clear
+                        .overlay { img.resizable().scaledToFill() }
                         .clipped()
                         .blur(radius: 30, opaque: true)
                         .opacity(0.5)
@@ -2553,7 +2613,7 @@ struct DetailSheet: View {
                     Color.clear
                 }
             }
-            .frame(height: 330)
+            .frame(height: Self.heroHeight)
             .clipped()
             .allowsHitTesting(false)
         }
@@ -2579,7 +2639,7 @@ struct DetailSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                .stroke(Color.mkStrongHairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 12)
     }
@@ -2658,7 +2718,7 @@ struct DetailSheet: View {
                 Button { Task { await toggleWatchlist() } } label: {
                     HStack(spacing: 8) {
                         if isTogglingWatchlist {
-                            ProgressView().scaleEffect(0.7).tint(isWatchlisted ? .mkOnAccent : .mkText)
+                            ProgressView().scaleEffect(0.7).tint(.mkText)
                         } else {
                             Image(systemName: isWatchlisted ? "bookmark.fill" : "bookmark")
                                 .font(.system(size: 16, weight: .semibold))
@@ -2667,7 +2727,7 @@ struct DetailSheet: View {
                         Text(isWatchlisted ? "On Watchlist" : "Watchlist")
                             .font(.system(size: 14.5, weight: .semibold))
                     }
-                    .foregroundColor(isWatchlisted ? .mkOnAccent : .mkText)
+                    .foregroundColor(.mkText)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .contentShape(Capsule())
@@ -3042,7 +3102,7 @@ struct SettingsView: View {
                             Image(systemName: icon).font(.system(size: 16))
                             Text(label).font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
+                        .foregroundColor(isSelected ? .mkText : .mkMuted)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -3104,7 +3164,12 @@ struct AppearanceTabView: View {
                                     }
 
                                 HStack(spacing: 8) {
-                                    Circle().fill(theme.background).frame(width: 10, height: 10)
+                                    // Ringed, because a light theme's background
+                                    // dot is invisible on a light surface.
+                                    Circle()
+                                        .fill(theme.background)
+                                        .overlay(Circle().stroke(Color.mkHairline, lineWidth: 1))
+                                        .frame(width: 10, height: 10)
                                     Text(theme.name)
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundColor(app.selectedThemeId == theme.id ? .mkAccent : .mkText)
@@ -3203,9 +3268,9 @@ struct PlatformToggle: View {
             VStack(spacing: 6) {
                 PlatformArtwork(platform: platform, size: 44, cornerRadius: 10)
                     .overlay(RoundedRectangle(cornerRadius: 10)
-                        .stroke(isSelected ? Color.mkOnAccent.opacity(0.9) : Color.clear, lineWidth: 2))
+                        .stroke(isSelected ? Color.mkAccent.opacity(0.9) : Color.clear, lineWidth: 2))
                 Text(platform.name).font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
+                    .foregroundColor(isSelected ? .mkText : .mkMuted)
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity)
             }
@@ -3233,7 +3298,7 @@ struct LanguageToggle: View {
         Button(action: action) {
             Text(language.label)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
+                .foregroundColor(isSelected ? .mkText : .mkMuted)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(
                     isSelected ? Color.mkAccent.opacity(0.22) : Color.mkCard,
@@ -3453,7 +3518,8 @@ struct ProfileTabView: View {
     }
 
     @MainActor func runLetterboxdImport() async {
-        let batchSize = 50
+        // Matches MAX_IMPORT_BATCH on the server.
+        let batchSize = 100
         var offset = 0
         var totalMatched = 0
         var totalNotFound = 0

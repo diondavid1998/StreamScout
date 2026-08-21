@@ -65,10 +65,37 @@ function all(db, sql, params = []) {
   });
 }
 
+/**
+ * Serialise a write against the single shared sqlite connection.
+ *
+ * Every explicit transaction in this process has to go through here. sqlite3
+ * multiplexes one connection, so a second `BEGIN` issued while another
+ * transaction is open fails with "cannot start a transaction within a
+ * transaction" — and statements from an unrelated task would otherwise land
+ * inside someone else's transaction and be rolled back with it.
+ */
 function enqueueWrite(operation) {
   const next = writeQueue.then(operation);
   writeQueue = next.catch(() => {});
   return next;
+}
+
+/**
+ * Run `body` inside a transaction, serialised behind every other writer.
+ * Commits on success, rolls back and rethrows on failure.
+ */
+function withTransaction(db, body) {
+  return enqueueWrite(async () => {
+    await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+    try {
+      const result = await body();
+      await run(db, 'COMMIT');
+      return result;
+    } catch (error) {
+      await run(db, 'ROLLBACK').catch(() => {});
+      throw error;
+    }
+  });
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -162,6 +189,25 @@ async function ensureCatalogTables(db) {
       rating_meta     TEXT,
       rating_meta_num REAL,
       fetched_at      TEXT NOT NULL
+    )`
+  );
+
+  // Resolved Letterboxd rows, keyed by the normalised "name (year)" from the CSV.
+  //
+  // A watchlist upload replaces the saved list, so people re-upload the same few
+  // hundred titles every time their Letterboxd list changes. Without this, each
+  // upload paid the full TMDB search cost again for titles that had already been
+  // resolved. Misses are cached too (item_id NULL) - an unresolvable row is the
+  // most expensive kind, since it exhausts every fallback search before failing.
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS title_lookup_cache (
+      lookup_key  TEXT PRIMARY KEY,
+      item_id     TEXT,
+      media_type  TEXT,
+      title       TEXT,
+      poster_url  TEXT,
+      resolved_at TEXT NOT NULL
     )`
   );
 
@@ -1400,6 +1446,7 @@ module.exports = {
   refreshAllCachedScopes,
   startDailyCatalogRefresh,
   syncScope,
+  withTransaction,
   // Exported for unit testing
   buildScopeKey,
   mapWithConcurrency,

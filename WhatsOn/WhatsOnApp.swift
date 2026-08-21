@@ -19,7 +19,9 @@ struct WhatsOnApp: App {
         WindowGroup {
             ContentView()
                 .environment(themeManager)
-                .preferredColorScheme(.dark)
+                // Follows the palette, not the device. Pinning this to .dark left the
+                // light theme drawing dark system controls on a near-white page.
+                .preferredColorScheme(themeManager.colorScheme)
         }
     }
 }
@@ -32,6 +34,25 @@ enum Brand {
 }
 
 // MARK: - Themes
+
+/// WCAG relative luminance, 0 (black) to 1 (white).
+///
+/// Used to decide whether an overlay, a divider or a glyph should be drawn in
+/// white or in black. Hardcoding white made every hairline and monogram vanish
+/// on the light palettes and on bright brand colours like Pluto's yellow.
+func relativeLuminance(_ color: Color) -> Double {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+    func channel(_ c: CGFloat) -> Double {
+        let v = Double(c)
+        return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+/// White and black text contrast equally against this luminance at 0.179, so
+/// anything above it wants dark ink on top.
+private let inkFlipLuminance = 0.179
 
 struct AppTheme: Identifiable, Equatable {
     let id: String
@@ -56,6 +77,34 @@ struct AppTheme: Identifiable, Equatable {
     let meshBottom: Color
     let meshBottomTrailing: Color
 
+    // MARK: Derived tokens
+    //
+    // Separators, translucent fills and placeholder blocks used to be painted
+    // as a fixed `Color.white.opacity(...)`. On a light palette that is white
+    // on near-white: the score strip lost its surface, its dividers and its
+    // border all at once. These flip with the background instead.
+
+    /// True when the page is bright enough that white overlays disappear.
+    var isLight: Bool { relativeLuminance(background) > inkFlipLuminance }
+
+    /// The ink that reads against `background`.
+    var overlayInk: Color { isLight ? .black : .white }
+
+    /// Hairline separators and 1pt strokes.
+    var hairline: Color { overlayInk.opacity(isLight ? 0.14 : 0.07) }
+
+    /// A stroke that has to hold its own against artwork, e.g. a poster edge.
+    var strongHairline: Color { overlayInk.opacity(isLight ? 0.18 : 0.14) }
+
+    /// The wash behind grouped content such as the score strip.
+    var subtleFill: Color { overlayInk.opacity(isLight ? 0.06 : 0.045) }
+
+    /// Stand-in block for a service with neither logo nor resolvable brand.
+    var placeholderFill: Color { overlayInk.opacity(isLight ? 0.20 : 0.28) }
+
+    /// Keeps system chrome — sheets, keyboards, spinners — in step with the palette.
+    var colorScheme: ColorScheme { isLight ? .light : .dark }
+
     static let signatureViolet = AppTheme(
         id: "signature_violet",
         name: "Signature Violet",
@@ -64,11 +113,11 @@ struct AppTheme: Identifiable, Equatable {
         card: Color(hex: "#171B2E"),
         accent: Color(hex: "#8C7BFF"),
         accentAlt: Color(hex: "#5B8CFF"),
-        onAccent: .white,
+        onAccent: Color(hex: "#1F1B38"),
         text: Color(hex: "#EEF1FF"),
         muted: Color(hex: "#8F98B5"),
         border: Color.white.opacity(0.09),
-        tv: Color(hex: "#5EA6FF"),
+        tv: Color(hex: "#FFB259"),
         meshTopLeading:     Color(hex: "#1A1440"),
         meshTop:            Color(hex: "#141B4A"),
         meshTopTrailing:    Color(hex: "#0F1638"),
@@ -88,11 +137,11 @@ struct AppTheme: Identifiable, Equatable {
         card: Color(hex: "#151B2E"),
         accent: Color(hex: "#5B8CFF"),
         accentAlt: Color(hex: "#3B5BDB"),
-        onAccent: .white,
+        onAccent: Color(hex: "#15203B"),
         text: Color(hex: "#EAF0FF"),
         muted: Color(hex: "#8997B8"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#69B4FF"),
+        tv: Color(hex: "#FF9E4D"),
         meshTopLeading:     Color(hex: "#111828"),
         meshTop:            Color(hex: "#0D1A30"),
         meshTopTrailing:    Color(hex: "#0A1522"),
@@ -112,7 +161,7 @@ struct AppTheme: Identifiable, Equatable {
         card: Color(hex: "#281D1A"),
         accent: Color(hex: "#FF8A5B"),
         accentAlt: Color(hex: "#FF5E9E"),
-        onAccent: .white,
+        onAccent: Color(hex: "#542E1E"),
         text: Color(hex: "#FFF0EA"),
         muted: Color(hex: "#C7A093"),
         border: Color.white.opacity(0.1),
@@ -136,11 +185,11 @@ struct AppTheme: Identifiable, Equatable {
         card: Color(hex: "#132523"),
         accent: Color(hex: "#2FD9C4"),
         accentAlt: Color(hex: "#3E9BFF"),
-        onAccent: .white,
+        onAccent: Color(hex: "#12524A"),
         text: Color(hex: "#E8FFF9"),
         muted: Color(hex: "#8FBDB7"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#62B1FF"),
+        tv: Color(hex: "#FF7EA8"),
         meshTopLeading:     Color(hex: "#112220"),
         meshTop:            Color(hex: "#0E201E"),
         meshTopTrailing:    Color(hex: "#0C1C1A"),
@@ -160,7 +209,7 @@ struct AppTheme: Identifiable, Equatable {
         card: Color(hex: "#1F171B"),
         accent: Color(hex: "#E23A55"),
         accentAlt: Color(hex: "#8C1024"),
-        onAccent: .white,
+        onAccent: Color(hex: "#170309"),
         text: Color(hex: "#F9EEF1"),
         muted: Color(hex: "#B48D97"),
         border: Color.white.opacity(0.1),
@@ -182,13 +231,13 @@ struct AppTheme: Identifiable, Equatable {
         background: Color(hex: "#0C0D10"),
         surface: Color(hex: "#15171C"),
         card: Color(hex: "#1D2027"),
-        accent: Color(hex: "#9AA2B6"),
-        accentAlt: Color(hex: "#5A6072"),
-        onAccent: .white,
+        accent: Color(hex: "#7DA2FF"),
+        accentAlt: Color(hex: "#4A6BB8"),
+        onAccent: Color(hex: "#27324F"),
         text: Color(hex: "#F0F2F7"),
-        muted: Color(hex: "#9AA2B6"),
+        muted: Color(hex: "#868D9E"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#6CAEFF"),
+        tv: Color(hex: "#FF9A62"),
         meshTopLeading:     Color(hex: "#1C1E24"),
         meshTop:            Color(hex: "#181A20"),
         meshTopTrailing:    Color(hex: "#15171C"),
@@ -232,11 +281,11 @@ struct AppTheme: Identifiable, Equatable {
         card: Color(hex: "#201632"),
         accent: Color(hex: "#B24BFF"),
         accentAlt: Color(hex: "#3EE0FF"),
-        onAccent: .white,
+        onAccent: Color(hex: "#180A22"),
         text: Color(hex: "#F7EEFF"),
         muted: Color(hex: "#B59BC9"),
         border: Color.white.opacity(0.1),
-        tv: Color(hex: "#54B0FF"),
+        tv: Color(hex: "#3EE0FF"),
         meshTopLeading:     Color(hex: "#1C1230"),
         meshTop:            Color(hex: "#181030"),
         meshTopTrailing:    Color(hex: "#130E28"),
@@ -248,15 +297,148 @@ struct AppTheme: Identifiable, Equatable {
         meshBottomTrailing: Color(hex: "#0A0512")
     )
 
+    /// The one light theme. A cinema programme: cool paper, ink text, seat red.
+    /// Its `border` is a black hairline — a white one is invisible on paper.
+    static let projection = AppTheme(
+        id: "projection",
+        name: "Projection",
+        background: Color(hex: "#EEF0F4"),
+        surface: Color(hex: "#F7F8FA"),
+        card: Color(hex: "#FFFFFF"),
+        accent: Color(hex: "#C0263C"),
+        accentAlt: Color(hex: "#7A1628"),
+        onAccent: Color(hex: "#FFFFFF"),
+        text: Color(hex: "#14161B"),
+        muted: Color(hex: "#5C6371"),
+        border: Color.black.opacity(0.10),
+        tv: Color(hex: "#1F6FB8"),
+        meshTopLeading: Color(hex: "#E9DCE2"),
+        meshTop: Color(hex: "#E6E1E6"),
+        meshTopTrailing: Color(hex: "#ECE6EB"),
+        meshLeading: Color(hex: "#E5DFE4"),
+        meshCenter: Color(hex: "#EBE4E9"),
+        meshTrailing: Color(hex: "#E8E5EA"),
+        meshBottomLeading: Color(hex: "#ECE8ED"),
+        meshBottom: Color(hex: "#EBE9EE"),
+        meshBottomTrailing: Color(hex: "#EDECF0")
+    )
+
+    /// Warm film stock. `onAccent` is near-black — white type on this gold would
+    /// sit at 1.9:1 and vanish.
+    static let kodachrome = AppTheme(
+        id: "kodachrome",
+        name: "Kodachrome",
+        background: Color(hex: "#14110B"),
+        surface: Color(hex: "#1F1A11"),
+        card: Color(hex: "#292217"),
+        accent: Color(hex: "#F2B32C"),
+        accentAlt: Color(hex: "#E2762B"),
+        onAccent: Color(hex: "#241A06"),
+        text: Color(hex: "#FFF6E4"),
+        muted: Color(hex: "#B3A183"),
+        border: Color.white.opacity(0.10),
+        tv: Color(hex: "#35A7E8"),
+        meshTopLeading: Color(hex: "#382A0E"),
+        meshTop: Color(hex: "#2F1C0D"),
+        meshTopTrailing: Color(hex: "#281F0C"),
+        meshLeading: Color(hex: "#2C1B0C"),
+        meshCenter: Color(hex: "#35280E"),
+        meshTrailing: Color(hex: "#29190C"),
+        meshBottomLeading: Color(hex: "#1E180A"),
+        meshBottom: Color(hex: "#20150B"),
+        meshBottomTrailing: Color(hex: "#1A1409")
+    )
+
+    /// The only green accent in the set; coral marks series against it.
+    static let cascade = AppTheme(
+        id: "cascade",
+        name: "Cascade",
+        background: Color(hex: "#07120D"),
+        surface: Color(hex: "#0E1F17"),
+        card: Color(hex: "#142B20"),
+        accent: Color(hex: "#34C86A"),
+        accentAlt: Color(hex: "#1E9E7F"),
+        onAccent: Color(hex: "#04180D"),
+        text: Color(hex: "#E9FFF2"),
+        muted: Color(hex: "#8AB49B"),
+        border: Color.white.opacity(0.09),
+        tv: Color(hex: "#FF8A5B"),
+        meshTopLeading: Color(hex: "#0E2F1B"),
+        meshTop: Color(hex: "#09231B"),
+        meshTopTrailing: Color(hex: "#0A2214"),
+        meshLeading: Color(hex: "#09211A"),
+        meshCenter: Color(hex: "#0D2D19"),
+        meshTrailing: Color(hex: "#081F18"),
+        meshBottomLeading: Color(hex: "#091A10"),
+        meshBottom: Color(hex: "#071913"),
+        meshBottomTrailing: Color(hex: "#07160E")
+    )
+
+    /// Theatre marquee at night — the loudest option, and the only magenta.
+    static let marquee = AppTheme(
+        id: "marquee",
+        name: "Marquee",
+        background: Color(hex: "#0B0910"),
+        surface: Color(hex: "#16111D"),
+        card: Color(hex: "#1F1829"),
+        accent: Color(hex: "#FF3D8B"),
+        accentAlt: Color(hex: "#A020C4"),
+        onAccent: Color(hex: "#2A0413"),
+        text: Color(hex: "#FFEBF4"),
+        muted: Color(hex: "#B294AA"),
+        border: Color.white.opacity(0.10),
+        tv: Color(hex: "#FFC24D"),
+        meshTopLeading: Color(hex: "#351123"),
+        meshTop: Color(hex: "#200A28"),
+        meshTopTrailing: Color(hex: "#240C1A"),
+        meshLeading: Color(hex: "#1E0A25"),
+        meshCenter: Color(hex: "#320F21"),
+        meshTrailing: Color(hex: "#1B0923"),
+        meshBottomLeading: Color(hex: "#190A14"),
+        meshBottom: Color(hex: "#15091B"),
+        meshBottomTrailing: Color(hex: "#140912")
+    )
+
+    /// Graphite’s restraint with an accent that actually outranks body text.
+    /// Second light option, warmer than Projection: paper rather than screen.
+    static let broadsheet = AppTheme(
+        id: "broadsheet",
+        name: "Broadsheet",
+        background: Color(hex: "#F2EFE7"),
+        surface: Color(hex: "#FAF8F2"),
+        card: Color(hex: "#FFFFFF"),
+        accent: Color(hex: "#1F5FA8"),
+        accentAlt: Color(hex: "#123C6B"),
+        onAccent: Color(hex: "#FFFFFF"),
+        text: Color(hex: "#1A1814"),
+        muted: Color(hex: "#5E5849"),
+        border: Color.black.opacity(0.10),
+        tv: Color(hex: "#B0532A"),
+        meshTopLeading:     Color(hex: "#EFE7D8"),
+        meshTop:            Color(hex: "#F2ECE0"),
+        meshTopTrailing:    Color(hex: "#EDE9DE"),
+        meshLeading:        Color(hex: "#F0EADC"),
+        meshCenter:         Color(hex: "#F4F0E6"),
+        meshTrailing:       Color(hex: "#EFECE3"),
+        meshBottomLeading:  Color(hex: "#F2EFE7"),
+        meshBottom:         Color(hex: "#F5F2EA"),
+        meshBottomTrailing: Color(hex: "#F3F1E9")
+    )
+
     static let all: [AppTheme] = [
         .signatureViolet,
         .midnightBlue,
+        .kodachrome,
+        .cascade,
+        .marquee,
         .sunsetAmber,
         .oceanTeal,
         .crimsonNoir,
         .graphiteMinimal,
         .monochrome,
-        .vibrantNeon
+        .vibrantNeon,
+        .projection,
+        .broadsheet
     ]
 
     static let defaultTheme: AppTheme = .signatureViolet
@@ -271,6 +453,16 @@ final class ThemeManager {
     static let shared = ThemeManager()
     private(set) var current: AppTheme = .defaultTheme
 
+    // Derived once per theme change rather than on every read. Working out
+    // whether a palette is light costs a UIColor conversion, and a scrolling
+    // feed reads these tokens on every hairline of every card.
+    private(set) var isLight: Bool = AppTheme.defaultTheme.isLight
+    private(set) var hairline: Color = AppTheme.defaultTheme.hairline
+    private(set) var strongHairline: Color = AppTheme.defaultTheme.strongHairline
+    private(set) var subtleFill: Color = AppTheme.defaultTheme.subtleFill
+    private(set) var placeholderFill: Color = AppTheme.defaultTheme.placeholderFill
+    private(set) var colorScheme: ColorScheme = AppTheme.defaultTheme.colorScheme
+
     private init() {}
 
     func applyTheme(id: String) {
@@ -279,6 +471,12 @@ final class ThemeManager {
 
     func applyTheme(_ theme: AppTheme) {
         current = theme
+        isLight = theme.isLight
+        hairline = theme.hairline
+        strongHairline = theme.strongHairline
+        subtleFill = theme.subtleFill
+        placeholderFill = theme.placeholderFill
+        colorScheme = theme.colorScheme
     }
 }
 
@@ -309,6 +507,10 @@ extension Color {
     static var mkMuted: Color { ThemeManager.shared.current.muted }
     static var mkBorder: Color { ThemeManager.shared.current.border }
     static var mkTV: Color { ThemeManager.shared.current.tv }
+    static var mkHairline: Color { ThemeManager.shared.hairline }
+    static var mkStrongHairline: Color { ThemeManager.shared.strongHairline }
+    static var mkSubtleFill: Color { ThemeManager.shared.subtleFill }
+    static var mkPlaceholderFill: Color { ThemeManager.shared.placeholderFill }
     static var mkMeshTopLeading: Color { ThemeManager.shared.current.meshTopLeading }
     static var mkMeshTop: Color { ThemeManager.shared.current.meshTop }
     static var mkMeshTopTrailing: Color { ThemeManager.shared.current.meshTopTrailing }
@@ -330,6 +532,22 @@ struct StreamingPlatform: Identifiable {
     /// bundled artwork — the UI draws `monogram` instead.
     let logoAsset: String?
     let accentColor: Color
+
+    /// Black or white, whichever stays legible on `accentColor`. A fixed white
+    /// monogram was invisible on Pluto TV's yellow and Apple's silver.
+    ///
+    /// Resolved in `init` so the list below reads the same as before and the
+    /// luminance is worked out once per service, not once per drawn tile.
+    let onAccentColor: Color
+
+    init(id: String, key: String, name: String, logoAsset: String?, accentColor: Color) {
+        self.id = id
+        self.key = key
+        self.name = name
+        self.logoAsset = logoAsset
+        self.accentColor = accentColor
+        self.onAccentColor = relativeLuminance(accentColor) > inkFlipLuminance ? .black : .white
+    }
 
     /// First letters of the service name, for tiles with no logo asset.
     var monogram: String {

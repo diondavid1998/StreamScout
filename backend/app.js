@@ -19,6 +19,7 @@ const {
   hydrateSavedTitleRatings,
   buildScopeKey,
   syncScope,
+  withTransaction,
 } = require('./catalogCache');
 const { fetchTitleWithCredits, searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
 
@@ -29,6 +30,15 @@ if (!JWT_SECRET) {
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const DEFAULT_REGION = 'US';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// In-flight TMDB searches during an import. TMDB's published ceiling is well
+// above this; the limit is here so a large import cannot starve the catalog
+// sync running alongside it.
+const IMPORT_LOOKUP_CONCURRENCY = 8;
+
+// Titles accepted per /import/letterboxd call. Raised from 50 now that lookups
+// run in parallel: the per-request overhead (auth, round trip) is paid once per
+// batch, and halving the number of batches halves it.
+const MAX_IMPORT_BATCH = 100;
 
 // ── Small promise wrappers over the sqlite3 callback API ────────────────────
 
@@ -69,6 +79,99 @@ function warmSavedRatings(db, userId) {
   hydrateSavedTitleRatings(db, userId).catch((e) =>
     console.error(`[ratings] saved-title hydration failed for user ${userId}:`, e.message)
   );
+}
+
+/** Run `mapper` over `items`, never more than `concurrency` in flight. */
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex;
+      nextIndex += 1;
+      results[i] = await mapper(items[i], i);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  );
+  return results;
+}
+
+/** Stable cache key for a Letterboxd row. */
+function lookupKeyFor(name, year) {
+  return `${String(name).toLowerCase().replace(/\s+/g, ' ').trim()}|${year}`;
+}
+
+/**
+ * Resolve a batch of Letterboxd rows to TMDB items.
+ *
+ * Reads every already-resolved row out of `title_lookup_cache` in one query,
+ * searches TMDB only for what is left — in parallel, since each lookup is an
+ * independent network call — then writes the new results back in one
+ * transaction. The previous version searched strictly one title at a time and
+ * slept 125ms between them, so a 50-title batch could not finish in under six
+ * seconds no matter how fast TMDB answered.
+ */
+async function resolveImportBatch(db, batch) {
+  const keys = batch.map(({ name, year }) => lookupKeyFor(name, year));
+  const uniqueKeys = [...new Set(keys)];
+
+  const resolved = new Map();
+  if (uniqueKeys.length) {
+    const placeholders = uniqueKeys.map(() => '?').join(',');
+    const cachedRows = await getRows(
+      db,
+      `SELECT lookup_key, item_id, media_type, title, poster_url
+         FROM title_lookup_cache WHERE lookup_key IN (${placeholders})`,
+      uniqueKeys
+    );
+    for (const row of cachedRows) {
+      resolved.set(
+        row.lookup_key,
+        row.item_id
+          ? { itemId: row.item_id, mediaType: row.media_type, title: row.title, posterUrl: row.poster_url }
+          : null
+      );
+    }
+  }
+
+  const misses = batch.filter((item, i) => !resolved.has(keys[i]));
+  const seen = new Set();
+  const toSearch = misses.filter(({ name, year }) => {
+    const key = lookupKeyFor(name, year);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (toSearch.length) {
+    const found = await mapWithConcurrency(toSearch, IMPORT_LOOKUP_CONCURRENCY, async ({ name, year }) => {
+      try {
+        return await searchTitleOnTmdb(name, year);
+      } catch {
+        return null;
+      }
+    });
+
+    const now = new Date().toISOString();
+    await withTransaction(db, async () => {
+      for (let i = 0; i < toSearch.length; i++) {
+        const key = lookupKeyFor(toSearch[i].name, toSearch[i].year);
+        const hit = found[i] || null;
+        resolved.set(key, hit);
+        await runSql(
+          db,
+          `INSERT OR REPLACE INTO title_lookup_cache
+             (lookup_key, item_id, media_type, title, poster_url, resolved_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [key, hit?.itemId ?? null, hit?.mediaType ?? null, hit?.title ?? null, hit?.posterUrl ?? null, now]
+        );
+      }
+    });
+  }
+
+  return keys.map((key) => resolved.get(key) ?? null);
 }
 
 /** Split a comma-separated query parameter into a clean list of values. */
@@ -1037,7 +1140,8 @@ function createApp(db, { disableRateLimit = false } = {}) {
   });
 
   // ── Letterboxd batch import ───────────────────────────────────────────────
-  // Accepts up to 50 items per call. Client loops until all items are processed.
+  // Accepts up to MAX_IMPORT_BATCH items per call. Client loops until all items
+  // are processed.
   //
   // The two lists import with different semantics, matching what each one means:
   //   watchlist — a snapshot of what you still intend to watch, so an upload
@@ -1061,43 +1165,51 @@ function createApp(db, { disableRateLimit = false } = {}) {
     let replaced = 0;
     if (replaceExisting === true) {
       try {
-        const result = await runSql(db, 'DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id]);
-        replaced = result.changes;
-        // The availability cache is keyed per user and item; stale rows would
-        // otherwise keep answering for titles no longer on the list.
-        await runSql(db, 'DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
+        await withTransaction(db, async () => {
+          const result = await runSql(db, 'DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id]);
+          replaced = result.changes;
+          // The availability cache is keyed per user and item; stale rows would
+          // otherwise keep answering for titles no longer on the list.
+          await runSql(db, 'DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
+        });
       } catch {
         return res.status(500).json({ error: 'Could not clear the existing watchlist' });
       }
     }
 
-    const batch = items.slice(0, 50);
+    const batch = items.slice(0, MAX_IMPORT_BATCH);
     const table = importType === 'watched' ? 'watched_items' : 'watchlist_items';
     const timeCol = importType === 'watched' ? 'watched_at' : 'added_at';
 
+    const usable = batch.filter(({ name, year }) => name && year);
+    let notFound = batch.length - usable.length;
     let matched = 0;
-    let notFound = 0;
 
-    for (const { name, year } of batch) {
-      if (!name || !year) { notFound++; continue; }
-      const result = await searchTitleOnTmdb(name, year);
-      if (!result) { notFound++; continue; }
+    let results;
+    try {
+      results = await resolveImportBatch(db, usable);
+    } catch (err) {
+      console.error('[import] batch lookup failed:', err.message);
+      return res.status(502).json({ error: 'Could not reach the title database' });
+    }
 
-      try {
-        const changes = await new Promise((resolve, reject) =>
-          db.run(
+    // One transaction for the whole batch. Standalone INSERTs meant one commit
+    // — and one disk sync — per title.
+    try {
+      await withTransaction(db, async () => {
+        for (const result of results) {
+          if (!result) { notFound++; continue; }
+          const { changes } = await runSql(
+            db,
             `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol}) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl],
-            function (err) { err ? reject(err) : resolve(this.changes); }
-          )
-        );
-        if (changes > 0) matched++;
-      } catch {
-        notFound++;
-      }
-
-      // Throttle to respect TMDB rate limits (~8 req/sec)
-      await new Promise((r) => setTimeout(r, 125));
+            [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl]
+          );
+          if (changes > 0) matched++;
+        }
+      });
+    } catch (err) {
+      console.error('[import] batch insert failed:', err.message);
+      return res.status(500).json({ error: 'Could not save the imported titles' });
     }
 
     // A finished import is the biggest single injection of saved titles, so

@@ -574,55 +574,105 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
 // ── Letterboxd title search ───────────────────────────────────────────────
 // Searches TMDB by title + year with ±1 year tolerance.
 // Tries movie first, then TV, returns {itemId, title, posterUrl, mediaType} or null.
+function normalizeTitle(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+}
+
+// Only accept an exact normalized-title match (or a whole-word substring match)
+// so short/common titles ("Up", "It") don't wrongly match unrelated results, and
+// so we never silently fall back to the first (possibly unrelated) result.
+function titleMatches(candidate, normName) {
+  const t = normalizeTitle(candidate);
+  if (!t) return false;
+  if (t === normName) return true;
+  const boundary = (haystack, needle) =>
+    new RegExp(`(^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(haystack);
+  return boundary(t, normName) || boundary(normName, t);
+}
+
+function shapeSearchResult(match, mediaType) {
+  return {
+    itemId: `${mediaType}-${match.id}`,
+    title: mediaType === 'movie' ? match.title : match.name,
+    posterUrl: match.poster_path ? `${TMDB_IMAGE_BASE_URL}${match.poster_path}` : null,
+    mediaType,
+  };
+}
+
+/**
+ * Resolve a Letterboxd row (title + year) to a TMDB item.
+ *
+ * The first pass is a single `/search/multi` call: it covers films and series at
+ * once, and because the year is matched against each result's own release date
+ * rather than sent as a query parameter, one request covers the ±1 year window
+ * too. The previous implementation issued a year-scoped request per media type
+ * per candidate year — six sequential round trips for a title it would go on to
+ * report as not found, which is exactly the case a large import hits most.
+ *
+ * The year-scoped searches remain as a fallback for the two cases where multi
+ * can still be hiding the answer — a name match under a different release year,
+ * or a first page full enough to have cut a lower-ranked exact match off — so
+ * match quality is unchanged.
+ */
 async function searchTitleOnTmdb(name, year) {
-  const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-  const normName = normalize(name);
+  const normName = normalizeTitle(name);
+  if (!normName) return null;
+
+  const inYearWindow = (dateString) => {
+    const resultYear = parseInt(String(dateString || '').slice(0, 4), 10);
+    if (!Number.isFinite(resultYear)) return false;
+    return Math.abs(resultYear - year) <= 1;
+  };
+
+  // Whether the year-scoped searches below are worth issuing at all.
+  let worthFallingBack = true;
+
+  try {
+    const data = await fetchTmdb('/search/multi', { query: name, language: 'en-US' });
+    const results = data.results || [];
+    const candidates = results.filter((r) => r.media_type === 'movie' || r.media_type === 'tv');
+    // Films first, matching the old movie-before-TV precedence.
+    const ordered = [
+      ...candidates.filter((r) => r.media_type === 'movie'),
+      ...candidates.filter((r) => r.media_type === 'tv'),
+    ];
+    const byName = ordered.filter((r) => titleMatches(r.title || r.name, normName));
+
+    const match = byName.find((r) => inYearWindow(r.release_date || r.first_air_date));
+    if (match) return shapeSearchResult(match, match.media_type);
+
+    // Two reasons the answer could still be out there: the title matched but
+    // under a different release year, or the first page of results was full and
+    // a lower-ranked exact match got cut off, which a year-scoped search would
+    // float up. Neither applies when a complete page of results holds nothing by
+    // that name — and that is what an unresolvable row looks like. Skipping the
+    // fallback there turns the most expensive outcome, a miss, from seven
+    // requests into one.
+    const pageWasTruncated = Number(data.total_results || 0) > results.length;
+    worthFallingBack = byName.length > 0 || pageWasTruncated;
+  } catch {
+    // Reaching TMDB failed rather than the title being absent — still worth retrying.
+  }
+
+  if (!worthFallingBack) return null;
 
   const trySearch = async (endpoint, yearParam, yearValue) => {
     try {
       const data = await fetchTmdb(endpoint, { query: name, [yearParam]: yearValue, language: 'en-US' });
-      const results = data.results || [];
-      // Only accept an exact normalized-title match (or a whole-word substring match)
-      // so short/common titles (e.g. "Up", "It") don't wrongly match unrelated results,
-      // and so we never silently fall back to the first (possibly unrelated) result.
-      const match = results.find((r) => {
-        const t = normalize(r.title || r.name || '');
-        if (!t) return false;
-        if (t === normName) return true;
-        const boundary = (haystack, needle) =>
-          new RegExp(`(^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(haystack);
-        return boundary(t, normName) || boundary(normName, t);
-      });
-      return match || null;
+      return (data.results || []).find((r) => titleMatches(r.title || r.name, normName)) || null;
     } catch {
       return null;
     }
   };
 
-  // Try movie with exact year, then ±1
   for (const yr of [year, year - 1, year + 1]) {
     const match = await trySearch('/search/movie', 'primary_release_year', yr);
-    if (match) {
-      return {
-        itemId: `movie-${match.id}`,
-        title: match.title,
-        posterUrl: match.poster_path ? `${TMDB_IMAGE_BASE_URL}${match.poster_path}` : null,
-        mediaType: 'movie',
-      };
-    }
+    if (match) return shapeSearchResult(match, 'movie');
   }
 
-  // Fallback to TV search
   for (const yr of [year, year - 1, year + 1]) {
     const match = await trySearch('/search/tv', 'first_air_date_year', yr);
-    if (match) {
-      return {
-        itemId: `tv-${match.id}`,
-        title: match.name,
-        posterUrl: match.poster_path ? `${TMDB_IMAGE_BASE_URL}${match.poster_path}` : null,
-        mediaType: 'tv',
-      };
-    }
+    if (match) return shapeSearchResult(match, 'tv');
   }
 
   return null;

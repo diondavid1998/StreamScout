@@ -1230,7 +1230,8 @@ function App() {
     if (!lbxPreview || !lbxFile) return;
     const { items } = lbxPreview;
     const importType = lbxIntendedType;  // use the button the user pressed, not server detection
-    const batchSize = 50;
+    // Matches MAX_IMPORT_BATCH on the server.
+    const batchSize = 100;
     let offset = 0;
     let totalMatched = 0;
     let totalNotFound = 0;
@@ -2766,8 +2767,12 @@ function App() {
             <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
               <button type="button" style={styles.modalClose}
                 onClick={() => { setSelectedMovie(null); setMovieDetails(null); }}>✕</button>
-              {(movieDetails?.backdropUrl || selectedMovie.posterUrl) && (
-                <img src={movieDetails?.backdropUrl || selectedMovie.posterUrl} alt=""
+              {/* Backdrops only. Falling back to the poster meant every title
+                  opened on its own poster stretched across the modal and cropped
+                  to a 220px band — the card you clicked, enlarged. Details load
+                  after the modal opens, so that was the first frame every time. */}
+              {movieDetails?.backdropUrl && (
+                <img src={movieDetails.backdropUrl} alt=""
                   style={styles.modalBanner}
                   onError={(e) => { e.currentTarget.style.display = 'none'; }} />
               )}
