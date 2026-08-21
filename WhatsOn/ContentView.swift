@@ -1796,15 +1796,34 @@ struct ProviderMark: View {
 struct FlowRow: Layout {
     var spacing: CGFloat = 6
 
+    /// Size a child against the width actually available, never against infinity.
+    ///
+    /// Asking with `.unspecified` let a long service or genre name report its full
+    /// single-line width. One such chip was then wider than the row, and this
+    /// layout reported that width as its own — pushing its container past the
+    /// screen edge. `sizeThatFits` and `placeSubviews` have to measure children
+    /// identically or placement drifts from the reported size, so both go through
+    /// here.
+    private func childSize(_ subview: LayoutSubview, available: CGFloat) -> CGSize {
+        let proposal = available.isFinite
+            ? ProposedViewSize(width: available, height: nil)
+            : ProposedViewSize.unspecified
+        var size = subview.sizeThatFits(proposal)
+        size.width = min(size.width, available)
+        return size
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         var rowWidth: CGFloat = 0
         var rowHeight: CGFloat = 0
         var totalHeight: CGFloat = 0
+        var widestRow: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = childSize(subview, available: maxWidth)
             if rowWidth > 0 && rowWidth + spacing + size.width > maxWidth {
+                widestRow = max(widestRow, rowWidth)
                 totalHeight += rowHeight + spacing
                 rowWidth = size.width
                 rowHeight = size.height
@@ -1814,7 +1833,12 @@ struct FlowRow: Layout {
             }
         }
         totalHeight += rowHeight
-        return CGSize(width: maxWidth == .infinity ? rowWidth : maxWidth, height: totalHeight)
+        widestRow = max(widestRow, rowWidth)
+
+        // Report the proposed width when there is one, so the layout fills its
+        // column; otherwise the widest row, which by construction is the least
+        // width that holds the content.
+        return CGSize(width: maxWidth.isFinite ? maxWidth : widestRow, height: totalHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -1823,7 +1847,7 @@ struct FlowRow: Layout {
         var rowHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = childSize(subview, available: bounds.width)
             if x > bounds.minX && x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
@@ -2559,14 +2583,23 @@ struct DetailSheet: View {
     /// arrives after the sheet does, every title opened on its own poster scaled
     /// up to fill the hero — the tapped card, enlarged. Without a backdrop the
     /// dominant-colour gradient underneath stands on its own.
+    ///
+    /// The image is an overlay on a fixed-height `Color.clear`, not a framed
+    /// image. `scaledToFill` reports a layout size that *fills* the proposal, so
+    /// it overflows in one axis; `.frame(height:)` then adopts its child's width,
+    /// and `.clipped()` only clips pixels, never layout. A 16:9 backdrop in a
+    /// 393pt hero reported roughly 484pt of width, and that width propagated up
+    /// through the ZStack into the scroll content — the whole detail page laid
+    /// out wider than the screen, clipped, with no way to reach what fell off the
+    /// right edge. An overlay is sized by its parent and never feeds size back.
     @ViewBuilder
     var backdropWash: some View {
         if let urlStr = details?.backdropUrl, let url = URL(string: urlStr) {
             CachedAsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let img):
-                    img.resizable().scaledToFill()
-                        .frame(height: Self.heroHeight)
+                    Color.clear
+                        .overlay { img.resizable().scaledToFill() }
                         .clipped()
                         .blur(radius: 30, opaque: true)
                         .opacity(0.5)
