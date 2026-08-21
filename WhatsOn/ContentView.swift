@@ -1463,9 +1463,6 @@ struct MovieCardView: View {
             }
         }
         .frame(width: 96, height: 144)
-        // Overlay before clipShape, so the scrim is clipped to the poster's
-        // corners rather than spilling past them.
-        .overlay(alignment: .bottom) { providerMarks }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1480,38 +1477,41 @@ struct MovieCardView: View {
         }
     }
 
-    /// Service logos sit on the poster, where the eye already is, instead of taking
-    /// a full text row in the info column. Beyond three, the rest become a count.
+    /// Services get their own row above the scores.
+    ///
+    /// They used to sit as 13pt marks in the poster's bottom corner, over a
+    /// scrim, capped at three with a "+2". At that size a logo is a coloured
+    /// smudge — you could tell a title was streaming somewhere but not where,
+    /// which is the one question the app exists to answer. Named chips, and the
+    /// row scrolls rather than truncating, so a title on six services shows six.
     @ViewBuilder
-    var providerMarks: some View {
+    var serviceBar: some View {
         let providers = movie.availableOn ?? []
         if !providers.isEmpty {
-            let shown = Array(providers.prefix(3))
-            let overflow = providers.count - shown.count
-            HStack(spacing: 3) {
-                ForEach(shown, id: \.self) { name in
-                    ProviderMark(name: name)
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(providers, id: \.self) { name in
+                        HStack(spacing: 5) {
+                            // The chip's own text carries the name for VoiceOver.
+                            ProviderMark(name: name, size: 15)
+                                .accessibilityHidden(true)
+                            Text(name)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.mkText)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.mkSubtleFill, in: Capsule())
+                        .overlay(Capsule().stroke(Color.mkHairline, lineWidth: 1))
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
-                if overflow > 0 {
-                    Text("+\(overflow)")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.white.opacity(0.75))
-                }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 7)
-            .padding(.bottom, 6)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                LinearGradient(
-                    colors: [Color.black.opacity(0), Color.black.opacity(0.72)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 42),
-                alignment: .bottom
-            )
-            .allowsHitTesting(false)
+            .padding(.bottom, 7)
         }
     }
 
@@ -1545,6 +1545,8 @@ struct MovieCardView: View {
             }
 
             Spacer(minLength: 8)
+
+            serviceBar
 
             ScoreStrip(entries: buildRatings())
         }
@@ -2498,6 +2500,12 @@ struct DetailSheet: View {
 
     // MARK: Hero
 
+    /// Height of the hero. It was 330 — roughly the top 40% of a phone — which
+    /// meant opening a title landed you on artwork and had you scrolling to
+    /// reach the answer you tapped for. 272 still clears a three-line title,
+    /// a two-line tagline and the 156pt poster without clipping.
+    static let heroHeight: CGFloat = 272
+
     /// The one place the poster's dominant colour earns a full wash — a single
     /// screen showing a single title, rather than a feed where every row would
     /// pull in a different direction.
@@ -2512,7 +2520,7 @@ struct DetailSheet: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 330)
+            .frame(height: Self.heroHeight)
 
             backdropWash
 
@@ -2540,20 +2548,25 @@ struct DetailSheet: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
-        .frame(height: 330)
+        .frame(height: Self.heroHeight)
         .clipped()
     }
 
     /// The backdrop image, blurred into the wash rather than shown as a framed
     /// picture — it is atmosphere here, not content.
+    ///
+    /// Backdrops only. This used to fall back to the poster, and since `details`
+    /// arrives after the sheet does, every title opened on its own poster scaled
+    /// up to fill the hero — the tapped card, enlarged. Without a backdrop the
+    /// dominant-colour gradient underneath stands on its own.
     @ViewBuilder
     var backdropWash: some View {
-        if let urlStr = details?.backdropUrl ?? movie.posterUrl, let url = URL(string: urlStr) {
+        if let urlStr = details?.backdropUrl, let url = URL(string: urlStr) {
             CachedAsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let img):
                     img.resizable().scaledToFill()
-                        .frame(height: 330)
+                        .frame(height: Self.heroHeight)
                         .clipped()
                         .blur(radius: 30, opaque: true)
                         .opacity(0.5)
@@ -2567,7 +2580,7 @@ struct DetailSheet: View {
                     Color.clear
                 }
             }
-            .frame(height: 330)
+            .frame(height: Self.heroHeight)
             .clipped()
             .allowsHitTesting(false)
         }
