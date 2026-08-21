@@ -3468,9 +3468,16 @@ struct ProfileTabView: View {
             }
 
             do {
+                // A watchlist upload supersedes the saved list, so the first
+                // batch clears it and the rest append. A watched upload is a
+                // history and only ever merges, so it never sets this.
+                var body: [String: Any] = ["items": encodableChunk, "importType": lbxImportType]
+                if lbxImportType == "watchlist" && offset == 0 {
+                    body["replaceExisting"] = true
+                }
                 let resp: LetterboxdImportResponse = try await APIService.shared.post(
                     "/import/letterboxd",
-                    body: ["items": encodableChunk, "importType": lbxImportType],
+                    body: body,
                     token: app.token
                 )
                 totalMatched  += resp.matched ?? 0
@@ -3596,8 +3603,36 @@ struct WatchedOnlyTabView: View {
     @Environment(AppState.self) private var app
     @State private var items: [WatchedItem] = []
     @State private var isLoading = true
+    @State private var isClearing = false
+    @State private var confirmClear = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !items.isEmpty {
+                ClearListBar(
+                    count: items.count,
+                    label: "watched",
+                    isClearing: isClearing,
+                    action: { confirmClear = true }
+                )
+            }
+            content
+        }
+        .confirmationDialog(
+            "Clear your watched list?",
+            isPresented: $confirmClear,
+            titleVisibility: .visible
+        ) {
+            Button("Remove all \(items.count) titles", role: .destructive) {
+                Task { await clearAll() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    var content: some View {
         Group {
             if isLoading {
                 VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
@@ -3623,6 +3658,24 @@ struct WatchedOnlyTabView: View {
             }
         }
         .task { await load() }
+    }
+
+    @MainActor func clearAll() async {
+        isClearing = true
+        // Optimistic: the list empties immediately and is reloaded from the
+        // server if the call fails, so a slow network never looks like a no-op.
+        let previous = items
+        items = []
+        do {
+            let _: ToggleWatchedResponse = try await APIService.shared.delete("/watched", token: app.token)
+            app.replaceWatchedIds([])
+        } catch let err as APIError {
+            items = previous
+            if case .unauthorized = err { app.logout() }
+        } catch {
+            items = previous
+        }
+        isClearing = false
     }
 
     @ViewBuilder
@@ -3661,14 +3714,81 @@ struct WatchedOnlyTabView: View {
     }
 }
 
+/// Header bar above a saved list, carrying the count and a destructive clear.
+/// Solid, not glass: it sits in the content column, not the floating layer.
+struct ClearListBar: View {
+    let count: Int
+    let label: String
+    let isClearing: Bool
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Text("\(count) \(count == 1 ? "title" : "titles")")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.mkMuted)
+            Spacer()
+            Button(action: action) {
+                HStack(spacing: 6) {
+                    if isClearing {
+                        ProgressView().scaleEffect(0.7).tint(.red)
+                    } else {
+                        Image(systemName: "trash").font(.system(size: 12, weight: .semibold))
+                    }
+                    Text(isClearing ? "Clearing…" : "Clear all")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.red.opacity(0.12), in: Capsule())
+                .overlay(Capsule().stroke(Color.red.opacity(0.3), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(isClearing)
+            .accessibilityLabel("Clear entire \(label)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+}
+
 // MARK: Watchlist Tab
 
 struct WatchlistOnlyTabView: View {
     @Environment(AppState.self) private var app
     @State private var items: [WatchlistItem] = []
     @State private var isLoading = true
+    @State private var isClearing = false
+    @State private var confirmClear = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !items.isEmpty {
+                ClearListBar(
+                    count: items.count,
+                    label: "watchlist",
+                    isClearing: isClearing,
+                    action: { confirmClear = true }
+                )
+            }
+            content
+        }
+        .confirmationDialog(
+            "Clear your watchlist?",
+            isPresented: $confirmClear,
+            titleVisibility: .visible
+        ) {
+            Button("Remove all \(items.count) titles", role: .destructive) {
+                Task { await clearAll() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    var content: some View {
         Group {
             if isLoading {
                 VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
@@ -3694,6 +3814,22 @@ struct WatchlistOnlyTabView: View {
             }
         }
         .task { await load() }
+    }
+
+    @MainActor func clearAll() async {
+        isClearing = true
+        let previous = items
+        items = []
+        do {
+            let _: ToggleWatchedResponse = try await APIService.shared.delete("/watchlist", token: app.token)
+            app.replaceWatchlistIds([])
+        } catch let err as APIError {
+            items = previous
+            if case .unauthorized = err { app.logout() }
+        } catch {
+            items = previous
+        }
+        isClearing = false
     }
 
     @ViewBuilder

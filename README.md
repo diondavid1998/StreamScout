@@ -209,7 +209,7 @@ npm run build    # production build
 1. **Register / Log in** — creates a user account with hashed password; JWT returned and stored in `localStorage`
 2. **Pick streaming platforms** — saved to your account; sent as query params to the catalog endpoint
 3. **Catalog fetch** — backend checks SQLite cache; if stale (> 24h), fetches fresh data from TMDB
-4. **Rating hydration** — background job enriches catalog entries with IMDb/RT/Metacritic scores via OMDB API
+4. **Rating hydration** — a background job enriches entries with IMDb/RT/Metacritic scores from OMDB. Titles you have saved go first: watchlist entries before watched ones, both before merely popular ones. Saved titles that never made the popular snapshot are hydrated separately, so an obscure film on your watchlist still gets scores. Everything lands in `title_ratings`, keyed by IMDb ID and shared across every user and platform combination, so each title costs one OMDB call ever
 5. **Daily refresh** — scheduled refresh at midnight recalculates catalog for all active scopes
 
 ---
@@ -266,9 +266,11 @@ narrows it to titles currently streaming on your services.
 | `GET` | `/watched` | Titles marked watched |
 | `POST` | `/watched` | Mark a title watched |
 | `DELETE` | `/watched/:itemId` | Unmark a title |
+| `DELETE` | `/watched` | Clear the whole watched list |
 | `GET` | `/watchlist` | Saved-for-later titles |
 | `POST` | `/watchlist` | Add a title to the watchlist |
 | `DELETE` | `/watchlist/:itemId` | Remove a title from the watchlist |
+| `DELETE` | `/watchlist` | Clear the whole watchlist |
 
 ### Letterboxd import
 
@@ -276,6 +278,14 @@ narrows it to titles currently streaming on your services.
 |---|---|---|
 | `POST` | `/import/letterboxd/preview` | Parse a CSV and report what it contains |
 | `POST` | `/import/letterboxd` | Import up to 50 items per call |
+
+The two lists import with different semantics, matching what each one means:
+
+- **Watchlist** is a snapshot of what you still intend to watch, so an upload
+  **replaces** it — titles you removed on Letterboxd do not linger. The client
+  sets `replaceExisting: true` on the first batch only; later batches append.
+- **Watched** is a history, which only grows, so an upload **merges** into the
+  existing list and leaves rows already present alone.
 
 ---
 

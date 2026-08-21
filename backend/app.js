@@ -16,6 +16,7 @@ const {
   ensureScopeSynced,
   readCachedCatalog,
   getWatchlistItemsWithAvailability,
+  hydrateSavedTitleRatings,
   buildScopeKey,
   syncScope,
 } = require('./catalogCache');
@@ -58,6 +59,16 @@ function signUserToken({ id, username, tokenVersion = 0 }) {
   return jwt.sign({ id, username, tokenVersion: tokenVersion || 0 }, JWT_SECRET, {
     expiresIn: '30d',
   });
+}
+
+/**
+ * Kick rating hydration for a user's saved titles without blocking the response.
+ * Locked per user and a no-op once cached, so calling it speculatively is cheap.
+ */
+function warmSavedRatings(db, userId) {
+  hydrateSavedTitleRatings(db, userId).catch((e) =>
+    console.error(`[ratings] saved-title hydration failed for user ${userId}:`, e.message)
+  );
 }
 
 /** Split a comma-separated query parameter into a clean list of values. */
@@ -595,6 +606,15 @@ function createApp(db, { disableRateLimit = false } = {}) {
     );
   });
 
+  // ── Watched list CLEAR ────────────────────────────────────────────────────
+  // Registered before the /:item_id route so "/watched" is not read as an item.
+  app.delete('/watched', authenticateToken, (req, res) => {
+    db.run('DELETE FROM watched_items WHERE user_id = ?', [req.user.id], function (err) {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json({ success: true, removed: this.changes });
+    });
+  });
+
   // ── Watched list DELETE ───────────────────────────────────────────────────
   app.delete('/watched/:item_id', authenticateToken, (req, res) => {
     const itemId = decodeURIComponent(req.params.item_id);
@@ -816,6 +836,10 @@ function createApp(db, { disableRateLimit = false } = {}) {
         const currentPage = Math.min(Math.max(1, Number(page)), totalPages);
         const paged = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+        // Availability resolution above is what fills in imdb_ids, so this is
+        // the point at which the hydrator has something new to work with.
+        warmSavedRatings(db, req.user.id);
+
         return res.json({
           items: paged,
           meta: {
@@ -853,6 +877,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
         yearMax,
         excludeWatchedForUserId: hideWatched ? req.user.id : null,
       });
+      warmSavedRatings(db, req.user.id);
       res.json(catalog);
     } catch (e) {
       res.status(500).json({ error: 'Failed to load cached catalog', details: e.message });
@@ -893,6 +918,17 @@ function createApp(db, { disableRateLimit = false } = {}) {
         res.json({ success: true, added: this.changes > 0 });
       }
     );
+  });
+
+  // ── Watchlist CLEAR ───────────────────────────────────────────────────────
+  app.delete('/watchlist', authenticateToken, (req, res) => {
+    db.run('DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id], function (err) {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      // Drop the availability cache too, or cleared titles resurface in the
+      // "From watchlist" view until their 24-hour TTL expires.
+      db.run('DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
+      res.json({ success: true, removed: this.changes });
+    });
   });
 
   // ── Watchlist DELETE ──────────────────────────────────────────────────────
@@ -1002,14 +1038,39 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
   // ── Letterboxd batch import ───────────────────────────────────────────────
   // Accepts up to 50 items per call. Client loops until all items are processed.
+  //
+  // The two lists import with different semantics, matching what each one means:
+  //   watchlist — a snapshot of what you still intend to watch, so an upload
+  //               REPLACES it. Titles you removed on Letterboxd should not
+  //               linger here. The client sets `replaceExisting` on the first
+  //               batch only; later batches append to what it just seeded.
+  //   watched   — a history, which only ever grows, so an upload MERGES. Rows
+  //               already present are left alone by INSERT OR IGNORE.
   app.post('/import/letterboxd', authenticateToken, async (req, res) => {
-    const { items, importType } = req.body || {};
+    const { items, importType, replaceExisting } = req.body || {};
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'items array required' });
     }
     if (!['watched', 'watchlist'].includes(importType)) {
       return res.status(400).json({ error: 'importType must be watched or watchlist' });
     }
+    if (replaceExisting === true && importType !== 'watchlist') {
+      return res.status(400).json({ error: 'replaceExisting is only valid for a watchlist import' });
+    }
+
+    let replaced = 0;
+    if (replaceExisting === true) {
+      try {
+        const result = await runSql(db, 'DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id]);
+        replaced = result.changes;
+        // The availability cache is keyed per user and item; stale rows would
+        // otherwise keep answering for titles no longer on the list.
+        await runSql(db, 'DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
+      } catch {
+        return res.status(500).json({ error: 'Could not clear the existing watchlist' });
+      }
+    }
+
     const batch = items.slice(0, 50);
     const table = importType === 'watched' ? 'watched_items' : 'watchlist_items';
     const timeCol = importType === 'watched' ? 'watched_at' : 'added_at';
@@ -1039,7 +1100,11 @@ function createApp(db, { disableRateLimit = false } = {}) {
       await new Promise((r) => setTimeout(r, 125));
     }
 
-    res.json({ matched, notFound, processed: batch.length });
+    // A finished import is the biggest single injection of saved titles, so
+    // start rating them straight away rather than waiting for the next visit.
+    warmSavedRatings(db, req.user.id);
+
+    res.json({ matched, notFound, processed: batch.length, replaced });
   });
 
   // ── Error handler ─────────────────────────────────────────────────────────
