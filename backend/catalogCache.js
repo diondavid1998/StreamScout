@@ -11,6 +11,10 @@ const PROVIDER_CONFIG_VERSION = 2;
 const syncLocks = new Map();
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
+const savedRatingLocks = new Map();
+// Per-run ceiling on OMDB calls for a user's saved titles. A Letterboxd import
+// can be five figures; this drains across visits instead of in one burst.
+const SAVED_HYDRATION_BATCH = 60;
 let writeQueue = Promise.resolve();
 const HYDRATION_BATCH_SIZE = 40;
 const HYDRATION_CONCURRENCY = 8;
@@ -208,18 +212,23 @@ async function ensureCatalogTables(db) {
     `CREATE INDEX IF NOT EXISTS idx_watchlist_items_item_id ON watchlist_items(item_id)`
   );
 
-  // Composite indexes on (scope_key, <sort_column>) so ORDER BY queries use index
-  // scans instead of full-table sorts, keeping paged catalog responses fast.
-  // These names and column expressions are compile-time constants, never derived
-  // from user input, so templating them here is safe.
+  // Sort indexes must match buildSortExpression COLUMN FOR COLUMN, including the
+  // tiebreaker. The original set indexed only the leading column, so every sort
+  // that carries a tiebreaker — which is all but one of them — fell back to a
+  // full scan plus a temp B-tree, the default popularity sort included.
+  //
+  // Names and column expressions here are compile-time constants, never derived
+  // from user input, so templating them is safe.
   const sortIndexes = [
-    ['idx_cce_popularity',       'popularity DESC'],
-    ['idx_cce_tmdb_rating',      'tmdb_rating DESC'],
-    ['idx_cce_rating_imdb_num',  'rating_imdb_num DESC'],
-    ['idx_cce_rating_rt_num',    'rating_rt_num DESC'],
-    ['idx_cce_rating_meta_num',  'rating_meta_num DESC'],
-    ['idx_cce_release_date',     'release_date DESC'],
-    ['idx_cce_first_seen_at',    'first_seen_at DESC'],
+    ['idx_cce_popularity_v2',      'popularity DESC, tmdb_rating DESC'],
+    ['idx_cce_tmdb_rating_v2',     'tmdb_rating DESC, popularity DESC'],
+    ['idx_cce_rating_imdb_v2',     'rating_imdb_num DESC, popularity DESC'],
+    ['idx_cce_rating_rt_v2',       'rating_rt_num DESC, popularity DESC'],
+    ['idx_cce_rating_meta_v2',     'rating_meta_num DESC, popularity DESC'],
+    ['idx_cce_release_date',       'release_date DESC'],
+    ['idx_cce_release_date_asc',   "(CASE WHEN release_date IS NULL OR release_date = '' THEN 1 ELSE 0 END) ASC, release_date ASC"],
+    ['idx_cce_recently_added_v2',  'first_seen_at DESC, updated_at DESC'],
+    ['idx_cce_title',              'title COLLATE NOCASE ASC'],
   ];
   for (const [name, col] of sortIndexes) {
     await run(
@@ -227,6 +236,19 @@ async function ensureCatalogTables(db) {
       `CREATE INDEX IF NOT EXISTS ${name}
        ON catalog_cache_entries(scope_key, ${col})`
     );
+  }
+
+  // Retire the single-column versions the ones above replace. Leaving them
+  // costs write time on every sync and gives the planner nothing.
+  for (const stale of [
+    'idx_cce_popularity',
+    'idx_cce_tmdb_rating',
+    'idx_cce_rating_imdb_num',
+    'idx_cce_rating_rt_num',
+    'idx_cce_rating_meta_num',
+    'idx_cce_first_seen_at',
+  ]) {
+    await run(db, `DROP INDEX IF EXISTS ${stale}`);
   }
 
   // Per-user streaming availability cache for watchlist items.
@@ -521,13 +543,24 @@ async function hydrateScopeRatings(db, scopeKey) {
         return;
       }
 
+      // Saved titles are rated before merely popular ones. The subqueries are
+      // deliberately not filtered by user: this scope's cache is shared by every
+      // user on the same platform set, so "someone saved this" is the right
+      // global signal for what to spend an OMDB call on first.
       const rows = await all(
         db,
         `SELECT e.scope_key, e.media_type, e.tmdb_id, e.imdb_id,
-                EXISTS (
-                  SELECT 1 FROM watchlist_items w
-                  WHERE w.item_id = e.media_type || '-' || CAST(e.tmdb_id AS TEXT)
-                ) AS on_watchlist
+                CASE
+                  WHEN EXISTS (
+                    SELECT 1 FROM watchlist_items w
+                    WHERE w.item_id = e.media_type || '-' || CAST(e.tmdb_id AS TEXT)
+                  ) THEN 0
+                  WHEN EXISTS (
+                    SELECT 1 FROM watched_items d
+                    WHERE d.item_id = e.media_type || '-' || CAST(e.tmdb_id AS TEXT)
+                  ) THEN 1
+                  ELSE 2
+                END AS saved_rank
          FROM catalog_cache_entries e
          WHERE e.scope_key = ?
            AND e.imdb_id IS NOT NULL
@@ -537,7 +570,7 @@ async function hydrateScopeRatings(db, scopeKey) {
              e.rating_rt   IS NULL OR
              e.rating_meta IS NULL
            )
-         ORDER BY on_watchlist DESC, e.popularity DESC
+         ORDER BY saved_rank ASC, e.popularity DESC
          LIMIT ?`,
         [scopeKey, HYDRATION_BATCH_SIZE]
       );
@@ -630,6 +663,138 @@ async function hydrateScopeRatings(db, scopeKey) {
   });
 
   ratingHydrationLocks.set(scopeKey, hydrationPromise);
+  return hydrationPromise;
+}
+
+/**
+ * Fetch and cache third-party ratings for the titles a user has actually saved.
+ *
+ * hydrateScopeRatings only ever walks `catalog_cache_entries`, so it can only
+ * rate titles that made the popular discover snapshot. A watchlist or watched
+ * entry outside that snapshot — the obscure film that is exactly why someone
+ * keeps a watchlist — was never sent to OMDB at all, and rendered with empty
+ * IMDb/RT/Metacritic forever.
+ *
+ * This closes that gap. Results land in `title_ratings`, the shared cache keyed
+ * by imdb_id, so they are reused by every scope and by the watchlist views that
+ * already read from it. Watchlist entries are rated before watched ones: the
+ * watchlist views display scores, while the watched tab does not yet — rating
+ * those is cache-warming for when they resurface in the catalog.
+ *
+ * Safe to call speculatively. It is a no-op once everything is cached, is
+ * locked per user, and respects the OMDB circuit breaker.
+ */
+async function hydrateSavedTitleRatings(db, userId) {
+  const lockKey = String(userId);
+  if (savedRatingLocks.has(lockKey)) {
+    return savedRatingLocks.get(lockKey);
+  }
+
+  const hydrationPromise = (async () => {
+    if (isOmdbRateLimited()) return { fetched: 0, skipped: 'omdb_rate_limited' };
+
+    // An imdb_id can come from the per-user watchlist availability cache (which
+    // resolves it from TMDB) or from any scope's catalog entry for the same
+    // title. Rows already in title_ratings are skipped entirely.
+    const rows = await all(
+      db,
+      `SELECT imdb_id, MIN(saved_rank) AS saved_rank
+       FROM (
+         SELECT COALESCE(
+                  (SELECT c.imdb_id FROM watchlist_streaming_cache c
+                    WHERE c.user_id = ? AND c.item_id = w.item_id),
+                  (SELECT e.imdb_id FROM catalog_cache_entries e
+                    WHERE e.media_type || '-' || CAST(e.tmdb_id AS TEXT) = w.item_id
+                    LIMIT 1)
+                ) AS imdb_id,
+                0 AS saved_rank
+         FROM watchlist_items w
+         WHERE w.user_id = ?
+
+         UNION ALL
+
+         SELECT (SELECT e.imdb_id FROM catalog_cache_entries e
+                  WHERE e.media_type || '-' || CAST(e.tmdb_id AS TEXT) = d.item_id
+                  LIMIT 1) AS imdb_id,
+                1 AS saved_rank
+         FROM watched_items d
+         WHERE d.user_id = ?
+       )
+       WHERE imdb_id IS NOT NULL
+         AND imdb_id != ''
+         AND imdb_id NOT IN (SELECT imdb_id FROM title_ratings)
+       GROUP BY imdb_id
+       ORDER BY saved_rank ASC
+       LIMIT ?`,
+      [userId, userId, userId, SAVED_HYDRATION_BATCH]
+    );
+
+    if (!rows.length) return { fetched: 0 };
+
+    const updates = (await mapWithConcurrency(rows, HYDRATION_CONCURRENCY, async (row) => {
+      const ratings = await fetchOmdbRatings(row.imdb_id);
+      // null means rate-limited or a network error — leave it uncached so the
+      // next run retries it.
+      if (ratings === null) return null;
+      return { imdbId: row.imdb_id, ratings };
+    })).filter(Boolean);
+
+    if (!updates.length) return { fetched: 0 };
+
+    await enqueueWrite(async () => {
+      await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+      try {
+        const now = new Date().toISOString();
+        for (const update of updates) {
+          const imdb    = update.ratings.imdb ?? '';
+          const imdbNum = toSortableRating(update.ratings.imdb);
+          const rt      = update.ratings.rottenTomatoes ?? '';
+          const rtNum   = toSortableRating(update.ratings.rottenTomatoes);
+          const meta    = update.ratings.metacritic ?? '';
+          const metaNum = toSortableRating(update.ratings.metacritic);
+
+          await run(
+            db,
+            `INSERT INTO title_ratings
+               (imdb_id, rating_imdb, rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num, fetched_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(imdb_id) DO UPDATE SET
+               rating_imdb     = excluded.rating_imdb,
+               rating_imdb_num = excluded.rating_imdb_num,
+               rating_rt       = excluded.rating_rt,
+               rating_rt_num   = excluded.rating_rt_num,
+               rating_meta     = excluded.rating_meta,
+               rating_meta_num = excluded.rating_meta_num,
+               fetched_at      = excluded.fetched_at`,
+            [update.imdbId, imdb, imdbNum, rt, rtNum, meta, metaNum, now]
+          );
+
+          // Mirror into any scope that already holds this title, so the catalog
+          // shows the score without waiting for its own hydration pass.
+          await run(
+            db,
+            `UPDATE catalog_cache_entries
+             SET rating_imdb = ?, rating_imdb_num = ?,
+                 rating_rt = ?, rating_rt_num = ?,
+                 rating_meta = ?, rating_meta_num = ?
+             WHERE imdb_id = ?
+               AND (rating_imdb IS NULL OR rating_rt IS NULL OR rating_meta IS NULL)`,
+            [imdb, imdbNum, rt, rtNum, meta, metaNum, update.imdbId]
+          );
+        }
+        await run(db, 'COMMIT');
+      } catch (error) {
+        await run(db, 'ROLLBACK');
+        throw error;
+      }
+    });
+
+    return { fetched: updates.length };
+  })().finally(() => {
+    savedRatingLocks.delete(lockKey);
+  });
+
+  savedRatingLocks.set(lockKey, hydrationPromise);
   return hydrationPromise;
 }
 
@@ -867,16 +1032,20 @@ async function readCachedCatalog(
   // Must use the same predicate as backfillScopeIdentifiers. An entry already
   // resolved to NO_IMDB_ID is not "missing" — counting it here would re-fire the
   // backfill on every page load for a title TMDB will never have an ID for.
+  //
+  // EXISTS, not COUNT: the answer is only ever used as a boolean, so stopping at
+  // the first match beats counting the whole filtered set on every request.
   const missingImdbIdsRow = await get(
     db,
-    `SELECT COUNT(*) AS count
+    `SELECT 1 AS present
      FROM catalog_cache_entries
      WHERE ${whereClause}
-       AND imdb_id IS NULL`,
+       AND imdb_id IS NULL
+     LIMIT 1`,
     params
   );
 
-  if ((missingImdbIdsRow?.count || 0) > 0) {
+  if (missingImdbIdsRow) {
     backfillScopeIdentifiers(db, scopeKey).catch((error) => {
       console.error(`Identifier backfill skipped for ${scopeKey}:`, error.message);
     });
@@ -1236,6 +1405,7 @@ module.exports = {
   mapWithConcurrency,
   isRateLimitError,
   hydrateScopeRatings,
+  hydrateSavedTitleRatings,
   backfillScopeIdentifiers,
   NO_IMDB_ID,
 };

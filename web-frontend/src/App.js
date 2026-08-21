@@ -386,6 +386,26 @@ const styles = {
     border: '1px solid rgba(108,99,255,0.55)',
     color: '#c4b8ff',
   },
+  listHeaderRow: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  clearListButton: {
+    background: 'rgba(233,69,96,0.1)',
+    border: '1px solid rgba(233,69,96,0.3)',
+    color: '#ff8fa3',
+    borderRadius: 8,
+    padding: '6px 12px',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    flexShrink: 0,
+  },
   // Stand-in for services with no bundled logo asset.
   platformMonogram: {
     width: 70,
@@ -886,6 +906,7 @@ function App() {
   const [resetNewPass, setResetNewPass] = useState('');
   const [openFilters, setOpenFilters] = useState({ service: false, language: false, genre: false, year: false });
   const [catalogStatus, setCatalogStatus] = useState(null);
+  const [clearingList, setClearingList] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -1090,6 +1111,50 @@ function App() {
     }
   };
 
+  /**
+   * Empty one of the saved lists. Guarded by a confirm because there is no undo
+   * and, for someone who imported from Letterboxd, this can be thousands of rows.
+   */
+  const clearSavedList = async (listType) => {
+    const label = listType === 'watchlist' ? 'watchlist' : 'watched list';
+    const count = listType === 'watchlist' ? watchlistIds.size : watchedIds.size;
+    if (!count) {
+      setInfo(`Your ${label} is already empty.`);
+      return;
+    }
+    // eslint-disable-next-line no-restricted-globals, no-alert
+    if (!window.confirm(`Remove all ${count} ${count === 1 ? 'title' : 'titles'} from your ${label}? This cannot be undone.`)) {
+      return;
+    }
+    clearFeedback();
+    setClearingList(listType);
+    try {
+      const response = await apiFetch(`/${listType}`, { method: 'DELETE' });
+      const data = await parseResponseBody(response);
+      if (!response.ok) {
+        setError(buildApiErrorMessage(data, `Could not clear your ${label}.`));
+        return;
+      }
+      if (listType === 'watchlist') {
+        setWatchlistIds(new Set());
+        setWatchlistOnlyItems([]);
+        setWatchlistOnly(false);
+        setStreamingWatchlist(false);
+      } else {
+        setWatchedIds(new Set());
+        setWatchedItems([]);
+        setHideWatched(false);
+      }
+      setInfo(`Cleared ${data.removed ?? count} ${(data.removed ?? count) === 1 ? 'title' : 'titles'} from your ${label}.`);
+    } catch (err) {
+      if (err.message !== 'Unauthorized') {
+        setError(`Network error: ${err.message}.`);
+      }
+    } finally {
+      setClearingList(null);
+    }
+  };
+
   const runSearch = useCallback(async (rawQuery) => {
     const query = rawQuery.trim();
     if (query.length < 2) {
@@ -1179,7 +1244,14 @@ function App() {
         const response = await apiFetch('/import/letterboxd', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: chunk, importType }),
+          body: JSON.stringify({
+            items: chunk,
+            importType,
+            // A watchlist upload supersedes the saved list, so the first batch
+            // clears it and the rest append. A watched upload is a history and
+            // only ever merges, so it never sets this.
+            ...(importType === 'watchlist' && offset === 0 ? { replaceExisting: true } : {}),
+          }),
         });
         if (response.ok) {
           const data = await parseResponseBody(response);
@@ -2177,6 +2249,7 @@ function App() {
                   <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 14, marginBottom: 6 }}>📦 Import from Letterboxd</div>
                   <div style={{ color: '#6e7a93', fontSize: 12, marginBottom: 14, lineHeight: 1.5 }}>
                     Export your watched.csv or watchlist.csv from Letterboxd (letterboxd.com/settings/data), then use the matching button below.
+                    {' '}Importing a watchlist <strong style={{ color: '#c0c8d8' }}>replaces</strong> your saved watchlist; importing watched <strong style={{ color: '#c0c8d8' }}>adds to</strong> your history.
                   </div>
                   {!lbxPreview && !lbxProgress && (
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -2220,8 +2293,15 @@ function App() {
             {!isFirstSetup && settingsTab === 'watchlist' && (
               <div style={{ width: '100%' }}>
                 {/* Watched section */}
-                <div style={{ fontWeight: 700, color: '#01d277', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                  ✓ Watched ({watchedItems.length})
+                <div style={styles.listHeaderRow}>
+                  <div style={{ fontWeight: 700, color: '#01d277', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    ✓ Watched ({watchedItems.length})
+                  </div>
+                  <button type="button" style={styles.clearListButton}
+                    onClick={() => clearSavedList('watched')}
+                    disabled={clearingList !== null || watchedItems.length === 0}>
+                    {clearingList === 'watched' ? 'Clearing…' : 'Clear all'}
+                  </button>
                 </div>
                 {watchedItems.length === 0
                   ? <p style={{ ...styles.emptyState, marginBottom: 16 }}>No watched content yet.</p>
@@ -2242,9 +2322,16 @@ function App() {
                     </div>
                   ))}
 
-                {/* Letterboxd Watchlist section */}
-                <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 24, marginBottom: 10 }}>
-                  🔖 Watchlist ({watchlistOnlyItems.length})
+                {/* Watchlist section */}
+                <div style={{ ...styles.listHeaderRow, marginTop: 24 }}>
+                  <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    🔖 Watchlist ({watchlistOnlyItems.length})
+                  </div>
+                  <button type="button" style={styles.clearListButton}
+                    onClick={() => clearSavedList('watchlist')}
+                    disabled={clearingList !== null || watchlistOnlyItems.length === 0}>
+                    {clearingList === 'watchlist' ? 'Clearing…' : 'Clear all'}
+                  </button>
                 </div>
                 {watchlistOnlyItems.length === 0
                   ? <p style={styles.emptyState}>No watchlist items yet. Add titles from the catalog or search, or import from Letterboxd in the Profile tab.</p>

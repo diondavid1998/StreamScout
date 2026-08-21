@@ -424,6 +424,99 @@ describe('Search', () => {
   });
 });
 
+describe('Clearing and importing saved lists', () => {
+  beforeEach(() => {
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
+  });
+
+  async function openWatchlistTab(extra = {}) {
+    setupApiMock({ catalog: SAMPLE_CATALOG, ...extra });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+    fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Watchlist/i }));
+  }
+
+  it('sends DELETE /watchlist when the clear button is confirmed', async () => {
+    window.confirm = jest.fn(() => true);
+    await openWatchlistTab({
+      watchlist: [{ itemId: 'movie-9', title: 'Saved', mediaType: 'movie' }],
+    });
+
+    const clearButtons = await screen.findAllByRole('button', { name: /Clear all/i });
+    fireEvent.click(clearButtons[1]);
+
+    await waitFor(() => {
+      const call = global.fetch.mock.calls.find(
+        (c) => String(c[0]).endsWith('/watchlist') && c[1]?.method === 'DELETE'
+      );
+      expect(call).toBeTruthy();
+    }, { timeout: 8000 });
+  });
+
+  it('does not call the API when the confirm is declined', async () => {
+    window.confirm = jest.fn(() => false);
+    await openWatchlistTab({
+      watched: [{ itemId: 'movie-1', title: 'Seen', mediaType: 'movie' }],
+    });
+
+    const clearButtons = await screen.findAllByRole('button', { name: /Clear all/i });
+    fireEvent.click(clearButtons[0]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const deletes = global.fetch.mock.calls.filter((c) => c[1]?.method === 'DELETE');
+    expect(deletes).toHaveLength(0);
+  });
+
+  it('marks only the first watchlist import batch as replacing', async () => {
+    setupApiMock({ catalog: SAMPLE_CATALOG });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+
+    // Drive the import loop directly through the API contract the UI uses:
+    // 60 items across two batches of 50 and 10.
+    const items = Array.from({ length: 60 }, (_, i) => ({ name: `Film ${i}`, year: 2024 }));
+    const file = new File(
+      [['Name,Year', ...items.map((i) => `${i.name},${i.year}`)].join('\n')],
+      'watchlist.csv',
+      { type: 'text/csv' }
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Profile/i }));
+
+    global.fetch.mockImplementation((url, options = {}) => {
+      const href = String(url);
+      if (href.includes('/import/letterboxd/preview')) {
+        return Promise.resolve(mockResponse({ importType: 'watchlist', count: items.length, items }));
+      }
+      if (href.includes('/import/letterboxd')) {
+        return Promise.resolve(mockResponse({ matched: 50, notFound: 0, processed: 50, replaced: 0 }));
+      }
+      if (href.includes('/watchlist')) return Promise.resolve(mockResponse({ items: [] }));
+      if (href.includes('/watched')) return Promise.resolve(mockResponse({ items: [] }));
+      return Promise.resolve(mockResponse({}));
+    });
+
+    const inputs = document.querySelectorAll('input[type="file"][accept=".csv,text/csv"]');
+    // Second file input is the watchlist one.
+    fireEvent.change(inputs[1], { target: { files: [file] } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Import all$/i }, { timeout: 8000 }));
+
+    await waitFor(() => {
+      const importCalls = global.fetch.mock.calls.filter(
+        (c) => String(c[0]).includes('/import/letterboxd') && !String(c[0]).includes('preview')
+      );
+      expect(importCalls.length).toBe(2);
+      const bodies = importCalls.map((c) => JSON.parse(c[1].body));
+      expect(bodies[0].replaceExisting).toBe(true);
+      expect(bodies[1].replaceExisting).toBeUndefined();
+    }, { timeout: 8000 });
+  });
+});
+
 describe('Watchlist from the catalog', () => {
   beforeEach(() => {
     localStorage.setItem('whatsOn.authToken', 'mock-jwt');

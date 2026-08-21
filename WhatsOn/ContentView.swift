@@ -717,14 +717,16 @@ struct PlatformTile: View {
         Button(action: onTap) {
             VStack(spacing: 6) {
                 ZStack {
-                    Color.clear
-                        .frame(width: 62, height: 62)
-                        .glassEffect(
-                            isSelected
-                                ? .regular.tint(platform.accentColor).interactive()
-                                : .regular.interactive(),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(isSelected ? platform.accentColor.opacity(0.30) : Color.mkCard)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(
+                                    isSelected ? platform.accentColor.opacity(0.8) : Color.mkBorder,
+                                    lineWidth: isSelected ? 1.5 : 1
+                                )
                         )
+                        .frame(width: 62, height: 62)
 
                     PlatformArtwork(platform: platform, size: 46, cornerRadius: 10)
 
@@ -1047,9 +1049,12 @@ struct CatalogView: View {
         .padding(.bottom, Layout.tabBarBottomClearance)
     }
 
+    /// One glass rail carrying plain chips, rather than a glass surface holding
+    /// chips that are each their own glass. Stacked glass cancels itself out —
+    /// the layer stops reading as a single floating control.
     var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 Menu {
                     ForEach([("tv","TV Shows"),("movie","Movies"),("all","All Titles"),("documentary","Documentary")], id: \.0) { k, l in
                         Button(l) { mediaType = k; page = 1; Task { await fetch() } }
@@ -1091,7 +1096,7 @@ struct CatalogView: View {
                     } label: {
                         FilterChip(
                             label: hideWatched ? "Hiding Watched" : "Hide Watched",
-                            icon: "eye.slash", active: hideWatched
+                            icon: "eye.slash", active: hideWatched, showsChevron: false
                         )
                     }
                     .buttonStyle(ScaleButtonStyle())
@@ -1104,7 +1109,7 @@ struct CatalogView: View {
                 } label: {
                     FilterChip(
                         label: "From Watchlist",
-                        icon: "bookmark.fill", active: watchlistOnly
+                        icon: "bookmark.fill", active: watchlistOnly, showsChevron: false
                     )
                 }
                 .buttonStyle(ScaleButtonStyle())
@@ -1116,7 +1121,7 @@ struct CatalogView: View {
                     } label: {
                         FilterChip(
                             label: "Streaming Watchlist",
-                            icon: "antenna.radiowaves.left.and.right", active: streamingWatchlistOnly
+                            icon: "antenna.radiowaves.left.and.right", active: streamingWatchlistOnly, showsChevron: false
                         )
                     }
                     .buttonStyle(ScaleButtonStyle())
@@ -1124,15 +1129,21 @@ struct CatalogView: View {
                 if !app.selectedPlatforms.isEmpty {
                     HStack(spacing: 5) {
                         Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 10))
-                        Text("\(app.selectedPlatforms.count) services").font(.system(size: 12))
+                        Text("\(app.selectedPlatforms.count) services").font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(.mkMuted)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .glassEffect(.regular, in: Capsule())
+                    .padding(.horizontal, 11).padding(.vertical, 8)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(6)
         }
+        // A rounded rect rather than a capsule: a capsule's corner arc reaches
+        // 8.4pt inward at the first chip's top edge, which sits 6pt in — enough
+        // to clip its corner and eat the tap target there. Same reason the tab
+        // bar below skips clipShape entirely.
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 16)
     }
 
     var emptyState: some View {
@@ -1375,6 +1386,7 @@ struct MovieCardView: View {
     @State private var isTogglingWatched = false
     @State private var isTogglingWatchlist = false
     /// Dominant color extracted from the poster; nil until the async fetch completes.
+    /// It no longer tints the whole card — see `edgeTint`.
     @State private var dominantColor: Color? = nil
     var isTV: Bool { movie.mediaType == "tv" }
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
@@ -1384,34 +1396,24 @@ struct MovieCardView: View {
         let parts = movie.id.split(separator: "-")
         return parts.count >= 2 ? String(parts.last!) : movie.id
     }
-    /// The tint color used for the card background. Falls back to theme-based colors when no
-    /// dominant color is available yet. The accent bar uses `movie.kind.accent` instead.
-    var cardTint: Color {
-        dominantColor ?? (isTV ? .mkTV : .mkAccent)
-    }
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
                 posterView
                 infoColumn
             }
-            .padding(14)
-            .glassEffect(
-                .regular.tint(cardTint.opacity(dominantColor != nil ? 0.14 : 0.08)).interactive(),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
+            .padding(12)
+            // Content layer: opaque and identical card to card. Liquid Glass is
+            // reserved for the floating layer (tab bar, filter rail, toolbar), so
+            // that layer reads as floating instead of blending into the feed.
+            .background(Color.mkCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(alignment: .top) { edgeTint }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(
-                        dominantColor != nil
-                            ? cardTint.opacity(0.35)
-                            : Color.mkBorder,
-                        lineWidth: 1
-                    )
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.mkBorder, lineWidth: 1)
             )
-            .overlay(accentBar)
-            .overlay(watchedToggleButton, alignment: .topTrailing)
         }
         .buttonStyle(.plain)
         // Seed from cache synchronously (no flicker on re-render after first load)
@@ -1429,26 +1431,174 @@ struct MovieCardView: View {
         }
     }
 
+    /// The poster's dominant color, reduced to a 2pt edge along the top of the card.
+    /// One restrained trace of the artwork instead of a full-card wash — a scrolling
+    /// list of differently-tinted cards reads as color noise.
+    @ViewBuilder
+    var edgeTint: some View {
+        if let color = dominantColor {
+            LinearGradient(
+                colors: [color, color.opacity(0)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 2)
+            .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: Poster
+
+    var posterView: some View {
+        Group {
+            if let urlStr = movie.posterUrl, let url = URL(string: urlStr) {
+                CachedAsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().scaledToFill()
+                    default: posterPlaceholder
+                    }
+                }
+            } else {
+                posterPlaceholder
+            }
+        }
+        .frame(width: 96, height: 144)
+        // Overlay before clipShape, so the scrim is clipped to the poster's
+        // corners rather than spilling past them.
+        .overlay(alignment: .bottom) { providerMarks }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.mkBorder, lineWidth: 1)
+        )
+    }
+
+    var posterPlaceholder: some View {
+        ZStack {
+            Color.mkSurface
+            Image(systemName: "film").font(.system(size: 22)).foregroundColor(.mkMuted.opacity(0.4))
+        }
+    }
+
+    /// Service logos sit on the poster, where the eye already is, instead of taking
+    /// a full text row in the info column. Beyond three, the rest become a count.
+    @ViewBuilder
+    var providerMarks: some View {
+        let providers = movie.availableOn ?? []
+        if !providers.isEmpty {
+            let shown = Array(providers.prefix(3))
+            let overflow = providers.count - shown.count
+            HStack(spacing: 3) {
+                ForEach(shown, id: \.self) { name in
+                    ProviderMark(name: name)
+                }
+                if overflow > 0 {
+                    Text("+\(overflow)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.75))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                LinearGradient(
+                    colors: [Color.black.opacity(0), Color.black.opacity(0.72)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 42),
+                alignment: .bottom
+            )
+            .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: Info column
+
+    var infoColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(movie.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.mkText)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Watchlist and watched sit together. The bookmark used to hide in
+                // the poster's corner, where it read as decoration.
+                HStack(spacing: 6) {
+                    watchlistToggleButton
+                    watchedToggleButton
+                }
+            }
+
+            metaLine
+                .padding(.top, 5)
+
+            if let ov = movie.overview, !ov.isEmpty {
+                Text(ov)
+                    .font(.system(size: 12.5))
+                    .foregroundColor(.mkMuted)
+                    .lineLimit(3)
+                    .padding(.top, 7)
+            }
+
+            Spacer(minLength: 8)
+
+            ScoreStrip(entries: buildRatings())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Kind, year and genres on one line, separated by dots. Replaces the stack of
+    /// four bordered pill rows — and the left accent capsule, which said "film or
+    /// series" a second time.
+    var metaLine: some View {
+        HStack(spacing: 6) {
+            Text(isTV ? "SERIES" : "FILM")
+                .font(.system(size: 11, weight: .bold))
+                .kerning(0.4)
+                .foregroundColor(movie.kind.accent)
+            if let y = movie.year {
+                MetaDot()
+                Text(String(y))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.mkMuted)
+            }
+            if let genres = movie.genres, !genres.isEmpty {
+                MetaDot()
+                Text(genres.prefix(2).joined(separator: " · "))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.mkMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Toggles
+
     var watchedToggleButton: some View {
         Button { Task { await toggleWatched() } } label: {
             Group {
                 if isTogglingWatched {
-                    ProgressView().scaleEffect(0.65).tint(.green)
+                    ProgressView().scaleEffect(0.6).tint(.green)
                         .frame(width: 22, height: 22)
                 } else {
                     Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22))
-                        .foregroundColor(isWatched ? .green : .mkMuted.opacity(0.6))
+                        .font(.system(size: 21))
+                        .foregroundColor(isWatched ? .green : .mkMuted.opacity(0.7))
                         .contentTransition(.symbolEffect(.replace))
                         .symbolEffect(.bounce, value: isWatched)
                 }
             }
-            .padding(4)
-            .glassEffect(.regular.interactive(), in: Circle())
-            .padding(8)
+            .frame(width: 26, height: 26)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isTogglingWatched)
+        .accessibilityLabel(isWatched ? "Remove from watched" : "Mark as watched")
         .sensoryFeedback(.success, trigger: isWatched)
     }
 
@@ -1479,24 +1629,22 @@ struct MovieCardView: View {
         Button { Task { await toggleWatchlist() } } label: {
             Group {
                 if isTogglingWatchlist {
-                    ProgressView().scaleEffect(0.5).tint(.mkAccent)
-                        .frame(width: 14, height: 18)
+                    ProgressView().scaleEffect(0.6).tint(.mkAccent)
+                        .frame(width: 22, height: 22)
                 } else {
                     Image(systemName: isWatchlisted ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(isWatchlisted ? .mkAccent : .white)
-                        .shadow(color: .black.opacity(0.6), radius: 1)
+                        .font(.system(size: 19))
+                        .foregroundColor(isWatchlisted ? .mkAccent : .mkMuted.opacity(0.7))
                         .contentTransition(.symbolEffect(.replace))
                         .symbolEffect(.bounce, value: isWatchlisted)
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.top, 5)
-            .padding(.bottom, 9)
-            .background(Color.black.opacity(isWatchlisted ? 0.65 : 0.4))
+            .frame(width: 26, height: 26)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isTogglingWatchlist)
+        .accessibilityLabel(isWatchlisted ? "Remove from watchlist" : "Add to watchlist")
         .sensoryFeedback(.success, trigger: isWatchlisted)
     }
 
@@ -1521,110 +1669,6 @@ struct MovieCardView: View {
             if case .unauthorized = err { app.logout() }
         } catch { }
         isTogglingWatchlist = false
-    }
-
-    // Left accent bar — color-coded by media type (red = film, blue = series)
-    var accentBar: some View {
-        HStack {
-            Capsule()
-                .fill(movie.kind.accent)
-                .frame(width: 3.5)
-                .padding(.vertical, 14)
-                .padding(.leading, 1)
-            Spacer()
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-    }
-
-    var posterView: some View {
-        Group {
-            if let urlStr = movie.posterUrl, let url = URL(string: urlStr) {
-                CachedAsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img): img.resizable().scaledToFill()
-                    default: posterPlaceholder
-                    }
-                }
-            } else {
-                posterPlaceholder
-            }
-        }
-        .frame(width: 88, height: 132)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.mkBorder, lineWidth: 1))
-        .overlay(alignment: .topLeading) { watchlistToggleButton }
-    }
-
-    var posterPlaceholder: some View {
-        ZStack {
-            Color.mkSurface
-            Image(systemName: "film").font(.system(size: 22)).foregroundColor(.mkMuted.opacity(0.4))
-        }
-    }
-
-    var infoColumn: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(movie.title)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.mkText)
-                .lineLimit(2)
-
-            // Type + Year chips
-            HStack(spacing: 6) {
-                Label(movie.kind.label, systemImage: movie.kind.symbol)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(movie.kind.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(movie.kind.accent.opacity(0.15)))
-                if let y = movie.year {
-                    PillChip(text: String(y), color: .mkMuted)
-                }
-            }
-
-            if let ov = movie.overview, !ov.isEmpty {
-                Text(ov)
-                    .font(.system(size: 12))
-                    .foregroundColor(.mkMuted)
-                    .lineLimit(3)
-            }
-
-            if let genres = movie.genres, !genres.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(genres.prefix(3), id: \.self) { g in PillChip(text: g, color: .mkMuted) }
-                }
-            }
-
-            if let providers = movie.availableOn, !providers.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
-                        ForEach(providers.prefix(4), id: \.self) { name in ProviderChip(name: name) }
-                    }
-                }
-            }
-
-            ratingRow
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    var ratingRow: some View {
-        let ratings = buildRatings()
-        if !ratings.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 7) {
-                    ForEach(ratings, id: \.label) { r in RatingChip(entry: r) }
-                    // Show loading indicator if only TMDb is present (OMDB ratings pending)
-                    if ratings.count == 1 && ratings[0].label == "TMDb" {
-                        Text("⏳ Ratings loading…")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.mkMuted)
-                    }
-                }
-            }
-            .padding(.top, 2)
-        }
     }
 
     // MARK: Rating builder
@@ -1665,19 +1709,24 @@ struct MovieCardView: View {
 // MARK: - Reusable Components
 
 struct FilterChip: View {
-    let label: String; let icon: String; let active: Bool
+    let label: String
+    let icon: String
+    let active: Bool
+    /// Menus get a chevron; toggles do not — the old chip drew one either way,
+    /// promising a picker that never opened.
+    var showsChevron: Bool = true
+
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(.caption2)
-            Text(label).font(.system(size: 13, weight: .medium))
-            Image(systemName: "chevron.down").font(.system(size: 9))
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+            Text(label).font(.system(size: 13, weight: active ? .semibold : .medium))
+            if showsChevron {
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
         }
-        .foregroundColor(active ? .mkOnAccent : .mkMuted)
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .glassEffect(
-            active ? .regular.tint(Color.mkAccent) : .regular,
-            in: Capsule()
-        )
+        .foregroundColor(active ? .mkOnAccent : Color.mkText.opacity(0.78))
+        .padding(.horizontal, 13).padding(.vertical, 8)
+        .background(active ? Color.mkAccent : Color.clear, in: Capsule())
         .contentShape(Capsule())
     }
 }
@@ -1698,8 +1747,12 @@ struct PillChip: View {
 }
 
 // Streaming provider chips — neutral pill, clearly a "service" tag
-struct ProviderChip: View {
+/// A service's logo alone, sized to sit on a poster. Falls back to the monogram
+/// for the services with no bundled artwork.
+struct ProviderMark: View {
     let name: String
+    var size: CGFloat = 13
+
     var platform: StreamingPlatform? {
         let lowered = name.lowercased()
         // Exact name first: with 31 services in the list, a substring match can
@@ -1707,42 +1760,177 @@ struct ProviderChip: View {
         return allPlatforms.first { $0.name.lowercased() == lowered }
             ?? allPlatforms.first { lowered.contains($0.key) }
     }
+
     var body: some View {
-        HStack(spacing: 4) {
+        Group {
             if let p = platform, let asset = p.logoAsset {
                 Image(asset).resizable().scaledToFit()
-                    .frame(width: 14, height: 14)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            } else if let p = platform {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(p.accentColor.opacity(0.9))
+                    .overlay(
+                        Text(p.monogram)
+                            .font(.system(size: size * 0.5, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(1)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.white.opacity(0.28))
             }
-            Text(name.count > 11 ? String(name.prefix(9)) + "…" : name)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.mkText.opacity(0.9))
         }
-        .padding(.horizontal, 9).padding(.vertical, 4)
-        .background(Color.white.opacity(0.07))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .accessibilityLabel(name)
     }
 }
 
-struct RatingChip: View {
-    let entry: MovieCardView.RatingEntry
-    var body: some View {
-        HStack(spacing: 5) {
-            if let asset = entry.logoAsset {
-                Image(asset).resizable().scaledToFit().frame(width: 14, height: 14)
+/// Wraps children onto as many lines as they need, at a fixed spacing.
+///
+/// Genre and service chips are variable-width and unbounded in count; an HStack
+/// pushed them off the edge and a horizontal ScrollView hid them behind a swipe
+/// nobody makes on a detail screen.
+struct FlowRow: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth > 0 && rowWidth + spacing + size.width > maxWidth {
+                totalHeight += rowHeight + spacing
+                rowWidth = size.width
+                rowHeight = size.height
             } else {
-                Circle().fill(entry.color).frame(width: 7, height: 7)
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                Text(entry.label).font(.system(size: 8)).foregroundColor(entry.color.opacity(0.8))
-                Text(entry.value).font(.system(size: 11, weight: .bold)).foregroundColor(.mkText)
+                rowWidth += rowWidth > 0 ? spacing + size.width : size.width
+                rowHeight = max(rowHeight, size.height)
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(entry.color.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(entry.color.opacity(0.45), lineWidth: 1))
+        totalHeight += rowHeight
+        return CGSize(width: maxWidth == .infinity ? rowWidth : maxWidth, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+/// Separator between items on a meta line.
+struct MetaDot: View {
+    var body: some View {
+        Circle()
+            .fill(Color.mkMuted.opacity(0.5))
+            .frame(width: 3, height: 3)
+    }
+}
+
+/// Every score on one shared surface, divided rather than boxed.
+///
+/// Replaces a horizontally scrolling row of individually-bordered chips, where the
+/// fourth score was usually off-screen and so never compared against anything.
+/// Fixed slots mean scores line up down the feed.
+struct ScoreStrip: View {
+    let entries: [MovieCardView.RatingEntry]
+    var compact: Bool = true
+
+    @ViewBuilder
+    var body: some View {
+        if entries.isEmpty {
+            EmptyView()
+        } else {
+            HStack(spacing: 0) {
+                ForEach(entries.indices, id: \.self) { index in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.07))
+                            .frame(width: 1)
+                    }
+                    scoreCell(entries[index])
+                }
+                // Ratings arrive from OMDB after the catalog does. Say so rather
+                // than leaving a lone TMDb score looking like the whole answer.
+                if entries.count == 1 && entries[0].label == "TMDb" {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.07))
+                        .frame(width: 1)
+                    Text("Scoring…")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundColor(.mkMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Color.white.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+            )
+        }
+    }
+
+    @ViewBuilder
+    func scoreCell(_ entry: MovieCardView.RatingEntry) -> some View {
+        if compact {
+            HStack(spacing: 5) {
+                scoreMark(entry)
+                Text(entry.value)
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundColor(.mkText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+        } else {
+            VStack(spacing: 6) {
+                scoreMark(entry, size: 18)
+                Text(entry.value)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(.mkText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(entry.label.uppercased())
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .kerning(0.6)
+                    .foregroundColor(.mkMuted)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    func scoreMark(_ entry: MovieCardView.RatingEntry, size: CGFloat = 13) -> some View {
+        if let asset = entry.logoAsset {
+            Image(asset).resizable().scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        } else {
+            Circle().fill(entry.color).frame(width: size * 0.55, height: size * 0.55)
+        }
     }
 }
 
@@ -2183,8 +2371,13 @@ struct DetailSheet: View {
     @State private var isLoadingExtras = true
     @State private var detailsError: String? = nil
     @State private var isTogglingWatched = false
+    @State private var isTogglingWatchlist = false
+    /// Drives the hero wash. One title on screen, so a full-strength tint reads
+    /// as this film's colour rather than as noise.
+    @State private var dominantColor: Color? = nil
 
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
+    var isWatchlisted: Bool { app.watchlistIds.contains(movie.id) }
     var mediaType: String { movie.mediaType ?? "movie" }
     var tmdbId: String {
         let parts = movie.id.split(separator: "-")
@@ -2193,57 +2386,48 @@ struct DetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 Color.mkBackground.ignoresSafeArea()
+
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        backdropSection
+                    VStack(alignment: .leading, spacing: 0) {
+                        heroSection
 
-                        VStack(alignment: .leading, spacing: 16) {
-                            // Title + year + type — always available from CatalogItem
-                            titleSection
+                        VStack(alignment: .leading, spacing: 22) {
+                            // "Where can I watch this" is the question the app exists
+                            // to answer, so it comes before anything else.
+                            if let providers = movie.availableOn, !providers.isEmpty {
+                                sectionBlock("Streaming on your services") {
+                                    serviceGrid(providers)
+                                }
+                            }
 
-                            // Overview — use CatalogItem value immediately
+                            let ratings = buildRatings()
+                            if !ratings.isEmpty {
+                                sectionBlock("Scores") {
+                                    ScoreStrip(entries: ratings, compact: false)
+                                }
+                            }
+
                             if let overview = movie.overview ?? details?.overview, !overview.isEmpty {
-                                detailRow(icon: "text.alignleft", label: "Overview") {
+                                sectionBlock("Overview") {
                                     Text(overview)
-                                        .font(.system(size: 14)).foregroundColor(.mkMuted)
+                                        .font(.system(size: 13.5))
+                                        .foregroundColor(.mkMuted)
+                                        .lineSpacing(3)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
 
-                            // Genres — prefer API-enriched list, fallback to CatalogItem
                             let genres = details?.genres ?? movie.genres ?? []
                             if !genres.isEmpty {
-                                detailRow(icon: "tag", label: "Genres") {
-                                    HStack(spacing: 6) {
+                                sectionBlock("Genres") {
+                                    FlowRow(spacing: 6) {
                                         ForEach(genres, id: \.self) { PillChip(text: $0, color: .mkMuted) }
                                     }
                                 }
                             }
 
-                            // Ratings — all four sources from CatalogItem, no API needed
-                            let ratings = buildRatings()
-                            if !ratings.isEmpty {
-                                detailRow(icon: "star.fill", label: "Ratings") {
-                                    HStack(spacing: 8) {
-                                        ForEach(ratings, id: \.label) { r in RatingChip(entry: r) }
-                                    }
-                                }
-                            }
-
-                            // Streaming services — from CatalogItem
-                            if let providers = movie.availableOn, !providers.isEmpty {
-                                detailRow(icon: "play.rectangle.on.rectangle", label: "Available On") {
-                                    HStack(spacing: 6) {
-                                        ForEach(providers.prefix(6), id: \.self) { ProviderChip(name: $0) }
-                                    }
-                                }
-                            }
-
-                            Divider().overlay(Color.mkBorder)
-
-                            // Extras — loaded from TMDB details endpoint
                             if isLoadingExtras {
                                 HStack(spacing: 8) {
                                     ProgressView().scaleEffect(0.8).tint(.mkAccent)
@@ -2257,28 +2441,275 @@ struct DetailSheet: View {
                             }
                         }
                         .padding(.horizontal, 20)
-                        .padding(.bottom, 32)
+                        .padding(.top, 22)
+                        // Clear the floating action bar.
+                        .padding(.bottom, 108)
                     }
                 }
+                .ignoresSafeArea(edges: .top)
+
+                actionBar
             }
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.mkMuted)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .glassEffect(.regular.interactive(), in: Circle())
                     }
+                    .accessibilityLabel("Close")
                 }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    watchedButton
-                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            if let urlString = movie.posterUrl {
+                dominantColor = ColorCache.shared.cachedColor(for: urlString)
+            }
+        }
+        .task(id: movie.posterUrl) {
+            guard let urlString = movie.posterUrl else { return }
+            if let color = await ColorCache.shared.fetchColor(for: urlString) {
+                withAnimation(.easeIn(duration: 0.45)) { dominantColor = color }
             }
         }
         .task {
             await loadDetails()
             await loadWatched()
         }
+    }
+
+    // MARK: Hero
+
+    /// The one place the poster's dominant colour earns a full wash — a single
+    /// screen showing a single title, rather than a feed where every row would
+    /// pull in a different direction.
+    var heroSection: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [
+                    (dominantColor ?? .mkAccent).opacity(0.55),
+                    (dominantColor ?? .mkAccent).opacity(0.16),
+                    Color.mkBackground,
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 330)
+
+            backdropWash
+
+            HStack(alignment: .bottom, spacing: 14) {
+                heroPoster
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(movie.title)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.mkText)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let t = details?.tagline, !t.isEmpty {
+                        Text("“\(t)”")
+                            .font(.system(size: 12.5))
+                            .italic()
+                            .foregroundColor(.mkText.opacity(0.72))
+                            .lineLimit(2)
+                            .padding(.top, 6)
+                    }
+                    heroMetaLine
+                        .padding(.top, 9)
+                }
+                .padding(.bottom, 4)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
+        }
+        .frame(height: 330)
+        .clipped()
+    }
+
+    /// The backdrop image, blurred into the wash rather than shown as a framed
+    /// picture — it is atmosphere here, not content.
+    @ViewBuilder
+    var backdropWash: some View {
+        if let urlStr = details?.backdropUrl ?? movie.posterUrl, let url = URL(string: urlStr) {
+            CachedAsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable().scaledToFill()
+                        .frame(height: 330)
+                        .clipped()
+                        .blur(radius: 30, opaque: true)
+                        .opacity(0.5)
+                        .overlay(
+                            LinearGradient(
+                                colors: [.clear, Color.mkBackground.opacity(0.7), Color.mkBackground],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                default:
+                    Color.clear
+                }
+            }
+            .frame(height: 330)
+            .clipped()
+            .allowsHitTesting(false)
+        }
+    }
+
+    var heroPoster: some View {
+        Group {
+            if let urlStr = movie.posterUrl, let url = URL(string: urlStr) {
+                CachedAsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().scaledToFill()
+                    default: Color.mkSurface
+                    }
+                }
+            } else {
+                ZStack {
+                    Color.mkSurface
+                    Image(systemName: "film").font(.system(size: 26)).foregroundColor(.mkMuted.opacity(0.4))
+                }
+            }
+        }
+        .frame(width: 104, height: 156)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 12)
+    }
+
+    var heroMetaLine: some View {
+        HStack(spacing: 6) {
+            Text(movie.mediaType == "tv" ? "SERIES" : "FILM")
+                .font(.system(size: 11, weight: .bold))
+                .kerning(0.4)
+                .foregroundColor(movie.kind.accent)
+            if let y = movie.year {
+                MetaDot()
+                Text(String(y))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.mkMuted)
+            }
+            if let runtime = details?.runtime, runtime > 0 {
+                MetaDot()
+                Text("\(runtime / 60)h \(runtime % 60)m")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.mkMuted)
+            } else if let seasons = details?.numberOfSeasons, seasons > 0 {
+                MetaDot()
+                Text("\(seasons) season\(seasons == 1 ? "" : "s")")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.mkMuted)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Sections
+
+    @ViewBuilder
+    func sectionBlock<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label.uppercased())
+                .font(.system(size: 11, weight: .bold))
+                .kerning(1.2)
+                .foregroundColor(.mkMuted)
+            content()
+        }
+    }
+
+    /// Services as rows with a real logo, not as tiny text pills — this is the
+    /// answer the screen is here to give.
+    @ViewBuilder
+    func serviceGrid(_ providers: [String]) -> some View {
+        FlowRow(spacing: 8) {
+            ForEach(providers.prefix(6), id: \.self) { name in
+                HStack(spacing: 9) {
+                    ProviderMark(name: name, size: 26)
+                    Text(name)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundColor(.mkText)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(Color.mkCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.mkBorder, lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    // MARK: Action bar
+
+    /// Both primary actions in one floating glass bar, in thumb reach. They used
+    /// to sit in the navigation bar, at the far end of a one-handed stretch.
+    var actionBar: some View {
+        GlassEffectContainer {
+            HStack(spacing: 6) {
+                Button { Task { await toggleWatchlist() } } label: {
+                    HStack(spacing: 8) {
+                        if isTogglingWatchlist {
+                            ProgressView().scaleEffect(0.7).tint(isWatchlisted ? .mkOnAccent : .mkText)
+                        } else {
+                            Image(systemName: isWatchlisted ? "bookmark.fill" : "bookmark")
+                                .font(.system(size: 16, weight: .semibold))
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        Text(isWatchlisted ? "On Watchlist" : "Watchlist")
+                            .font(.system(size: 14.5, weight: .semibold))
+                    }
+                    .foregroundColor(isWatchlisted ? .mkOnAccent : .mkText)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isTogglingWatchlist)
+                .glassEffect(
+                    isWatchlisted ? .regular.tint(Color.mkAccent).interactive() : .clear,
+                    in: Capsule()
+                )
+                .sensoryFeedback(.success, trigger: isWatchlisted)
+
+                Button { Task { await toggleWatched() } } label: {
+                    HStack(spacing: 8) {
+                        if isTogglingWatched {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        } else {
+                            Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        Text(isWatched ? "Watched" : "Mark Watched")
+                            .font(.system(size: 14.5, weight: .semibold))
+                    }
+                    .foregroundColor(isWatched ? .green : .mkText)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isTogglingWatched)
+                .glassEffect(
+                    isWatched ? .regular.tint(Color.green.opacity(0.5)).interactive() : .clear,
+                    in: Capsule()
+                )
+                .sensoryFeedback(.success, trigger: isWatched)
+            }
+            .padding(7)
+        }
+        .glassEffect(.regular, in: Capsule())
+        .padding(.horizontal, 20)
+        .padding(.bottom, 24)
     }
 
     // Reusable labeled section block
@@ -2288,62 +2719,6 @@ struct DetailSheet: View {
             Label(label, systemImage: icon)
                 .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
             content()
-        }
-    }
-
-    var backdropSection: some View {
-        Group {
-            if let urlStr = details?.backdropUrl ?? movie.posterUrl, let url = URL(string: urlStr) {
-                CachedAsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        ZStack {
-                            // Blurred background fills letterbox gaps for portrait posters
-                            img.resizable().scaledToFill()
-                                .frame(maxWidth: .infinity).frame(height: 220)
-                                .clipped()
-                                .blur(radius: 16)
-                                .opacity(0.4)
-                            // Sharp centered image
-                            img.resizable().scaledToFit()
-                                .frame(maxHeight: 210)
-                                .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
-                        }
-                        .frame(maxWidth: .infinity).frame(height: 220)
-                        .clipped()
-                        .overlay(
-                            LinearGradient(
-                                gradient: Gradient(colors: [.clear, Color.mkBackground.opacity(0.85), Color.mkBackground]),
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
-                    default:
-                        Color.mkSurface.frame(height: 180)
-                    }
-                }
-            } else {
-                Color.mkSurface.frame(height: 120)
-            }
-        }
-    }
-
-    var titleSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(movie.title)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.mkText)
-            HStack(spacing: 8) {
-                Label(movie.kind.label, systemImage: movie.kind.symbol)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(movie.kind.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(movie.kind.accent.opacity(0.15)))
-                if let y = movie.year { PillChip(text: String(y), color: .mkMuted) }
-                if let t = details?.tagline, !t.isEmpty {
-                    Text("· \(t)").font(.caption).foregroundColor(.mkMuted).lineLimit(1)
-                }
-            }
         }
     }
 
@@ -2384,21 +2759,27 @@ struct DetailSheet: View {
         }
     }
 
-    var watchedButton: some View {
-        Button { Task { await toggleWatched() } } label: {
-            HStack(spacing: 5) {
-                if isTogglingWatched {
-                    ProgressView().scaleEffect(0.75).tint(isWatched ? .mkMuted : .green)
-                } else {
-                    Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
-                        .foregroundColor(isWatched ? .green : .mkMuted)
-                }
-                Text(isWatched ? "Watched" : "Mark Watched")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(isWatched ? .green : .mkMuted)
+    @MainActor func toggleWatchlist() async {
+        isTogglingWatchlist = true
+        do {
+            if isWatchlisted {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/watchlist/\(movie.id)", token: app.token
+                )
+                app.setWatchlisted(movie.id, on: false)
+            } else {
+                let body: [String: String] = ["itemId": movie.id, "title": movie.title,
+                                               "mediaType": mediaType, "tmdbId": tmdbId,
+                                               "posterUrl": movie.posterUrl ?? ""]
+                let _: ToggleWatchedResponse = try await APIService.shared.post(
+                    "/watchlist", body: body, token: app.token
+                )
+                app.setWatchlisted(movie.id, on: true)
             }
-        }
-        .disabled(isTogglingWatched)
+        } catch let err as APIError {
+            if case .unauthorized = err { app.logout() }
+        } catch { }
+        isTogglingWatchlist = false
     }
 
     @MainActor func loadDetails() async {
@@ -2830,9 +3211,14 @@ struct PlatformToggle: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 80)
-            .glassEffect(
-                isSelected ? .regular.tint(.mkAccent).interactive() : .regular.interactive(),
+            .background(
+                isSelected ? Color.mkAccent.opacity(0.22) : Color.mkCard,
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.mkAccent.opacity(0.85) : Color.mkBorder,
+                            lineWidth: isSelected ? 1.5 : 1)
             )
         }
         .buttonStyle(ScaleButtonStyle())
@@ -2849,9 +3235,14 @@ struct LanguageToggle: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(isSelected ? .mkOnAccent : .mkMuted)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .glassEffect(
-                    isSelected ? .regular.tint(.mkAccent).interactive() : .regular.interactive(),
+                .background(
+                    isSelected ? Color.mkAccent.opacity(0.22) : Color.mkCard,
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(isSelected ? Color.mkAccent.opacity(0.85) : Color.mkBorder,
+                                lineWidth: isSelected ? 1.5 : 1)
                 )
         }
         .buttonStyle(ScaleButtonStyle())
@@ -3077,9 +3468,16 @@ struct ProfileTabView: View {
             }
 
             do {
+                // A watchlist upload supersedes the saved list, so the first
+                // batch clears it and the rest append. A watched upload is a
+                // history and only ever merges, so it never sets this.
+                var body: [String: Any] = ["items": encodableChunk, "importType": lbxImportType]
+                if lbxImportType == "watchlist" && offset == 0 {
+                    body["replaceExisting"] = true
+                }
                 let resp: LetterboxdImportResponse = try await APIService.shared.post(
                     "/import/letterboxd",
-                    body: ["items": encodableChunk, "importType": lbxImportType],
+                    body: body,
                     token: app.token
                 )
                 totalMatched  += resp.matched ?? 0
@@ -3205,8 +3603,36 @@ struct WatchedOnlyTabView: View {
     @Environment(AppState.self) private var app
     @State private var items: [WatchedItem] = []
     @State private var isLoading = true
+    @State private var isClearing = false
+    @State private var confirmClear = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !items.isEmpty {
+                ClearListBar(
+                    count: items.count,
+                    label: "watched",
+                    isClearing: isClearing,
+                    action: { confirmClear = true }
+                )
+            }
+            content
+        }
+        .confirmationDialog(
+            "Clear your watched list?",
+            isPresented: $confirmClear,
+            titleVisibility: .visible
+        ) {
+            Button("Remove all \(items.count) titles", role: .destructive) {
+                Task { await clearAll() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    var content: some View {
         Group {
             if isLoading {
                 VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
@@ -3232,6 +3658,24 @@ struct WatchedOnlyTabView: View {
             }
         }
         .task { await load() }
+    }
+
+    @MainActor func clearAll() async {
+        isClearing = true
+        // Optimistic: the list empties immediately and is reloaded from the
+        // server if the call fails, so a slow network never looks like a no-op.
+        let previous = items
+        items = []
+        do {
+            let _: ToggleWatchedResponse = try await APIService.shared.delete("/watched", token: app.token)
+            app.replaceWatchedIds([])
+        } catch let err as APIError {
+            items = previous
+            if case .unauthorized = err { app.logout() }
+        } catch {
+            items = previous
+        }
+        isClearing = false
     }
 
     @ViewBuilder
@@ -3270,14 +3714,81 @@ struct WatchedOnlyTabView: View {
     }
 }
 
+/// Header bar above a saved list, carrying the count and a destructive clear.
+/// Solid, not glass: it sits in the content column, not the floating layer.
+struct ClearListBar: View {
+    let count: Int
+    let label: String
+    let isClearing: Bool
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Text("\(count) \(count == 1 ? "title" : "titles")")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.mkMuted)
+            Spacer()
+            Button(action: action) {
+                HStack(spacing: 6) {
+                    if isClearing {
+                        ProgressView().scaleEffect(0.7).tint(.red)
+                    } else {
+                        Image(systemName: "trash").font(.system(size: 12, weight: .semibold))
+                    }
+                    Text(isClearing ? "Clearing…" : "Clear all")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.red.opacity(0.12), in: Capsule())
+                .overlay(Capsule().stroke(Color.red.opacity(0.3), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(isClearing)
+            .accessibilityLabel("Clear entire \(label)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+}
+
 // MARK: Watchlist Tab
 
 struct WatchlistOnlyTabView: View {
     @Environment(AppState.self) private var app
     @State private var items: [WatchlistItem] = []
     @State private var isLoading = true
+    @State private var isClearing = false
+    @State private var confirmClear = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !items.isEmpty {
+                ClearListBar(
+                    count: items.count,
+                    label: "watchlist",
+                    isClearing: isClearing,
+                    action: { confirmClear = true }
+                )
+            }
+            content
+        }
+        .confirmationDialog(
+            "Clear your watchlist?",
+            isPresented: $confirmClear,
+            titleVisibility: .visible
+        ) {
+            Button("Remove all \(items.count) titles", role: .destructive) {
+                Task { await clearAll() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    var content: some View {
         Group {
             if isLoading {
                 VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
@@ -3303,6 +3814,22 @@ struct WatchlistOnlyTabView: View {
             }
         }
         .task { await load() }
+    }
+
+    @MainActor func clearAll() async {
+        isClearing = true
+        let previous = items
+        items = []
+        do {
+            let _: ToggleWatchedResponse = try await APIService.shared.delete("/watchlist", token: app.token)
+            app.replaceWatchlistIds([])
+        } catch let err as APIError {
+            items = previous
+            if case .unauthorized = err { app.logout() }
+        } catch {
+            items = previous
+        }
+        isClearing = false
     }
 
     @ViewBuilder
