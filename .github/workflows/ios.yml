@@ -1,0 +1,79 @@
+name: iOS
+
+# There is no macOS toolchain in the environment this project is usually
+# edited from, so nothing under WhatsOn/ ever got compiled. This runs the
+# real build and the XCTest suite on an Apple runner. Simulator destinations
+# need no signing identity, so this requires no secrets.
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # Printed before anything else so a failure caused by a missing SDK is
+      # obvious in the log rather than something to guess at. The app targets
+      # iOS 26, which needs a matching Xcode.
+      - name: Toolchain and SDKs available
+        run: |
+          ls /Applications | grep -i '^Xcode' || true
+          xcodebuild -version
+          xcodebuild -showsdks | sed -n '/iOS/,$p'
+          xcrun simctl list runtimes
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          set -eo pipefail
+          UDID=$(xcrun simctl list devices available -j \
+            | python3 -c "
+import json,sys
+runtimes = json.load(sys.stdin)['devices']
+best = None
+for rt, devs in runtimes.items():
+    if 'iOS' not in rt: continue
+    ver = rt.rsplit('-', 2)[-2:]
+    for d in devs:
+        if not d.get('isAvailable'): continue
+        if 'iPhone' not in d['name']: continue
+        key = tuple(int(x) for x in ver)
+        if best is None or key > best[0]:
+            best = (key, d['udid'], d['name'], rt)
+if not best:
+    sys.exit('no available iPhone simulator')
+print(best[1])
+sys.stderr.write(f'using {best[2]} on {best[3]}\n')
+")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project WhatsOn.xcodeproj \
+            -scheme WhatsOn \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+          | tee xcodebuild.log
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-results
+          path: |
+            TestResults.xcresult
+            xcodebuild.log
+          retention-days: 7
