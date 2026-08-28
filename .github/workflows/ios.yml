@@ -16,20 +16,24 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
-      # Printed before anything else so a failure caused by a missing SDK is
-      # obvious in the log rather than something to guess at. The app targets
-      # iOS 26, which needs a matching Xcode.
-      - name: Toolchain and SDKs available
+      # The app targets iOS 26 and uses Liquid Glass APIs, so it needs Xcode 26.
+      # The first attempt at this ran on macos-15, which carries Xcode 16.4 and
+      # the iOS 18.5 SDK: every glassEffect call failed to resolve and the real
+      # errors were buried in the inference cascade that followed. Select the
+      # newest Xcode on the image explicitly rather than trusting the default.
+      - name: Select the newest Xcode
         run: |
-          ls /Applications | grep -i '^Xcode' || true
+          ls -d /Applications/Xcode*.app
+          NEWEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Selecting $NEWEST"
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
           xcodebuild -version
-          xcodebuild -showsdks || true
-          xcrun simctl list runtimes || true
+          xcodebuild -showsdks | grep -i ios || true
 
       # Ask xcodebuild what this scheme can actually run on rather than
       # hardcoding a device name that may not exist on the runner image. If the
