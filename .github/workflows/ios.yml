@@ -28,32 +28,24 @@ jobs:
         run: |
           ls /Applications | grep -i '^Xcode' || true
           xcodebuild -version
-          xcodebuild -showsdks | sed -n '/iOS/,$p'
-          xcrun simctl list runtimes
+          xcodebuild -showsdks || true
+          xcrun simctl list runtimes || true
 
+      # Ask xcodebuild what this scheme can actually run on rather than
+      # hardcoding a device name that may not exist on the runner image. If the
+      # iOS 26 deployment target has no matching simulator, this comes back
+      # empty and says so.
       - name: Pick a simulator
         id: sim
         run: |
-          set -eo pipefail
-          UDID=$(xcrun simctl list devices available -j \
-            | python3 -c "
-import json,sys
-runtimes = json.load(sys.stdin)['devices']
-best = None
-for rt, devs in runtimes.items():
-    if 'iOS' not in rt: continue
-    ver = rt.rsplit('-', 2)[-2:]
-    for d in devs:
-        if not d.get('isAvailable'): continue
-        if 'iPhone' not in d['name']: continue
-        key = tuple(int(x) for x in ver)
-        if best is None or key > best[0]:
-            best = (key, d['udid'], d['name'], rt)
-if not best:
-    sys.exit('no available iPhone simulator')
-print(best[1])
-sys.stderr.write(f'using {best[2]} on {best[3]}\n')
-")
+          set -o pipefail
+          xcodebuild -project WhatsOn.xcodeproj -scheme WhatsOn -showdestinations 2>&1 | tee destinations.txt
+          UDID=$(grep 'platform:iOS Simulator' destinations.txt | grep -v 'placeholder' | head -1 | sed -E 's/.*id:([0-9A-Fa-f-]+).*/\1/')
+          if [ -z "$UDID" ]; then
+            echo "::error::No iOS Simulator destination is available for this scheme on this runner."
+            exit 1
+          fi
+          echo "Using simulator $UDID"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
       - name: Build and test
@@ -66,7 +58,7 @@ sys.stderr.write(f'using {best[2]} on {best[3]}\n')
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-          | tee xcodebuild.log
+            | tee xcodebuild.log
 
       - name: Upload results
         if: always()
@@ -76,4 +68,5 @@ sys.stderr.write(f'using {best[2]} on {best[3]}\n')
           path: |
             TestResults.xcresult
             xcodebuild.log
+            destinations.txt
           retention-days: 7
