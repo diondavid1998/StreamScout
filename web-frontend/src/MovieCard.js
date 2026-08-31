@@ -33,11 +33,23 @@ function MovieCard({
   const isTV = movie.mediaType === 'tv';
 
   return (
+    // A clickable div is invisible to the keyboard: it cannot be tabbed to, it
+    // cannot be activated, and the dialog it opens has nowhere to return focus
+    // to on close. tabIndex plus Enter/Space plus the button role fix all three.
     <div
       style={{ ...styles.movieCard, ...styles.movieCardClickable }}
       className="movie-card-wrap"
       data-media={movie.mediaType}
+      role="button"
+      tabIndex={0}
+      aria-label={`${movie.title} — open details`}
       onClick={(e) => onOpen(movie, e.currentTarget)}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        // Space scrolls the page by default.
+        e.preventDefault();
+        onOpen(movie, e.currentTarget);
+      }}
     >
       <div style={styles.cardActions}>
         <button type="button"
