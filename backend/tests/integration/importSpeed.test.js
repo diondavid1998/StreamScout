@@ -26,6 +26,12 @@ const { createTestDb, closeDb } = require('../testHelpers');
 const { createApp } = require('../../app');
 const { searchTitleOnTmdb, isOmdbRateLimited } = require('../../movieService');
 
+function run(db, sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.run(sql, params, function onRun(err) { err ? reject(err) : resolve(this); })
+  );
+}
+
 function all(db, sql, params = []) {
   return new Promise((resolve, reject) =>
     db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])))
@@ -73,6 +79,27 @@ describe('Letterboxd import cost', () => {
     expect(second.status).toBe(200);
     expect(second.body.matched).toBe(2);
     expect(searchTitleOnTmdb).not.toHaveBeenCalled();
+  });
+
+  it('retries a stale failure instead of writing the title off forever', async () => {
+    // A miss only means TMDB had nothing at the time. Caching that permanently
+    // meant an outage, a rate limit, or a title TMDB had not indexed yet could
+    // never resolve on any later import.
+    searchTitleOnTmdb.mockResolvedValueOnce(null);
+    await post({ importType: 'watchlist', items: [{ name: 'Late Arrival', year: 2011 }] });
+    expect(searchTitleOnTmdb).toHaveBeenCalledTimes(1);
+
+    // Age the cached miss past the TTL.
+    await run(
+      db,
+      "UPDATE title_lookup_cache SET resolved_at = ? WHERE item_id IS NULL",
+      [new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()]
+    );
+
+    searchTitleOnTmdb.mockClear();
+    const second = await post({ importType: 'watchlist', items: [{ name: 'Late Arrival', year: 2011 }] });
+    expect(searchTitleOnTmdb).toHaveBeenCalledTimes(1);
+    expect(second.body).toMatchObject({ matched: 1 });
   });
 
   it('caches a title it could not resolve, so the misses stay cheap too', async () => {

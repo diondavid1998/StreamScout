@@ -1,6 +1,6 @@
 /* ── Global reset & base ─────────────────────────────── */
 :root {
-  --accent:       #e94560;
+  --accent:       #8C7BFF;
   --accent-glow:  rgba(233, 69, 96, 0.28);
   --accent-alt:   #ff8c61;
   --bg:           #0b0c11;
@@ -202,11 +202,21 @@ body {
     grid-template-columns: 1fr !important;
   }
 
-  /* Header row tighter */
+  /* Header row tighter.
+     This used to force flex-wrap: nowrap. Four action buttons need ~300px of a
+     390px viewport, so the title/subtitle column was squeezed to zero: the
+     <h1> measured 0px wide and the subtitle became 0px x 195px, one word per
+     line, with the buttons drawn on top of it. Let the row wrap; only the
+     button group below stays on one line. */
   .header-row-wrap {
     margin-bottom: 18px !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+  }
+  /* Without a min-width of 0 a flex child refuses to shrink below its content,
+     which is the other half of how the column collapsed. */
+  .header-row-wrap > * {
+    min-width: 0;
   }
   .top-actions-wrap {
     gap: 6px !important;

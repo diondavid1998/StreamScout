@@ -5,6 +5,18 @@ const OMDB_API_KEY = process.env.OMDB_API_KEY;
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 const DEFAULT_REGION = 'US';
+
+// How a title can be "included with your subscription".
+//
+//   flatrate — a normal subscription tier (Netflix, Max)
+//   free     — free with no ads and no account (Pluto TV, Kanopy via a library)
+//   ads      — free but ad-supported (Tubi, The Roku Channel, Pluto)
+//
+// Only `flatrate` used to be requested and read, so the four free services in
+// the picker — Tubi, Pluto TV, The Roku Channel and Kanopy — could be selected
+// but never returned a single title. Rentals and purchases stay excluded: this
+// app answers "what can I already watch", not "what could I buy".
+const INCLUDED_MONETIZATION = ['flatrate', 'free', 'ads'];
 const DISCOVER_PAGE_COUNT = 1;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 // Hard ceiling on each in-memory response cache. A full snapshot sync touches
@@ -300,7 +312,7 @@ async function discoverTitles(mediaType, providerIds, page, region = DEFAULT_REG
     page,
     sort_by: 'popularity.desc',
     watch_region: region,
-    with_watch_monetization_types: 'flatrate',
+    with_watch_monetization_types: INCLUDED_MONETIZATION.join('|'),
     with_watch_providers: providerIds.join('|'),
     ...extraParams,
   });
@@ -324,16 +336,28 @@ async function fetchTitleWithCredits(mediaType, tmdbId) {
   });
 }
 
-function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
-  const regionProviders = details['watch/providers']?.results?.[region]?.flatrate || [];
-  const mappedProviders = regionProviders
-    .map((provider) => providerMapById.get(provider.provider_id))
-    .filter(Boolean);
+/** Every provider offering this title at no extra cost, across all three tiers. */
+function includedProviders(watchProviders, region = DEFAULT_REGION) {
+  const forRegion = watchProviders?.results?.[region];
+  if (!forRegion) return [];
+  return INCLUDED_MONETIZATION.flatMap((tier) => forRegion[tier] || []);
+}
 
-  return {
-    names: mappedProviders.map((provider) => provider.name),
-    keys: mappedProviders.map((provider) => provider.key),
-  };
+function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
+  const seen = new Set();
+  const names = [];
+  const keys = [];
+  for (const provider of includedProviders(details['watch/providers'], region)) {
+    const entry = providerMapById.get(provider.provider_id);
+    // A title can appear under more than one tier — free and ads both list
+    // Pluto, for instance — so dedupe by key rather than trusting TMDB.
+    if (entry && !seen.has(entry.key)) {
+      seen.add(entry.key);
+      names.push(entry.name);
+      keys.push(entry.key);
+    }
+  }
+  return { names, keys };
 }
 
 function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
@@ -776,6 +800,7 @@ module.exports = {
   fetchTitleWithCredits,
   isOmdbRateLimited,
   searchTitleOnTmdb,
+  includedProviders,
   searchCatalog,
   fetchTitlesByPerson,
   // Exported for unit testing

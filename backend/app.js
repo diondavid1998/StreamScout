@@ -40,6 +40,17 @@ const IMPORT_LOOKUP_CONCURRENCY = 8;
 // batch, and halving the number of batches halves it.
 const MAX_IMPORT_BATCH = 100;
 
+// How long a failed title lookup stays cached.
+//
+// A resolved title is correct forever, so hits never expire. A miss is only
+// evidence that TMDB had nothing *at the time* — the service may have been
+// down, rate-limited, or simply not carrying the title yet. Caching those
+// permanently meant a row that failed once could never resolve on any future
+// import, however many times the list was re-uploaded. Two weeks is long
+// enough that repeat imports stay cheap and short enough that a title added
+// to TMDB gets picked up.
+const NEGATIVE_LOOKUP_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
 // ── Small promise wrappers over the sqlite3 callback API ────────────────────
 
 function getRow(db, sql, params = []) {
@@ -112,6 +123,9 @@ function lookupKeyFor(name, year) {
  * transaction. The previous version searched strictly one title at a time and
  * slept 125ms between them, so a 50-title batch could not finish in under six
  * seconds no matter how fast TMDB answered.
+ *
+ * Resolved titles are cached forever; failures only for NEGATIVE_LOOKUP_TTL_MS,
+ * so a transient TMDB outage cannot write a title off permanently.
  */
 async function resolveImportBatch(db, batch) {
   const keys = batch.map(({ name, year }) => lookupKeyFor(name, year));
@@ -123,8 +137,10 @@ async function resolveImportBatch(db, batch) {
     const cachedRows = await getRows(
       db,
       `SELECT lookup_key, item_id, media_type, title, poster_url
-         FROM title_lookup_cache WHERE lookup_key IN (${placeholders})`,
-      uniqueKeys
+         FROM title_lookup_cache
+        WHERE lookup_key IN (${placeholders})
+          AND (item_id IS NOT NULL OR resolved_at > ?)`,
+      [...uniqueKeys, new Date(Date.now() - NEGATIVE_LOOKUP_TTL_MS).toISOString()]
     );
     for (const row of cachedRows) {
       resolved.set(
