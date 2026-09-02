@@ -93,6 +93,66 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertNil(defaults.stringArray(forKey: "mk_currently_watching_ids"))
     }
 
+    // MARK: - Letterboxd export reading
+
+    /// A temporary directory shaped like an uncompressed Letterboxd export.
+    private func makeExportFolder(files: [String: String]) throws -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("letterboxd-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (name, text) in files {
+            try text.write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        return dir
+    }
+
+    func testReadingAFolderPicksUpEveryCsvAndIgnoresTheRest() throws {
+        let dir = try makeExportFolder(files: [
+            "diary.csv": "Date,Name,Year\n2026-01-01,Heat,1995",
+            "ratings.csv": "Date,Name,Year,Rating\n2026-01-01,Heat,1995,4.5",
+            "watchlist.csv": "Date,Name,Year\n2026-01-01,Stalker,1979",
+            "profile.txt": "not a csv",
+        ])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let files = try LetterboxdExport.read(urls: [dir])
+
+        XCTAssertEqual(files.count, 3)
+        XCTAssertTrue(files.allSatisfy { $0.name.hasSuffix(".csv") })
+        XCTAssertTrue(files.contains { $0.text.contains("Heat") })
+    }
+
+    func testLooseCsvFilesCanBePickedInstead() throws {
+        let dir = try makeExportFolder(files: ["diary.csv": "Date,Name,Year\n2026-01-01,Heat,1995"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let files = try LetterboxdExport.read(urls: [dir.appendingPathComponent("diary.csv")])
+
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files.first?.name, "diary.csv")
+    }
+
+    func testAStillZippedExportSaysSoRatherThanFailingSilently() throws {
+        let dir = try makeExportFolder(files: ["letterboxd.zip": "PK"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertThrowsError(try LetterboxdExport.read(urls: [dir.appendingPathComponent("letterboxd.zip")])) { error in
+            // The message has to name the fix — "Uncompress" — because a zip is
+            // exactly what Letterboxd hands you and this is the common case.
+            XCTAssertTrue(
+                (error as? LetterboxdExport.ReadError)?.errorDescription?.contains("Uncompress") == true,
+                "expected the uncompress hint, got \(error)"
+            )
+        }
+    }
+
+    func testAFolderWithNoCsvsIsRejected() throws {
+        let dir = try makeExportFolder(files: ["readme.txt": "nothing here"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertThrowsError(try LetterboxdExport.read(urls: [dir]))
+    }
+
     func testMarkedCaughtUpClearsOnlyTheNewEpisodeFlag() {
         let item = CurrentlyWatchingItem(
             itemId: "tv-1399",

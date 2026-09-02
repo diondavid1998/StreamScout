@@ -270,6 +270,177 @@ struct CurrentlyWatchingResponse: Decodable {
     let items: [CurrentlyWatchingItem]?
 }
 
+// MARK: - Letterboxd diary & analytics
+
+/// What the server made of an uploaded export. Every count here comes from the
+/// CSVs themselves, so it is available the instant the upload finishes.
+struct DiaryImportResponse: Decodable {
+    let success: Bool?
+    let films: Int?
+    let viewings: Int?
+    let rated: Int?
+    let dated: Int?
+    let rewatches: Int?
+    let watchlist: Int?
+    let hasDiary: Bool?
+    let files: [DiaryImportFile]?
+    let error: String?
+}
+
+struct DiaryImportFile: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let kind: String
+    let rows: Int
+}
+
+struct AnalyticsCoverage: Decodable {
+    let films: Int
+    let resolved: Int
+    let pending: Int
+}
+
+struct AnalyticsSummary: Decodable {
+    let films: Int
+    let viewings: Int
+    let rewatches: Int
+    let rated: Int
+    let meanRating: Double?
+    let crowdMean: Double?
+    let tasteOffset: Double?
+    let comparedOn: Int?
+    let runtimeMinutes: Int
+    let firstWatched: String?
+    let lastWatched: String?
+}
+
+struct RatingBucket: Decodable, Identifiable {
+    var id: Double { rating }
+    let rating: Double
+    let films: Int
+}
+
+struct RatingYear: Decodable, Identifiable {
+    var id: String { year }
+    let year: String
+    let films: Int
+    let meanRating: Double?
+}
+
+struct TitleDelta: Decodable, Identifiable {
+    var id: String { "\(name)-\(year ?? 0)" }
+    let name: String
+    let year: Int?
+    let rating: Double
+    let crowd: Double?
+    let delta: Double
+}
+
+struct AnalyticsRating: Decodable {
+    let histogram: [RatingBucket]
+    let mode: RatingBucket?
+    let byYear: [RatingYear]
+    let hottestTakes: HottestTakes
+}
+
+struct HottestTakes: Decodable {
+    let above: [TitleDelta]
+    let below: [TitleDelta]
+}
+
+struct DecadeBucket: Decodable, Identifiable {
+    var id: String { decade }
+    let decade: String
+    let films: Int
+    let meanRating: Double?
+}
+
+struct LanguageBucket: Decodable, Identifiable {
+    var id: String { code }
+    let code: String
+    let films: Int
+}
+
+struct AnalyticsEras: Decodable {
+    let decades: [DecadeBucket]
+    let lagYearsMedian: Double?
+    let languages: [LanguageBucket]
+}
+
+struct MonthBucket: Decodable, Identifiable {
+    var id: String { month }
+    let month: String
+    let films: Int
+}
+
+struct WeekdayBucket: Decodable, Identifiable {
+    var id: String { day }
+    let day: String
+    let films: Int
+}
+
+struct TagBucket: Decodable, Identifiable {
+    var id: String { tag }
+    let tag: String
+    let films: Int
+}
+
+struct RewatchedFilm: Decodable, Identifiable {
+    var id: String { "\(name)-\(year ?? 0)" }
+    let name: String
+    let year: Int?
+    let viewings: Int
+}
+
+struct AnalyticsStreaks: Decodable {
+    let longestStreakDays: Int
+    let longestGapDays: Int
+    let activeDays: Int
+}
+
+struct AnalyticsHabits: Decodable {
+    let hasDates: Bool
+    let byMonth: [MonthBucket]
+    let weekday: [WeekdayBucket]
+    let streaks: AnalyticsStreaks?
+    let topTags: [TagBucket]
+    let mostRewatched: [RewatchedFilm]
+}
+
+/// A director, actor or genre with the films behind it.
+struct PersonStat: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let films: Int
+    let rated: Int
+    let meanRating: Double?
+    let crowdMean: Double?
+    let delta: Double?
+}
+
+struct AnalyticsPeople: Decodable {
+    let genres: [PersonStat]
+    let directors: [PersonStat]
+    let cast: [PersonStat]
+    let affinity: [PersonStat]
+    let blindSpots: [PersonStat]
+}
+
+struct AnalyticsResponse: Decodable {
+    let coverage: AnalyticsCoverage
+    let summary: AnalyticsSummary
+    let rating: AnalyticsRating
+    let eras: AnalyticsEras
+    let habits: AnalyticsHabits
+    let people: AnalyticsPeople
+}
+
+struct ResolveResponse: Decodable {
+    let resolved: Int?
+    let failed: Int?
+    let pending: Int?
+}
+
 struct LetterboxdPreviewResponse: Decodable {
     let importType: String?
     let count: Int?
@@ -363,11 +534,14 @@ final class APIService {
         return try await perform(req)
     }
 
-    func post<T: Decodable>(_ path: String, body: [String: Any], token: String? = nil) async throws -> T {
+    /// `timeout` is overridable because a Letterboxd export is a few hundred
+    /// kilobytes of CSV, and thirty seconds is not enough of a cellular upload.
+    func post<T: Decodable>(_ path: String, body: [String: Any], token: String? = nil,
+                            timeout: TimeInterval = 30) async throws -> T {
         guard let url = URL(string: API.baseURL + path) else {
             throw APIError.networkError(URLError(.badURL))
         }
-        var req = URLRequest(url: url, timeoutInterval: 30)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }

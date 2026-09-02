@@ -856,6 +856,7 @@ struct CatalogView: View {
     @State private var isSearchLoading = false
     @State private var searchTask: Task<Void, Never>?
     @State private var showLogoutAlert = false
+    @State private var showAnalytics = false
 
     static let allGenres: [(key: String, label: String)] = [
         ("Action","Action"), ("Adventure","Adventure"), ("Animation","Animation"),
@@ -897,6 +898,9 @@ struct CatalogView: View {
         }
         .sheet(isPresented: $showSettingsView) {
             SettingsView().environment(app)
+        }
+        .sheet(isPresented: $showAnalytics) {
+            AnalyticsView().environment(app)
         }
         .sheet(isPresented: $showGenrePicker) {
             GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
@@ -1027,6 +1031,7 @@ struct CatalogView: View {
             if mainTab == .discover {
                 IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
             }
+            IconButton(icon: "chart.bar.xaxis") { showAnalytics = true }
             IconButton(icon: "gearshape.fill") { showSettingsView = true }
             IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
         }
