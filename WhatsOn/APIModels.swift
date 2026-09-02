@@ -280,7 +280,6 @@ struct DiaryImportResponse: Decodable {
     let viewings: Int?
     let rated: Int?
     let dated: Int?
-    let rewatches: Int?
     let watchlist: Int?
     let hasDiary: Bool?
     let files: [DiaryImportFile]?
@@ -303,7 +302,6 @@ struct AnalyticsCoverage: Decodable {
 struct AnalyticsSummary: Decodable {
     let films: Int
     let viewings: Int
-    let rewatches: Int
     let rated: Int
     let meanRating: Double?
     let crowdMean: Double?
@@ -373,17 +371,9 @@ struct TagBucket: Decodable, Identifiable {
     let films: Int
 }
 
-struct RewatchedFilm: Decodable, Identifiable {
-    var id: String { "\(name)-\(year ?? 0)" }
-    let name: String
-    let year: Int?
-    let viewings: Int
-}
-
-/// Tags and rewatches — the two things that survive without a watch date.
+/// Tags — what survives without a watch date and without a rewatch count.
 struct AnalyticsCollection: Decodable {
     let topTags: [TagBucket]
-    let mostRewatched: [RewatchedFilm]
 }
 
 /// A director, actor or genre with the films behind it.

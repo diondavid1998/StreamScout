@@ -233,7 +233,6 @@ function readExport(files) {
       viewings: entries.length,
       rated: entries.filter((e) => e.rating !== null).length,
       dated: entries.filter((e) => e.watchedOn !== null).length,
-      rewatches: entries.filter((e) => e.isRewatch).length,
       watchlist: watchlistUnique.length,
       hasDiary: diary.length > 0,
     },

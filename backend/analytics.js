@@ -180,7 +180,6 @@ function buildSummary(rows) {
   return {
     films: films.size,
     viewings: rows.length,
-    rewatches: rows.filter((r) => r.isRewatch).length,
     rated: rated.length,
     meanRating: round(userMean),
     // Only over the films where both exist — otherwise the two means describe
@@ -266,40 +265,21 @@ function buildEras(rows) {
  * on that reads "161 films on 13 February", which is a data-entry session
  * described as a viewing.
  *
- * Tags and rewatch counts survive because neither needs a date.
+ * Rewatch counts went the same way, and for the first reason rather than the
+ * second: they were reportable, just not wanted. `is_rewatch` is still parsed
+ * and stored — it costs nothing to keep, and a model trained on this history
+ * later would want to know a film was worth returning to.
+ *
+ * Tags survive because they need no date and answer a question about the films
+ * themselves.
  */
 function buildCollection(rows) {
   const tagCounts = new Map();
   for (const row of rows) for (const tag of row.tags) tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
 
-  // A rewatch shows up two different ways depending on the export.
-  //
-  // With a diary, the same film has several rows and counting them is enough.
-  // Without one, the film has a single row carrying Rewatch=Yes — so counting
-  // rows alone reported zero rewatched films on an export whose summary said
-  // five. A flagged row means at least one viewing before it, so the count is
-  // the greater of the two readings.
-  const viewings = new Map();
-  for (const row of rows) {
-    const entry = viewings.get(row.filmKey)
-      || { name: row.name, year: row.year, rows: 0, flagged: 0 };
-    entry.rows += 1;
-    if (row.isRewatch) entry.flagged += 1;
-    viewings.set(row.filmKey, entry);
-  }
-
-  const rewatched = [...viewings.values()]
-    .map((f) => ({
-      name: f.name,
-      year: f.year,
-      viewings: Math.max(f.rows, f.flagged + 1),
-    }))
-    .filter((f) => f.viewings > 1);
-
   return {
     topTags: [...tagCounts.entries()].map(([tag, films]) => ({ tag, films }))
       .sort((a, b) => b.films - a.films).slice(0, TOP_N),
-    mostRewatched: rewatched.sort((a, b) => b.viewings - a.viewings).slice(0, TOP_N),
   };
 }
 

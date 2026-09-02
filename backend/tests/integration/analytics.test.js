@@ -75,7 +75,6 @@ describe('importing an export', () => {
     // because Dune was logged twice.
     expect(res.body.films).toBe(5);
     expect(res.body.viewings).toBe(6);
-    expect(res.body.rewatches).toBe(1);
     expect(res.body.rated).toBe(5);
     expect(res.body.hasDiary).toBe(true);
     expect(res.body.watchlist).toBe(1);
@@ -112,7 +111,7 @@ test('a user who has never imported gets zeros, not a crash', async () => {
   expect(res.status).toBe(200);
   expect(res.body.summary.films).toBe(0);
   expect(res.body.summary.meanRating).toBeNull();
-  expect(res.body.collection.mostRewatched).toEqual([]);
+  expect(res.body.collection.topTags).toEqual([]);
   expect(res.body.coverage).toMatchObject({ films: 0, pending: 0 });
 });
 
@@ -155,10 +154,22 @@ describe('analytics from the CSVs alone', () => {
     expect(body.eras.lagYearsMedian).toBeGreaterThan(0);
   });
 
-  test('keeps tags and rewatches, which need no watch date', async () => {
+  test('keeps tags, which need no watch date', async () => {
     const { body } = await auth(request(app).get('/analytics'));
-    expect(body.collection.mostRewatched[0]).toMatchObject({ name: 'Dune: Part Two', viewings: 2 });
     expect(body.collection.topTags.map((t) => t.tag).sort()).toEqual(['epic', 'imax']);
+  });
+
+  test('reports no rewatch stat, but still stores the flag', async () => {
+    // Not wanted on the page. Kept in the column because a model trained on
+    // this history later would want to know a film was worth returning to.
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(JSON.stringify(body)).not.toMatch(/rewatch/i);
+
+    const stored = await new Promise((resolve, reject) =>
+      db.get('SELECT COUNT(*) AS n FROM letterboxd_entries WHERE is_rewatch = 1', [],
+        (err, row) => (err ? reject(err) : resolve(row)))
+    );
+    expect(stored.n).toBe(1);
   });
 
   test('reports no day-frequency stats at all', async () => {
@@ -299,7 +310,6 @@ describe('an export with no diary.csv', () => {
     expect(res.body.films).toBe(4);
     // Both reviewed films carry a date; nothing else in the export does.
     expect(res.body.dated).toBe(2);
-    expect(res.body.rewatches).toBe(1);
     expect(res.body.hasDiary).toBe(true);
 
     const { body } = await auth(request(app).get('/analytics'));
@@ -323,25 +333,4 @@ describe('an export with no diary.csv', () => {
       .send({ files: [{ name: 'af56586c-ratings.csv', text: RATINGS_ONLY }] });
     expect(res.body.files[0].kind).toBe('ratings');
   });
-});
-
-test('a rewatch flagged on a single row still counts as a rewatch', async () => {
-  // Without a diary.csv a rewatched film has one row carrying Rewatch=Yes,
-  // not two rows. Counting rows alone reported zero rewatched films on an
-  // export whose own summary said five.
-  const reviews = [
-    'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date',
-    '2026-01-05,Nosferatu,2024,https://boxd.it/a,3.5,Yes,Seen it before,,2026-01-04',
-  ].join('\n');
-
-  const res = await auth(request(app).post('/letterboxd/diary')).send({
-    files: [{ name: 'reviews.csv', text: reviews }],
-  });
-  expect(res.body.rewatches).toBe(1);
-
-  const { body } = await auth(request(app).get('/analytics'));
-  expect(body.summary.rewatches).toBe(1);
-  expect(body.collection.mostRewatched).toEqual([
-    { name: 'Nosferatu', year: 2024, viewings: 2 },
-  ]);
 });

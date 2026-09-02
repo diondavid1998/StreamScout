@@ -226,7 +226,7 @@ struct AnalyticsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader("At a glance")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                stat("Films", "\(a.summary.films)", detail: a.summary.rewatches > 0 ? "\(a.summary.viewings) viewings" : nil)
+                stat("Films", "\(a.summary.films)", detail: nil)
                 stat("Time in the dark", hours(a.summary.runtimeMinutes),
                      detail: a.coverage.pending > 0 ? "of \(a.coverage.resolved) resolved" : nil)
                 stat("Your mean", a.summary.meanRating.map { String(format: "%.2f", $0) } ?? "—",
@@ -306,11 +306,8 @@ struct AnalyticsView: View {
 
     private func collectionSection(_ a: AnalyticsResponse) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !a.collection.mostRewatched.isEmpty || !a.collection.topTags.isEmpty {
-                sectionHeader("Your collection")
-            }
-            if !a.collection.mostRewatched.isEmpty {
-                rankedList("Returned to most", a.collection.mostRewatched.map { ($0.name, "\($0.viewings)x") })
+            if !a.collection.topTags.isEmpty {
+                sectionHeader("Your tags")
             }
             if !a.collection.topTags.isEmpty {
                 chipRow(a.collection.topTags.map { "\($0.tag) - \($0.films)" })
