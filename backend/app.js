@@ -311,6 +311,12 @@ function createApp(db, { disableRateLimit = false } = {}) {
       credentials: true,
     })
   );
+  // The diary upload carries a whole Letterboxd export as JSON — five CSVs,
+  // which for a five-figure watch history runs past 2 MB before escaping. This
+  // parser is mounted first and scoped to that one path; express.json marks the
+  // request as read, so the global 2 MB parser below skips a body it already
+  // consumed and every other route keeps the smaller ceiling.
+  app.use('/letterboxd/diary', express.json({ limit: '16mb' }));
   app.use(express.json({ limit: '2mb' }));
 
   const authLimiter = disableRateLimit

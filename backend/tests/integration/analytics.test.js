@@ -230,3 +230,22 @@ describe('resolving genres and people', () => {
     expect(searchTitleOnTmdb).not.toHaveBeenCalled();
   });
 });
+
+describe('a large export', () => {
+  test('a body past the global 2 MB limit is still accepted', async () => {
+    // Five figures of watch history runs past 2 MB as JSON. The global parser
+    // would have rejected it with a 413 and no useful message.
+    const rows = ['Date,Name,Year,Letterboxd URI,Rating'];
+    for (let i = 0; i < 40000; i++) {
+      rows.push(`2026-01-01,A Film With A Reasonably Long Title ${i},2001,https://boxd.it/x${i},4`);
+    }
+    const text = rows.join('\n');
+    expect(Buffer.byteLength(text)).toBeGreaterThan(2 * 1024 * 1024);
+
+    const res = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text }] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.films).toBe(40000);
+  }, 60000);
+});

@@ -61,9 +61,18 @@ enum LetterboxdExport {
         }
 
         if files.isEmpty { throw ReadError.noCsvFound }
-        // The server reads at most twenty; the export has six, so anything past
-        // that is a folder of something else.
-        return Array(files.prefix(20))
+
+        // An export also contains comments, likes, lists and a reviews file
+        // whose bodies can run to megabytes — and nothing reads them: every
+        // viewing in reviews.csv is already in diary.csv. Sending them would
+        // only risk the upload limit, so keep the four that carry data.
+        let wanted = ["diary", "ratings", "watched", "watchlist"]
+        let useful = files.filter { file in
+            wanted.contains { file.name.lowercased().contains($0) }
+        }
+        // Unless nothing matched, in which case the files have been renamed and
+        // the server's header-based classifier is the better judge.
+        return Array((useful.isEmpty ? files : useful).prefix(20))
     }
 
     private static func readOne(_ url: URL) throws -> File {
