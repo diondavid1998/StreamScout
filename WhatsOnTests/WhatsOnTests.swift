@@ -54,4 +54,60 @@ final class WhatsOnTests: XCTestCase {
         let error = APIError.clientError(422, nil)
         XCTAssertEqual(error.errorDescription, "Request failed (422).")
     }
+
+    // MARK: - Currently Watching
+
+    func testAddingToCurrentlyWatchingRemovesTheShowFromTheWatchlist() throws {
+        let app = AppState(userDefaults: defaults)
+        app.setWatchlisted("tv-1399", on: true)
+        XCTAssertTrue(app.watchlistIds.contains("tv-1399"))
+
+        app.setCurrentlyWatching("tv-1399", on: true)
+
+        // The server does the same thing; this mirrors it so the bookmark
+        // control does not keep claiming the show is still saved for later.
+        XCTAssertTrue(app.currentlyWatchingIds.contains("tv-1399"))
+        XCTAssertFalse(app.watchlistIds.contains("tv-1399"))
+    }
+
+    func testRemovingFromCurrentlyWatchingLeavesTheWatchlistAlone() throws {
+        let app = AppState(userDefaults: defaults)
+        app.setWatchlisted("tv-42", on: true)
+        app.setCurrentlyWatching("tv-1399", on: true)
+
+        app.setCurrentlyWatching("tv-1399", on: false)
+
+        XCTAssertFalse(app.currentlyWatchingIds.contains("tv-1399"))
+        XCTAssertTrue(app.watchlistIds.contains("tv-42"))
+    }
+
+    func testCurrentlyWatchingSurvivesRelaunchAndIsClearedOnLogout() throws {
+        let app = AppState(userDefaults: defaults)
+        app.setCurrentlyWatching("tv-1399", on: true)
+
+        let restored = AppState(userDefaults: defaults)
+        XCTAssertEqual(restored.currentlyWatchingIds, ["tv-1399"])
+
+        restored.logout()
+        XCTAssertTrue(restored.currentlyWatchingIds.isEmpty)
+        XCTAssertNil(defaults.stringArray(forKey: "mk_currently_watching_ids"))
+    }
+
+    func testMarkedCaughtUpClearsOnlyTheNewEpisodeFlag() {
+        let item = CurrentlyWatchingItem(
+            itemId: "tv-1399",
+            title: "A Show",
+            posterUrl: nil,
+            state: "airing",
+            scheduleMessage: "New episodes Thursdays",
+            hasNewEpisode: true
+        )
+
+        let cleared = item.markedCaughtUp()
+
+        XCTAssertEqual(cleared.hasNewEpisode, false)
+        XCTAssertEqual(cleared.itemId, item.itemId)
+        XCTAssertEqual(cleared.scheduleMessage, item.scheduleMessage)
+        XCTAssertEqual(cleared.state, item.state)
+    }
 }

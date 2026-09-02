@@ -234,6 +234,42 @@ struct WatchlistResponse: Decodable {
     let items: [WatchlistItem]?
 }
 
+// MARK: - Currently Watching
+
+/// One followed series. `scheduleMessage` is composed server-side — the day of
+/// the week is derived from TMDB's next air date in US Central, and doing it in
+/// one place is what keeps the web app and this one saying the same sentence.
+struct CurrentlyWatchingItem: Decodable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let title: String?
+    let posterUrl: String?
+    /// airing, all_out, ended, or unknown when the show has never been fetched.
+    let state: String?
+    let scheduleMessage: String?
+    /// Something aired since this user last said they were caught up.
+    let hasNewEpisode: Bool?
+}
+
+extension CurrentlyWatchingItem {
+    /// A copy with the new-episode flag cleared, so the dot can disappear the
+    /// moment "Caught up" is tapped rather than after the round trip.
+    func markedCaughtUp() -> CurrentlyWatchingItem {
+        CurrentlyWatchingItem(
+            itemId: itemId,
+            title: title,
+            posterUrl: posterUrl,
+            state: state,
+            scheduleMessage: scheduleMessage,
+            hasNewEpisode: false
+        )
+    }
+}
+
+struct CurrentlyWatchingResponse: Decodable {
+    let items: [CurrentlyWatchingItem]?
+}
+
 struct LetterboxdPreviewResponse: Decodable {
     let importType: String?
     let count: Int?
