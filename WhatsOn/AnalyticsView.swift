@@ -62,11 +62,20 @@ enum LetterboxdExport {
 
         if files.isEmpty { throw ReadError.noCsvFound }
 
-        // An export also contains comments, likes, lists and a reviews file
-        // whose bodies can run to megabytes — and nothing reads them: every
-        // viewing in reviews.csv is already in diary.csv. Sending them would
-        // only risk the upload limit, so keep the four that carry data.
-        let wanted = ["diary", "ratings", "watched", "watchlist"]
+        // reviews.csv is not optional, whatever its size.
+        //
+        // An earlier version of this dropped it, on the reasoning that every
+        // viewing it holds is also in diary.csv. That is only true when there
+        // *is* a diary.csv — and a real export can arrive without one, in which
+        // case reviews.csv is the only file carrying a Watched Date, a Rewatch
+        // flag or tags at all. On a 1,782-film export with no diary, dropping
+        // it took dated viewings from 47 to 0 and switched the whole habits
+        // section off.
+        //
+        // profile.csv stays out for a different reason: nothing reads it, and
+        // it is the one file in the export that carries an email address.
+        // Comments, likes and lists are simply unread.
+        let wanted = ["diary", "ratings", "watched", "watchlist", "reviews"]
         let useful = files.filter { file in
             wanted.contains { file.name.lowercased().contains($0) }
         }
@@ -214,7 +223,7 @@ struct AnalyticsView: View {
     private var noDiaryNote: some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionHeader("Habits", note: "needs diary.csv")
-            Text("Your export had ratings but no diary, so there are no watch dates to chart. Re-export with the diary included to unlock months, weekdays and streaks.")
+            Text("Letterboxd only records a watch date on films you logged in your diary or reviewed — the ratings and watched files carry no dates at all. None of yours came through with one, so there is nothing to chart here yet.")
                 .font(.footnote).foregroundColor(.mkMuted)
         }
     }

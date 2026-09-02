@@ -7,10 +7,14 @@
  * spread across three of them:
  *
  *   diary.csv     one row per viewing — date, rating, rewatch flag, tags
+ *   reviews.csv   the same columns again, for viewings that carry a review
  *   ratings.csv   one row per rated film — the rating, but no viewing date
  *   watched.csv   one row per film ever marked watched — no rating, no date
  *   watchlist.csv films saved for later
- *   reviews.csv   diary rows that carry written reviews
+ *
+ * Only the first two carry a Watched Date, and an export can arrive without a
+ * diary.csv at all — in which case reviews.csv is the sole source of every
+ * date, rewatch flag and tag in the whole import. Both are read as the diary.
  *
  * The three watched-history files overlap: a film logged in the diary is also
  * in ratings.csv and watched.csv. Reading them naively triples the count, so

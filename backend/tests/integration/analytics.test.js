@@ -249,3 +249,71 @@ describe('a large export', () => {
     expect(res.body.films).toBe(40000);
   }, 60000);
 });
+
+describe('an export with no diary.csv', () => {
+  // Shaped after a real Letterboxd export that arrived as ratings, watched,
+  // reviews, watchlist and profile — no diary at all. reviews.csv was then the
+  // only file carrying a watch date, a rewatch flag or a tag.
+  const REVIEWS = [
+    'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date',
+    '2026-01-05,Sinners,2025,https://boxd.it/a,5,,A single-line review,imax,2026-01-04',
+    '2026-01-08,Nosferatu,2024,https://boxd.it/b,3.5,Yes,"Pros:',
+    'The bat.',
+    '',
+    'Cons:',
+    'Everything else",,2026-01-07',
+  ].join('\n');
+
+  const RATINGS_ONLY = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-05,Sinners,2025,https://boxd.it/a,5',
+    '2020-01-01,Heat,1995,https://boxd.it/c,4',
+  ].join('\n');
+
+  const WATCHED_ONLY = [
+    'Date,Name,Year,Letterboxd URI',
+    '2026-01-05,Sinners,2025,https://boxd.it/a',
+    '2019-01-01,The Thing,1982,https://boxd.it/d',
+  ].join('\n');
+
+  const PROFILE = 'Date Joined,Username,Given Name,Family Name,Email Address\n2020-05-16,someone,A,B,a@b.c';
+
+  test('reads dates, rewatches and tags out of reviews.csv', async () => {
+    const res = await auth(request(app).post('/letterboxd/diary')).send({
+      files: [
+        { name: 'reviews.csv', text: REVIEWS },
+        { name: 'ratings.csv', text: RATINGS_ONLY },
+        { name: 'watched.csv', text: WATCHED_ONLY },
+      ],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.films).toBe(4);
+    // Both reviewed films carry a date; nothing else in the export does.
+    expect(res.body.dated).toBe(2);
+    expect(res.body.rewatches).toBe(1);
+    expect(res.body.hasDiary).toBe(true);
+
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(body.habits.hasDates).toBe(true);
+    expect(body.habits.topTags).toEqual([{ tag: 'imax', films: 1 }]);
+    // A review body spanning five lines with a blank line in the middle is one
+    // record, not five broken ones.
+    expect(body.summary.films).toBe(4);
+  });
+
+  test('profile.csv is not read — it is the file with the email address', async () => {
+    const res = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'profile.csv', text: PROFILE }, { name: 'ratings.csv', text: RATINGS_ONLY }] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.files.find((f) => f.name === 'profile.csv').kind).toBe('unknown');
+    expect(res.body.films).toBe(2);
+  });
+
+  test('a hashed filename prefix still classifies', async () => {
+    const res = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'af56586c-ratings.csv', text: RATINGS_ONLY }] });
+    expect(res.body.files[0].kind).toBe('ratings');
+  });
+});
