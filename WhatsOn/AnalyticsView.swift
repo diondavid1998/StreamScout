@@ -242,7 +242,7 @@ struct AnalyticsView: View {
                 }
                 .chartXScale(domain: 0.25...5.25)
                 // Whole stars only: ten half-star labels collide at phone width.
-                .chartXAxis { AxisMarks(values: [1, 2, 3, 4, 5]) }
+                .chartXAxis { AxisMarks(values: .stride(by: 1.0)) }
                 .chartYAxis { AxisMarks(position: .leading) }
                 .frame(height: 168)
             }
@@ -260,7 +260,7 @@ struct AnalyticsView: View {
                             .foregroundStyle(Color.mkAccent)
                             .symbolSize(60)
                     }
-                    .chartYScale(domain: 0...5)
+                    .chartYScale(domain: 0.0...5.0)
                     .frame(height: 150)
                 }
                 caption("Your mean rating by year watched")
