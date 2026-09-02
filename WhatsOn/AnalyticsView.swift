@@ -173,10 +173,10 @@ struct AnalyticsView: View {
                     if let importStatus { banner(importStatus, tone: .accent) }
                     if let importError { banner(importError, tone: .error) }
                     summarySection(analytics)
+                    peopleSection(analytics)
                     ratingSection(analytics)
                     erasSection(analytics)
-                    if analytics.habits.hasDates { habitsSection(analytics) } else { noDiaryNote }
-                    peopleSection(analytics)
+                    collectionSection(analytics)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 18)
@@ -217,14 +217,6 @@ struct AnalyticsView: View {
             .disabled(isImporting)
             .padding(.top, 6)
             Spacer()
-        }
-    }
-
-    private var noDiaryNote: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionHeader("Habits", note: "needs diary.csv")
-            Text("Letterboxd only records a watch date on films you logged in your diary or reviewed — the ratings and watched files carry no dates at all. None of yours came through with one, so there is nothing to chart here yet.")
-                .font(.footnote).foregroundColor(.mkMuted)
         }
     }
 
@@ -312,33 +304,16 @@ struct AnalyticsView: View {
         }
     }
 
-    private func habitsSection(_ a: AnalyticsResponse) -> some View {
+    private func collectionSection(_ a: AnalyticsResponse) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Habits")
-            if !a.habits.weekday.isEmpty {
-                card {
-                    Chart(a.habits.weekday) { day in
-                        BarMark(x: .value("Day", String(day.day.prefix(3))), y: .value("Films", day.films), width: .fixed(24))
-                            .foregroundStyle(Color.mkAccent)
-                            .cornerRadius(4)
-                    }
-                    .frame(height: 150)
-                }
-                caption("When you actually watch")
+            if !a.collection.mostRewatched.isEmpty || !a.collection.topTags.isEmpty {
+                sectionHeader("Your collection")
             }
-            if let streaks = a.habits.streaks {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                    stat("Longest streak", "\(streaks.longestStreakDays)", detail: "days in a row")
-                    stat("Longest gap", "\(streaks.longestGapDays)", detail: "days off")
-                    stat("Active days", "\(streaks.activeDays)", detail: nil)
-                    stat("Rewatches", "\(a.summary.rewatches)", detail: nil)
-                }
+            if !a.collection.mostRewatched.isEmpty {
+                rankedList("Returned to most", a.collection.mostRewatched.map { ($0.name, "\($0.viewings)x") })
             }
-            if !a.habits.mostRewatched.isEmpty {
-                rankedList("Returned to most", a.habits.mostRewatched.map { ($0.name, "\($0.viewings)×") })
-            }
-            if !a.habits.topTags.isEmpty {
-                chipRow(a.habits.topTags.map { "\($0.tag) · \($0.films)" })
+            if !a.collection.topTags.isEmpty {
+                chipRow(a.collection.topTags.map { "\($0.tag) - \($0.films)" })
             }
         }
     }
@@ -375,21 +350,67 @@ struct AnalyticsView: View {
             }
 
             if !a.people.genres.isEmpty {
-                rankedList("Genres", a.people.genres.map { ($0.name, ratingLabel($0)) })
+                rankedList("Most-watched genres", a.people.genres.map { ($0.name, countAndMean($0)) })
+            }
+            if !a.people.bestRatedGenres.isEmpty {
+                deltaRanked("Genres you rate highest", a.people.bestRatedGenres,
+                            note: "against your own average")
+            }
+            if !a.people.worstRatedGenres.isEmpty {
+                deltaRanked("Genres you rate lowest", a.people.worstRatedGenres, note: nil)
             }
             if !a.people.directors.isEmpty {
-                rankedList("Directors", a.people.directors.map { ($0.name, ratingLabel($0)) })
+                rankedList("Most-watched directors", a.people.directors.map { ($0.name, countAndMean($0)) })
             }
             if !a.people.affinity.isEmpty {
-                rankedList("You love these directors",
-                           a.people.affinity.map { ($0.name, $0.delta.map { d in String(format: "%+.1f", d) } ?? "—") },
-                           note: "mean rating against your own, three films minimum")
+                deltaRanked("Directors you rate highest", a.people.affinity,
+                            note: "three films minimum")
+            }
+            if !a.people.leastFavouriteDirectors.isEmpty {
+                deltaRanked("Directors you rate lowest", a.people.leastFavouriteDirectors, note: nil)
             }
             if !a.people.cast.isEmpty {
-                rankedList("Faces you see most", a.people.cast.map { ($0.name, "\($0.films)") },
+                rankedList("Faces you see most", a.people.cast.map { ($0.name, countAndMean($0)) },
                            note: "top-billed roles only")
             }
+            if !a.people.castAffinity.isEmpty {
+                deltaRanked("Actors you rate highest", a.people.castAffinity, note: "three films minimum")
+            }
         }
+    }
+
+    /// A ranked list whose right-hand column is a signed distance from the
+    /// reader's own mean, with the sign and an arrow carrying direction so the
+    /// row does not depend on colour.
+    private func deltaRanked(_ title: String, _ rows: [PersonStat], note: String?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.mkText)
+                Spacer()
+                if let note { Text(note).font(.caption2).foregroundColor(.mkMuted) }
+            }
+            .padding(.bottom, 8)
+            ForEach(rows) { row in
+                let delta = row.delta ?? 0
+                let up = delta >= 0
+                HStack(spacing: 8) {
+                    Text(row.name).font(.system(size: 14)).foregroundColor(.mkText).lineLimit(1)
+                    Spacer(minLength: 10)
+                    Text("\(row.films) · \(row.meanRating.map { String(format: "%.1f", $0) } ?? "—")★")
+                        .font(.system(size: 12)).foregroundColor(.mkMuted)
+                    Image(systemName: up ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(up ? .green : .orange)
+                    Text(String(format: "%+.1f", delta))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(up ? .green : .orange)
+                }
+                .padding(.vertical, 7)
+                Divider().overlay(Color.mkBorder)
+            }
+        }
+        .padding(14)
+        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: Pieces
@@ -526,7 +547,9 @@ struct AnalyticsView: View {
         rating == rating.rounded() ? "\(Int(rating))★" : String(format: "%.1f★", rating)
     }
 
-    private func ratingLabel(_ stat: PersonStat) -> String {
+    /// "24 · 3.8★" — the count answers how much of a history something is, the
+    /// mean answers how it was received. Neither is much use alone.
+    private func countAndMean(_ stat: PersonStat) -> String {
         guard let mean = stat.meanRating else { return "\(stat.films)" }
         return String(format: "%d · %.1f★", stat.films, mean)
     }

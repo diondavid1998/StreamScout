@@ -112,7 +112,7 @@ test('a user who has never imported gets zeros, not a crash', async () => {
   expect(res.status).toBe(200);
   expect(res.body.summary.films).toBe(0);
   expect(res.body.summary.meanRating).toBeNull();
-  expect(res.body.habits.hasDates).toBe(false);
+  expect(res.body.collection.mostRewatched).toEqual([]);
   expect(res.body.coverage).toMatchObject({ films: 0, pending: 0 });
 });
 
@@ -155,18 +155,20 @@ describe('analytics from the CSVs alone', () => {
     expect(body.eras.lagYearsMedian).toBeGreaterThan(0);
   });
 
-  test('derives habits from watched dates', async () => {
+  test('keeps tags and rewatches, which need no watch date', async () => {
     const { body } = await auth(request(app).get('/analytics'));
-    expect(body.habits.hasDates).toBe(true);
-    // 5 Jan 2026 is a Monday, 6 Jan a Tuesday, 7 Jan a Wednesday — and 2 Mar is
-    // exactly eight weeks after 5 Jan, so it lands on a Monday too.
-    const weekday = Object.fromEntries(body.habits.weekday.map((w) => [w.day, w.films]));
-    expect(weekday.Monday).toBe(2);
-    expect(weekday.Tuesday).toBe(1);
-    expect(weekday.Wednesday).toBe(1);
-    expect(body.habits.streaks.longestStreakDays).toBe(3);
-    expect(body.habits.mostRewatched[0]).toMatchObject({ name: 'Dune: Part Two', viewings: 2 });
-    expect(body.habits.topTags.map((t) => t.tag).sort()).toEqual(['epic', 'imax']);
+    expect(body.collection.mostRewatched[0]).toMatchObject({ name: 'Dune: Part Two', viewings: 2 });
+    expect(body.collection.topTags.map((t) => t.tag).sort()).toEqual(['epic', 'imax']);
+  });
+
+  test('reports no day-frequency stats at all', async () => {
+    // Letterboxd stamps a watch date only on logged or reviewed films, and the
+    // Date column on everything else is when the row was entered — a bulk
+    // rating session puts 161 films on one day. Anything counting films per day
+    // would be describing data entry, so none of it is computed.
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(body.habits).toBeUndefined();
+    expect(JSON.stringify(body)).not.toMatch(/busiestDay|longestStreak|weekday|byMonth|calendar/);
   });
 
   test('says how much is unresolved instead of silently omitting it', async () => {
@@ -176,11 +178,12 @@ describe('analytics from the CSVs alone', () => {
     expect(body.people.directors).toEqual([]);
   });
 
-  test('a date range narrows the diary', async () => {
-    const { body } = await auth(request(app).get('/analytics?from=2026-02-01&to=2026-12-31'));
-    // Only the March rewatch has a date inside the window; undated films stay,
-    // because excluding them would silently drop the rating histogram.
-    expect(body.habits.byMonth).toEqual([{ month: '2026-03', films: 1 }]);
+  test('a date range is ignored rather than half-applied', async () => {
+    // It used to filter on watched_on while keeping undated rows, so a range
+    // answered with the whole history plus a filter's worth of confusion.
+    const ranged = await auth(request(app).get('/analytics?from=2026-02-01&to=2026-12-31'));
+    const plain = await auth(request(app).get('/analytics'));
+    expect(ranged.body.summary).toEqual(plain.body.summary);
   });
 });
 
@@ -215,6 +218,11 @@ describe('resolving genres and people', () => {
     expect(body.people.genres[0]).toMatchObject({ name: 'Science Fiction', films: 5 });
     expect(body.people.directors[0]).toMatchObject({ name: 'Denis Villeneuve', films: 5 });
     expect(body.summary.runtimeMinutes).toBe(720);
+    // Every list carries a mean and a distance from the reader's own average —
+    // the count alone answers the less interesting half of the question.
+    expect(body.people.directors[0].meanRating).not.toBeNull();
+    expect(body.people.directors[0].delta).not.toBeNull();
+    expect(body.people.cast[0]).toMatchObject({ name: 'An Actor', films: 5 });
   });
 
   test('a film TMDB cannot find is not retried forever', async () => {
@@ -295,8 +303,7 @@ describe('an export with no diary.csv', () => {
     expect(res.body.hasDiary).toBe(true);
 
     const { body } = await auth(request(app).get('/analytics'));
-    expect(body.habits.hasDates).toBe(true);
-    expect(body.habits.topTags).toEqual([{ tag: 'imax', films: 1 }]);
+    expect(body.collection.topTags).toEqual([{ tag: 'imax', films: 1 }]);
     // A review body spanning five lines with a blank line in the middle is one
     // record, not five broken ones.
     expect(body.summary.films).toBe(4);
@@ -316,4 +323,25 @@ describe('an export with no diary.csv', () => {
       .send({ files: [{ name: 'af56586c-ratings.csv', text: RATINGS_ONLY }] });
     expect(res.body.files[0].kind).toBe('ratings');
   });
+});
+
+test('a rewatch flagged on a single row still counts as a rewatch', async () => {
+  // Without a diary.csv a rewatched film has one row carrying Rewatch=Yes,
+  // not two rows. Counting rows alone reported zero rewatched films on an
+  // export whose own summary said five.
+  const reviews = [
+    'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date',
+    '2026-01-05,Nosferatu,2024,https://boxd.it/a,3.5,Yes,Seen it before,,2026-01-04',
+  ].join('\n');
+
+  const res = await auth(request(app).post('/letterboxd/diary')).send({
+    files: [{ name: 'reviews.csv', text: reviews }],
+  });
+  expect(res.body.rewatches).toBe(1);
+
+  const { body } = await auth(request(app).get('/analytics'));
+  expect(body.summary.rewatches).toBe(1);
+  expect(body.collection.mostRewatched).toEqual([
+    { name: 'Nosferatu', year: 2024, viewings: 2 },
+  ]);
 });

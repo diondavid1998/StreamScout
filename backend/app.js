@@ -806,11 +806,13 @@ function createApp(db, { disableRateLimit = false } = {}) {
     res.json({ success: true, ...parsed.stats, files: parsed.files });
   });
 
+  // No date range. It filtered on watched_on while keeping undated rows, so
+  // "2024 in review" would have answered with every undated film in the history
+  // alongside the 2024 ones — and on a real export all but a few dozen films are
+  // undated. A filter that silently keeps almost everything is worse than none.
   app.get('/analytics', authenticateToken, async (req, res) => {
-    const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : null;
-    const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : null;
     try {
-      res.json(await computeAnalytics(db, req.user.id, { from, to }));
+      res.json(await computeAnalytics(db, req.user.id));
     } catch (e) {
       console.error('[analytics] failed:', e.message);
       res.status(500).json({ error: 'Could not build your analytics', details: e.message });

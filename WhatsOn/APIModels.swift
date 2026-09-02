@@ -367,18 +367,6 @@ struct AnalyticsEras: Decodable {
     let languages: [LanguageBucket]
 }
 
-struct MonthBucket: Decodable, Identifiable {
-    var id: String { month }
-    let month: String
-    let films: Int
-}
-
-struct WeekdayBucket: Decodable, Identifiable {
-    var id: String { day }
-    let day: String
-    let films: Int
-}
-
 struct TagBucket: Decodable, Identifiable {
     var id: String { tag }
     let tag: String
@@ -392,17 +380,8 @@ struct RewatchedFilm: Decodable, Identifiable {
     let viewings: Int
 }
 
-struct AnalyticsStreaks: Decodable {
-    let longestStreakDays: Int
-    let longestGapDays: Int
-    let activeDays: Int
-}
-
-struct AnalyticsHabits: Decodable {
-    let hasDates: Bool
-    let byMonth: [MonthBucket]
-    let weekday: [WeekdayBucket]
-    let streaks: AnalyticsStreaks?
+/// Tags and rewatches — the two things that survive without a watch date.
+struct AnalyticsCollection: Decodable {
     let topTags: [TagBucket]
     let mostRewatched: [RewatchedFilm]
 }
@@ -423,7 +402,10 @@ struct AnalyticsPeople: Decodable {
     let directors: [PersonStat]
     let cast: [PersonStat]
     let affinity: [PersonStat]
-    let blindSpots: [PersonStat]
+    let leastFavouriteDirectors: [PersonStat]
+    let castAffinity: [PersonStat]
+    let bestRatedGenres: [PersonStat]
+    let worstRatedGenres: [PersonStat]
 }
 
 struct AnalyticsResponse: Decodable {
@@ -431,7 +413,7 @@ struct AnalyticsResponse: Decodable {
     let summary: AnalyticsSummary
     let rating: AnalyticsRating
     let eras: AnalyticsEras
-    let habits: AnalyticsHabits
+    let collection: AnalyticsCollection
     let people: AnalyticsPeople
 }
 

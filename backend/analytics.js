@@ -8,7 +8,7 @@
  * 1. **The CSVs are the source of truth.** Ratings, dates, rewatches, tags and
  *    release years all come from the files the user uploaded — never from the
  *    app's own watched list, and never from TMDB. Everything in `summary`,
- *    `rating`, `eras` and `habits` is computable the second the import lands,
+ *    `rating`, `eras` and `collection` is computable the second the import lands,
  *    with no network at all.
  *
  * 2. **Genre and people are the one exception, and they are opt-in.** No
@@ -19,9 +19,7 @@
  *    can be honest about a partial answer.
  */
 
-const { weekdayFromDateString, todayInAppZone } = require('./seriesSchedule');
 
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 /** Below this, a mean is an anecdote rather than a preference. */
 const MIN_FILMS_FOR_AFFINITY = 3;
 const TOP_N = 12;
@@ -54,11 +52,6 @@ function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-/** Whole days between two bare dates. */
-function daysBetween(from, to) {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 }
 
 /**
@@ -131,12 +124,7 @@ async function ensureAnalyticsTables(db) {
  * has a rating and a date, and must still count in every section that does not
  * need TMDB.
  */
-async function readDiary(db, userId, { from = null, to = null } = {}) {
-  const clauses = ['e.user_id = ?'];
-  const params = [userId];
-  if (from) { clauses.push('(e.watched_on IS NULL OR e.watched_on >= ?)'); params.push(from); }
-  if (to) { clauses.push('(e.watched_on IS NULL OR e.watched_on <= ?)'); params.push(to); }
-
+async function readDiary(db, userId) {
   const rows = await all(
     db,
     `SELECT e.name, e.year, e.film_key, e.rating, e.watched_on, e.is_rewatch,
@@ -148,8 +136,8 @@ async function readDiary(db, userId, { from = null, to = null } = {}) {
               ON d.media_type = 'movie'
              AND ('movie-' || d.tmdb_id) = e.item_id
        LEFT JOIN title_ratings tr ON tr.imdb_id = d.imdb_id
-      WHERE ${clauses.join(' AND ')}`,
-    params
+      WHERE e.user_id = ?`,
+    [userId]
   );
 
   return rows.map((row) => {
@@ -260,95 +248,108 @@ function buildEras(rows) {
   return { decades, lagYearsMedian: round(median(lags), 1), lagSample: lags.length, languages };
 }
 
-function buildHabits(rows) {
-  const dated = rows.filter((r) => r.watchedOn);
-  if (!dated.length) {
-    return { hasDates: false, byMonth: [], weekday: [], calendar: [], streaks: null, topTags: [], mostRewatched: [] };
-  }
-
-  const byMonth = [...groupBy(dated, (r) => [r.watchedOn.slice(0, 7)]).values()]
-    .map((g) => ({ month: g.key, films: g.rows.length }))
-    .sort((a, b) => a.month.localeCompare(b.month));
-
-  const weekdayCounts = WEEKDAYS.map((day) => ({ day, films: 0 }));
-  for (const row of dated) {
-    const day = weekdayFromDateString(row.watchedOn);
-    const bucket = weekdayCounts.find((w) => w.day === day);
-    if (bucket) bucket.films += 1;
-  }
-
-  const perDay = new Map();
-  for (const row of dated) perDay.set(row.watchedOn, (perDay.get(row.watchedOn) || 0) + 1);
-
-  // The last 365 days, so the calendar is a fixed shape the client can draw
-  // without deciding how far back to go.
-  const today = todayInAppZone();
-  const calendar = [...perDay.entries()]
-    .filter(([date]) => daysBetween(date, today) <= 365 && daysBetween(date, today) >= 0)
-    .map(([date, films]) => ({ date, films }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  const days = [...perDay.keys()].sort();
-  let longestStreak = days.length ? 1 : 0;
-  let currentStreak = days.length ? 1 : 0;
-  let longestGap = 0;
-  for (let i = 1; i < days.length; i++) {
-    const gap = daysBetween(days[i - 1], days[i]);
-    if (gap === 1) { currentStreak += 1; longestStreak = Math.max(longestStreak, currentStreak); }
-    else { currentStreak = 1; longestGap = Math.max(longestGap, gap - 1); }
-  }
-  const busiest = [...perDay.entries()].sort((a, b) => b[1] - a[1])[0];
-
+/**
+ * The two things worth keeping that need no watch date.
+ *
+ * There used to be a habits section here — films per month, a weekday chart, a
+ * calendar heatmap, longest streak, busiest day. It is gone, for two reasons
+ * that point the same way.
+ *
+ * The first is that nobody asked for it: the questions this page exists to
+ * answer are which genres, directors and actors turn up in a history and how
+ * they were rated, and "films watched in a day" is not one of them.
+ *
+ * The second is that it could not have been honest anyway. Letterboxd records a
+ * watch date only on films logged to a diary or reviewed — on a real 1,782-film
+ * export, 47 of them. Everything else carries the date the row was *entered*,
+ * and a bulk rating session puts 161 films on one day. A busiest-day stat built
+ * on that reads "161 films on 13 February", which is a data-entry session
+ * described as a viewing.
+ *
+ * Tags and rewatch counts survive because neither needs a date.
+ */
+function buildCollection(rows) {
   const tagCounts = new Map();
   for (const row of rows) for (const tag of row.tags) tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
 
-  const rewatchCounts = new Map();
+  // A rewatch shows up two different ways depending on the export.
+  //
+  // With a diary, the same film has several rows and counting them is enough.
+  // Without one, the film has a single row carrying Rewatch=Yes — so counting
+  // rows alone reported zero rewatched films on an export whose summary said
+  // five. A flagged row means at least one viewing before it, so the count is
+  // the greater of the two readings.
+  const viewings = new Map();
   for (const row of rows) {
-    const entry = rewatchCounts.get(row.filmKey) || { name: row.name, year: row.year, viewings: 0 };
-    entry.viewings += 1;
-    rewatchCounts.set(row.filmKey, entry);
+    const entry = viewings.get(row.filmKey)
+      || { name: row.name, year: row.year, rows: 0, flagged: 0 };
+    entry.rows += 1;
+    if (row.isRewatch) entry.flagged += 1;
+    viewings.set(row.filmKey, entry);
   }
 
+  const rewatched = [...viewings.values()]
+    .map((f) => ({
+      name: f.name,
+      year: f.year,
+      viewings: Math.max(f.rows, f.flagged + 1),
+    }))
+    .filter((f) => f.viewings > 1);
+
   return {
-    hasDates: true,
-    byMonth,
-    weekday: weekdayCounts,
-    calendar,
-    streaks: {
-      longestStreakDays: longestStreak,
-      longestGapDays: longestGap,
-      busiestDay: busiest ? { date: busiest[0], films: busiest[1] } : null,
-      activeDays: days.length,
-    },
     topTags: [...tagCounts.entries()].map(([tag, films]) => ({ tag, films }))
       .sort((a, b) => b.films - a.films).slice(0, TOP_N),
-    mostRewatched: [...rewatchCounts.values()].filter((f) => f.viewings > 1)
-      .sort((a, b) => b.viewings - a.viewings).slice(0, TOP_N),
+    mostRewatched: rewatched.sort((a, b) => b.viewings - a.viewings).slice(0, TOP_N),
   };
 }
 
+/**
+ * The heart of the page: who and what a history is made of, and how it was
+ * rated.
+ *
+ * Every list here carries a mean alongside its count, because the count on its
+ * own answers the less interesting half of the question — seeing forty thrillers
+ * says something, but rating them half a star below your own average says more.
+ *
+ * `delta` is that comparison made explicit: the group's mean against the
+ * overall mean, so a reader does not have to hold their own average in their
+ * head while scanning a list.
+ */
 function buildPeopleAndGenres(rows, overallMean) {
   const resolved = rows.filter((r) => r.resolved);
-  const genres = rankBy(groupBy(resolved, (r) => r.genres));
-  const directors = rankBy(groupBy(resolved, (r) => r.directors), 1);
-  const cast = rankBy(groupBy(resolved, (r) => r.cast), 1);
 
-  const affinity = directors
-    .filter((d) => d.films >= MIN_FILMS_FOR_AFFINITY && d.meanRating !== null && overallMean !== null)
-    .map((d) => ({ ...d, delta: round(d.meanRating - overallMean) }))
+  const withDelta = (list) => list.map((entry) => ({
+    ...entry,
+    delta: entry.meanRating !== null && overallMean !== null
+      ? round(entry.meanRating - overallMean)
+      : null,
+  }));
+
+  const genres = withDelta(rankBy(groupBy(resolved, (r) => r.genres)));
+  const directors = withDelta(rankBy(groupBy(resolved, (r) => r.directors)));
+  const cast = withDelta(rankBy(groupBy(resolved, (r) => r.cast)));
+
+  // A single film is an anecdote, not a preference — so the "you love this
+  // person" list needs a floor, where the most-watched lists do not.
+  const ranked = (list) => list
+    .filter((d) => d.films >= MIN_FILMS_FOR_AFFINITY && d.delta !== null)
     .sort((a, b) => b.delta - a.delta);
 
-  const blindSpots = directors
-    .filter((d) => d.films === 1 && d.meanRating !== null)
-    .sort((a, b) => b.meanRating - a.meanRating)
-    .slice(0, TOP_N);
+  const directorAffinity = ranked(directors);
+  const castAffinity = ranked(cast);
+  const genreRanked = genres.filter((g) => g.delta !== null).sort((a, b) => b.delta - a.delta);
 
   return {
     genres: genres.slice(0, TOP_N),
     directors: directors.slice(0, TOP_N),
     cast: cast.slice(0, TOP_N),
-    affinity: affinity.slice(0, TOP_N),
-    blindSpots,
+    // Best and worst treated, from the same ranking, so the two ends are
+    // guaranteed to be measured the same way.
+    affinity: directorAffinity.slice(0, TOP_N),
+    leastFavouriteDirectors: directorAffinity.slice(-TOP_N).reverse(),
+    castAffinity: castAffinity.slice(0, TOP_N),
+    bestRatedGenres: genreRanked.slice(0, TOP_N),
+    worstRatedGenres: genreRanked.slice(-TOP_N).reverse(),
   };
 }
 
@@ -356,8 +357,8 @@ function buildPeopleAndGenres(rows, overallMean) {
  * The whole payload. `coverage` comes first because the page has to be able to
  * say what it has not resolved yet rather than quietly under-reporting.
  */
-async function computeAnalytics(db, userId, range = {}) {
-  const rows = await readDiary(db, userId, range);
+async function computeAnalytics(db, userId) {
+  const rows = await readDiary(db, userId);
   const films = new Set(rows.map((r) => r.filmKey));
   const resolvedFilms = new Set(rows.filter((r) => r.resolved).map((r) => r.filmKey));
   const summary = buildSummary(rows);
@@ -374,7 +375,7 @@ async function computeAnalytics(db, userId, range = {}) {
     summary,
     rating: buildRating(rows),
     eras: buildEras(rows),
-    habits: buildHabits(rows),
+    collection: buildCollection(rows),
     people: buildPeopleAndGenres(rows, overallMean),
   };
 }
@@ -386,7 +387,7 @@ module.exports = {
   buildSummary,
   buildRating,
   buildEras,
-  buildHabits,
+  buildCollection,
   buildPeopleAndGenres,
   MIN_FILMS_FOR_AFFINITY,
 };
