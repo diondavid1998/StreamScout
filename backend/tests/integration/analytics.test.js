@@ -105,6 +105,17 @@ describe('importing an export', () => {
   });
 });
 
+test('a user who has never imported gets zeros, not a crash', async () => {
+  // The first-run path: the iOS screen decides between its empty state and the
+  // charts on summary.films, so this has to answer rather than 500.
+  const res = await auth(request(app).get('/analytics'));
+  expect(res.status).toBe(200);
+  expect(res.body.summary.films).toBe(0);
+  expect(res.body.summary.meanRating).toBeNull();
+  expect(res.body.habits.hasDates).toBe(false);
+  expect(res.body.coverage).toMatchObject({ films: 0, pending: 0 });
+});
+
 describe('analytics from the CSVs alone', () => {
   beforeEach(async () => {
     await auth(request(app).post('/letterboxd/diary')).send({ files: EXPORT_FILES });
