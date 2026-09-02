@@ -752,6 +752,64 @@ function createApp(db, { disableRateLimit = false } = {}) {
     );
   });
 
+  /**
+   * Fill in `item_id` for diary rows whose film is already known.
+   *
+   * `title_lookup_cache` is shared across every user and never expires for a
+   * hit, so a film someone has resolved once never needs resolving again — but
+   * an import writes fresh rows with a NULL `item_id`, which made every
+   * re-upload look like a full backfill. Re-uploading a 1,782-film export
+   * reported 1,782 films to look up when only the handful added since the last
+   * export were actually unknown.
+   *
+   * The cost was never TMDB calls — those were already served from cache — it
+   * was thirty round trips of pure database work and a progress bar implying
+   * the whole history was being fetched again.
+   *
+   * Pure SQL, no network. Safe to call as often as you like.
+   */
+  async function adoptCachedResolutions(db, userId) {
+    const unresolved = await getRows(
+      db,
+      `SELECT DISTINCT film_key, name, year FROM letterboxd_entries
+        WHERE user_id = ? AND item_id IS NULL`,
+      [userId]
+    );
+    if (!unresolved.length) return 0;
+
+    // film_key and the lookup key are built by different functions, so the two
+    // are mapped here rather than joined on in SQL.
+    const byLookupKey = new Map();
+    for (const row of unresolved) byLookupKey.set(lookupKeyFor(row.name, row.year), row.film_key);
+
+    const keys = [...byLookupKey.keys()];
+    const known = [];
+    // SQLite's default parameter ceiling is 999; a large history needs chunking.
+    for (let i = 0; i < keys.length; i += 500) {
+      const chunk = keys.slice(i, i + 500);
+      const rows = await getRows(
+        db,
+        `SELECT lookup_key, item_id FROM title_lookup_cache
+          WHERE lookup_key IN (${chunk.map(() => '?').join(',')})
+            AND item_id IS NOT NULL`,
+        chunk
+      );
+      known.push(...rows);
+    }
+    if (!known.length) return 0;
+
+    await withTransaction(db, async () => {
+      for (const row of known) {
+        await runSql(
+          db,
+          'UPDATE letterboxd_entries SET item_id = ? WHERE user_id = ? AND film_key = ?',
+          [row.item_id, userId, byLookupKey.get(row.lookup_key)]
+        );
+      }
+    });
+    return known.length;
+  }
+
   // ── Letterboxd diary ──────────────────────────────────────────────────────
   //
   // The whole export in one upload. The client hands over every CSV it found;
@@ -803,7 +861,18 @@ function createApp(db, { disableRateLimit = false } = {}) {
       return res.status(500).json({ error: 'Could not save your diary' });
     }
 
-    res.json({ success: true, ...parsed.stats, files: parsed.files });
+    // Before answering, adopt every resolution the shared cache already holds,
+    // so `pending` counts films genuinely new to the service rather than films
+    // new to this row.
+    let adopted = 0;
+    try {
+      adopted = await adoptCachedResolutions(db, req.user.id);
+    } catch (e) {
+      // Not fatal: the resolve step would pick these up anyway, just slower.
+      console.warn('[letterboxd] could not adopt cached resolutions:', e.message);
+    }
+
+    res.json({ success: true, ...parsed.stats, alreadyKnown: adopted, files: parsed.files });
   });
 
   // No date range. It filtered on watched_on while keeping undated rows, so
@@ -830,6 +899,9 @@ function createApp(db, { disableRateLimit = false } = {}) {
   app.post('/analytics/resolve', catalogLimiter, authenticateToken, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 60, 1), 200);
     try {
+      // Another user may have resolved some of these since the import.
+      await adoptCachedResolutions(db, req.user.id);
+
       const pendingRows = await getRows(
         db,
         `SELECT film_key, name, year FROM letterboxd_entries
