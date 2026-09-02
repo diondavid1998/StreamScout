@@ -14,7 +14,17 @@ const db = new sqlite3.Database(process.env.DB_PATH || './db.sqlite', (err) => {
   }
 });
 
-// Bootstrap schema
+// Bootstrap schema.
+//
+// All of this runs inside db.serialize(). node-sqlite3 executes queued
+// statements in parallel by default, so without it the PRAGMA below could read
+// the users table before the CREATE above had finished. It then saw no columns,
+// ran every migration, and ALTERing in `languages` — which the CREATE already
+// added — threw `duplicate column name`. That surfaces as an unhandled 'error'
+// event on the statement, which takes the process down: roughly one in four
+// first boots died. The runs that survived sometimes lost the unique-email
+// index instead, because it was created before the email column existed.
+db.serialize(() => {
 db.run(`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL,
@@ -25,18 +35,24 @@ db.run(`CREATE TABLE IF NOT EXISTS users (
 
 db.all('PRAGMA table_info(users)', [], (err, columns) => {
   if (err || !Array.isArray(columns)) return;
-  if (!columns.some((col) => col.name === 'languages')) {
-    db.run("ALTER TABLE users ADD COLUMN languages TEXT DEFAULT '[]'");
-  }
-  if (!columns.some((col) => col.name === 'email')) {
-    db.run('ALTER TABLE users ADD COLUMN email TEXT');
-  }
-  if (!columns.some((col) => col.name === 'profile_pic')) {
-    db.run('ALTER TABLE users ADD COLUMN profile_pic TEXT');
-  }
-  if (!columns.some((col) => col.name === 'token_version')) {
-    db.run('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
-  }
+  // A second serialize(): this callback fires after the outer one has already
+  // returned, so anything queued here is back in parallel mode. Without it the
+  // unique-email index was created before ALTER TABLE had added the email
+  // column, and 9 of 12 fresh boots lost the index with a logged warning.
+  db.serialize(() => {
+  // Every ALTER carries a callback. A db.run() with no callback emits an
+  // unhandled 'error' event on failure, which is fatal; a bad migration should
+  // be a logged warning, not a crash loop.
+  const addColumn = (name, ddl) => {
+    if (columns.some((col) => col.name === name)) return;
+    db.run(`ALTER TABLE users ADD COLUMN ${ddl}`, (alterErr) => {
+      if (alterErr) console.warn(`Could not add users.${name}: ${alterErr.message}`);
+    });
+  };
+  addColumn('languages', "languages TEXT DEFAULT '[]'");
+  addColumn('email', 'email TEXT');
+  addColumn('profile_pic', 'profile_pic TEXT');
+  addColumn('token_version', 'token_version INTEGER NOT NULL DEFAULT 0');
 
   // Password reset resolves an account by email, so two accounts sharing one
   // address makes that flow ambiguous — it would always reset whichever row
@@ -53,6 +69,7 @@ db.all('PRAGMA table_info(users)', [], (err, columns) => {
       );
     }
   );
+  });
 });
 
 db.run(`CREATE TABLE IF NOT EXISTS watched_items (
@@ -89,6 +106,7 @@ db.run(`CREATE TABLE IF NOT EXISTS reset_tokens (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 )`);
+});
 
 ensureCatalogTables(db).catch((error) => {
   console.error('Failed to initialize catalog cache tables:', error);

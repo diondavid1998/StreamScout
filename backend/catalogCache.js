@@ -1,4 +1,11 @@
-const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails, isOmdbRateLimited, PLATFORM_CONFIG } = require('./movieService');
+const {
+  fetchCatalogByPlatforms,
+  fetchOmdbRatings,
+  fetchTitleDetails,
+  includedProviders,
+  isOmdbRateLimited,
+  PLATFORM_CONFIG,
+} = require('./movieService');
 
 const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24, 1);
 const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
@@ -7,7 +14,9 @@ const DEFAULT_REGION = 'US';
 // Ratings rarely change — keep them indefinitely once fetched.
 // They are only re-fetched when a manual full refresh explicitly requests it.
 // Increment this whenever PLATFORM_CONFIG provider IDs change so stale caches are invalidated
-const PROVIDER_CONFIG_VERSION = 2;
+// Bumped when availability semantics change so stale snapshots are dropped:
+// v3 added free and ad-supported tiers alongside flatrate.
+const PROVIDER_CONFIG_VERSION = 3;
 const syncLocks = new Map();
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
@@ -1237,11 +1246,15 @@ function buildProviderLookupMap(platforms) {
 
 // Extract provider names+keys from a TMDB watch/providers response.
 function extractAvailability(watchProviders, providerMap, region) {
-  const flatrate = watchProviders?.results?.[region]?.flatrate || [];
+  // Subscription, free and ad-supported alike — see INCLUDED_MONETIZATION in
+  // movieService. Reading only `flatrate` here is why a watchlist title on Tubi
+  // or Pluto came back with an empty availableOn even after the discover query
+  // had found it.
+  const offers = includedProviders(watchProviders, region);
   const seen = new Set();
   const names = [];
   const keys = [];
-  for (const p of flatrate) {
+  for (const p of offers) {
     const entry = providerMap.get(p.provider_id);
     if (entry && !seen.has(entry.key)) {
       seen.add(entry.key);

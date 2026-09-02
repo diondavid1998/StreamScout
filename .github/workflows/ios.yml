@@ -1,0 +1,92 @@
+name: iOS
+
+# Nothing under WhatsOn/ is compiled in the environment this project is edited
+# from — there is no macOS toolchain there. This runs the real compiler on an
+# Apple runner. Simulator destinations need no signing identity, so no secrets.
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The app targets iOS 26 and uses Liquid Glass APIs. macos-15 ships Xcode
+      # 16.4 / iOS 18.5, where every glassEffect call fails to resolve and the
+      # inference cascade buries anything real, so the image and the Xcode both
+      # matter. Pick the newest explicitly rather than trusting the default.
+      - name: Select Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          NEWEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i "ios" || true
+          xcrun simctl list runtimes || true
+
+      # The gate that actually answers "does this code compile". A generic
+      # destination needs no simulator instance, so it cannot be blocked by the
+      # runner having no runtimes installed — which is what stopped the previous
+      # attempt, where -showdestinations returned only placeholders.
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project WhatsOn.xcodeproj \
+            -scheme WhatsOn \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            | tee build.log
+
+      # Tests need a real simulator. If the image has no iOS runtime this is
+      # reported and skipped rather than failing the build we just proved good.
+      - name: Find or create a simulator
+        id: sim
+        continue-on-error: true
+        run: |
+          RUNTIME=$(xcrun simctl list runtimes -j | grep -o '"identifier"[^,]*iOS[^,"]*' | sed 's/.*"\(com[^"]*\)".*/\1/' | tail -1)
+          if [ -z "$RUNTIME" ]; then
+            echo "No iOS simulator runtime on this image — skipping tests."
+            exit 1
+          fi
+          echo "Runtime: $RUNTIME"
+          UDID=$(xcrun simctl create ci-iphone "com.apple.CoreSimulator.SimDeviceType.iPhone-16" "$RUNTIME" 2>/dev/null \
+                 || xcrun simctl list devices available | grep -m1 -o '[0-9A-F-]\{36\}')
+          [ -n "$UDID" ] || { echo "Could not obtain a simulator."; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        if: steps.sim.outcome == 'success'
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project WhatsOn.xcodeproj \
+            -scheme WhatsOn \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            | tee test.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-results
+          path: |
+            build.log
+            test.log
+            TestResults.xcresult
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1398,24 +1398,39 @@ struct MovieCardView: View {
     }
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(alignment: .top, spacing: 12) {
-                posterView
-                infoColumn
-            }
-            .padding(12)
-            // Content layer: opaque and identical card to card. Liquid Glass is
-            // reserved for the floating layer (tab bar, filter rail, toolbar), so
-            // that layer reads as floating instead of blending into the feed.
-            .background(Color.mkCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(alignment: .top) { edgeTint }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.mkBorder, lineWidth: 1)
-            )
+        // A tap gesture on the container rather than a Button wrapping it all.
+        //
+        // The card's content now holds two horizontal ScrollViews — the service
+        // bar and the score strip — plus the two toggle buttons. Nesting
+        // scrollable and tappable children inside a Button's label makes the
+        // outer Button and the inner gestures compete for the same touch, and
+        // the card's own tap is the one that loses. A contentShape plus
+        // onTapGesture keeps the whole card hittable while letting the real
+        // Buttons inside it win their own taps and the scroll views keep their
+        // drags.
+        HStack(alignment: .top, spacing: 12) {
+            posterView
+            infoColumn
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        // Content layer: opaque and identical card to card. Liquid Glass is
+        // reserved for the floating layer (tab bar, filter rail, toolbar), so
+        // that layer reads as floating instead of blending into the feed.
+        .background(Color.mkCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(alignment: .top) { edgeTint }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.mkBorder, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onTapGesture(perform: onTap)
+        // Dropping the Button drops its accessibility traits with it, so put
+        // them back explicitly.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(movie.title)
+        .accessibilityHint("Opens details")
         // Seed from cache synchronously (no flicker on re-render after first load)
         .onAppear {
             if let urlString = movie.posterUrl {

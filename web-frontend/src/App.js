@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenTomatoesType } from './utils';
+import MovieCard from './MovieCard';
 import whatsOnLogo from './logos/whatson.png';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend-production.up.railway.app';
@@ -35,7 +36,7 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     background:
-      'radial-gradient(ellipse at 18% 0%, rgba(233,69,96,0.14) 0%, transparent 46%),' +
+      'radial-gradient(ellipse at 18% 0%, rgba(140,123,255,0.14) 0%, transparent 46%),' +
       'radial-gradient(ellipse at 84% 95%, rgba(80,108,220,0.09) 0%, transparent 46%),' +
       'linear-gradient(180deg, #0b0c11 0%, #0e1019 100%)',
     color: '#eef0f7',
@@ -83,7 +84,7 @@ const styles = {
     minWidth: 0,
   },
   eyebrow: {
-    color: '#e94560',
+    color: '#8C7BFF',
     fontSize: 11,
     fontWeight: 800,
     letterSpacing: '0.22em',
@@ -135,14 +136,14 @@ const styles = {
     margin: '12px 0 0',
     borderRadius: 14,
     border: 'none',
-    background: 'linear-gradient(135deg, #e94560 0%, #c8304a 100%)',
+    background: 'linear-gradient(135deg, #6D5BE8 0%, #5F4DD6 100%)',
     color: '#fff',
     fontWeight: 700,
     fontSize: 16,
     cursor: 'pointer',
     fontFamily: 'inherit',
     letterSpacing: '-0.01em',
-    boxShadow: '0 8px 24px rgba(233,69,96,0.32), inset 0 1px 0 rgba(255,255,255,0.12)',
+    boxShadow: '0 8px 24px rgba(140,123,255,0.32), inset 0 1px 0 rgba(255,255,255,0.12)',
     transition: 'opacity 0.2s ease, transform 0.2s ease',
   },
   buttonSecondary: {
@@ -171,22 +172,22 @@ const styles = {
     background: 'none',
     border: 'none',
     padding: 0,
-    color: '#e94560',
+    color: '#8C7BFF',
     font: 'inherit',
     cursor: 'pointer',
     fontWeight: 600,
   },
   error: {
     width: '100%',
-    background: 'rgba(233,69,96,0.1)',
-    color: '#ff8fa3',
+    background: 'rgba(140,123,255,0.1)',
+    color: '#B7ADFF',
     marginTop: 16,
     borderRadius: 12,
     padding: '12px 16px',
     fontWeight: 600,
     fontSize: 14,
     boxSizing: 'border-box',
-    border: '1px solid rgba(233,69,96,0.2)',
+    border: '1px solid rgba(140,123,255,0.2)',
   },
   info: {
     width: '100%',
@@ -319,9 +320,9 @@ const styles = {
     gap: 8,
   },
   platformCardSelected: {
-    border: '1.5px solid rgba(233,69,96,0.65)',
-    background: 'linear-gradient(160deg, rgba(233,69,96,0.14) 0%, rgba(180,30,54,0.09) 100%)',
-    boxShadow: '0 8px 28px rgba(233,69,96,0.22), inset 0 1px 0 rgba(255,255,255,0.07)',
+    border: '1.5px solid rgba(140,123,255,0.65)',
+    background: 'linear-gradient(160deg, rgba(140,123,255,0.14) 0%, rgba(95,77,214,0.09) 100%)',
+    boxShadow: '0 8px 28px rgba(140,123,255,0.22), inset 0 1px 0 rgba(255,255,255,0.07)',
   },
   platformLabel: {
     textAlign: 'center',
@@ -395,9 +396,9 @@ const styles = {
     marginBottom: 10,
   },
   clearListButton: {
-    background: 'rgba(233,69,96,0.1)',
-    border: '1px solid rgba(233,69,96,0.3)',
-    color: '#ff8fa3',
+    background: 'rgba(140,123,255,0.1)',
+    border: '1px solid rgba(140,123,255,0.3)',
+    color: '#B7ADFF',
     borderRadius: 8,
     padding: '6px 12px',
     fontSize: 12,
@@ -518,9 +519,9 @@ const styles = {
     letterSpacing: '0.02em',
   },
   chipAccent: {
-    background: 'rgba(233,69,96,0.17)',
-    color: '#ff8fa3',
-    border: '1px solid rgba(233,69,96,0.25)',
+    background: 'rgba(140,123,255,0.17)',
+    color: '#B7ADFF',
+    border: '1px solid rgba(140,123,255,0.25)',
   },
   chipTV: {
     background: 'rgba(94,166,255,0.17)',
@@ -559,9 +560,9 @@ const styles = {
     transition: 'all 0.18s ease',
   },
   serviceFilterButtonActive: {
-    background: 'rgba(233,69,96,0.17)',
-    border: '1px solid rgba(233,69,96,0.4)',
-    color: '#ff8fa3',
+    background: 'rgba(140,123,255,0.17)',
+    border: '1px solid rgba(140,123,255,0.4)',
+    color: '#B7ADFF',
   },
   genreFilterButtonActive: {
     background: 'rgba(142,96,255,0.2)',
@@ -658,7 +659,7 @@ const styles = {
   },
   movieDate: {
     fontSize: 12,
-    color: '#e94560',
+    color: '#8C7BFF',
     fontWeight: 600,
   },
   emptyState: {
@@ -703,8 +704,8 @@ const styles = {
     transition: 'all 0.18s ease',
   },
   pageButtonActive: {
-    background: 'linear-gradient(135deg, rgba(233,69,96,0.26), rgba(200,48,74,0.3))',
-    border: '1px solid rgba(233,69,96,0.48)',
+    background: 'linear-gradient(135deg, rgba(140,123,255,0.26), rgba(200,48,74,0.3))',
+    border: '1px solid rgba(140,123,255,0.48)',
     color: '#fff',
   },
   // ── Rating chip color variants ─────────────────────────────────────────────
@@ -751,7 +752,7 @@ const styles = {
   // ── Settings tabs ─────────────────────────────────────────────────────────
   settingsTabRow: { display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid rgba(255,255,255,0.08)', width: '100%' },
   settingsTabBtn: { padding: '10px 18px', background: 'none', border: 'none', color: '#6e7a93', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', borderBottom: '2px solid transparent', marginBottom: -1, transition: 'color 0.18s' },
-  settingsTabBtnActive: { color: '#e94560', borderBottomColor: '#e94560' },
+  settingsTabBtnActive: { color: '#8C7BFF', borderBottomColor: '#8C7BFF' },
   // ── Watched button on card ────────────────────────────────────────────────
   // Placement comes from the cardActions row this sits in, not from the button.
   watchedBtn: { background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 999, width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#8a93a8', transition: 'all 0.18s ease', padding: 0, flexShrink: 0 },
@@ -760,7 +761,7 @@ const styles = {
   watchlistRow: { display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' },
   watchlistPoster: { width: 40, height: 58, borderRadius: 8, objectFit: 'cover', background: 'rgba(255,255,255,0.05)', flexShrink: 0 },
   // ── Profile avatar ────────────────────────────────────────────────────────
-  avatarCircle: { width: 80, height: 80, borderRadius: 999, background: 'rgba(233,69,96,0.15)', border: '2px solid rgba(233,69,96,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: '#e94560', overflow: 'hidden', flexShrink: 0 },
+  avatarCircle: { width: 80, height: 80, borderRadius: 999, background: 'rgba(140,123,255,0.15)', border: '2px solid rgba(140,123,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: '#8C7BFF', overflow: 'hidden', flexShrink: 0 },
   // ── Year range inputs ─────────────────────────────────────────────────────
   yearRangeRow: { display: 'flex', gap: 10, alignItems: 'center' },
   yearRangeWrap: { padding: '4px 0 8px' },
@@ -812,6 +813,80 @@ const streamingPlatforms = [
 ];
 
 /** First letters of a service name, for tiles with no logo asset. */
+// Module scope, not component scope: MovieCard is memoized, and a helper
+// re-created on every render would change identity every time and defeat it.
+// All three are pure — they read only `styles`, `ratingLogos` and imports.
+const getRottenTomatoesCriticsLogo = (item) => {
+  const type = getRottenTomatoesType(parsePercent(item?.ratings?.rottenTomatoes), item?.mediaType);
+  if (!type) return null;
+  if (type === 'rotten') return ratingLogos.rtRotten;
+  if (type === 'certified') return ratingLogos.rtMovieCertified;
+  if (type === 'fresh-movie') return ratingLogos.rtMovieFresh;
+  return ratingLogos.rtTvFresh;
+};
+
+const getRatingChipStyle = (key, value) => {
+  if (key === 'imdb') return styles.ratingChipImdb;
+  if (key === 'tmdb') return styles.ratingChipTMDb;
+  if (key === 'rottenTomatoes') {
+    const pct = parsePercent(value);
+    return (pct !== null && pct >= 60) ? styles.ratingChipRT : styles.ratingChipRTRotten;
+  }
+  if (key === 'metacritic') {
+    const num = parseInt(value);
+    if (!isNaN(num)) {
+      if (num >= 61) return styles.ratingChipMC;
+      if (num >= 40) return styles.ratingChipMCMid;
+      return styles.ratingChipMCLow;
+    }
+  }
+  return {};
+};
+const getRatingVisual = (item, key) => {
+  if (key === 'tmdb') {
+    return ratingLogos.tmdb;
+  }
+
+  if (key === 'imdb') {
+    return ratingLogos.imdb;
+  }
+
+  if (key === 'rottenTomatoes') {
+    return getRottenTomatoesCriticsLogo(item);
+  }
+
+  if (key === 'metacritic') {
+    return ratingLogos.metacritic;
+  }
+
+  return null;
+};
+const formatMediaType = (value) => {
+  if (value === 'documentary') {
+    return 'Documentary';
+  }
+
+  if (value === 'tv') {
+    return 'TV';
+  }
+
+  if (value === 'movie') {
+    return 'Movie';
+  }
+
+  return value;
+};
+
+/** "Updated today at 14:32" / "Updated 12 Aug" — no seconds, no noise. */
+function formatUpdatedAt(iso) {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return '';
+  const sameDay = then.toDateString() === new Date().toDateString();
+  return sameDay
+    ? `today at ${then.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : then.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
 function platformMonogram(name) {
   const words = String(name).split(/[\s+]+/).filter(Boolean);
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
@@ -866,11 +941,20 @@ function App() {
   const [loadingReset, setLoadingReset] = useState(false);
   const [mediaTypeFilter, setMediaTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState('popularity');
-  const [isBypassMode, setIsBypassMode] = useState(false);
   const [serviceFilters, setServiceFilters] = useState([]);
   const [languageFilters, setLanguageFilters] = useState([]);
   const [genreFilters, setGenreFilters] = useState([]);
   const [catalogPage, setCatalogPage] = useState(1);
+
+  // Clicking Next kept the scroll position, so you landed on the *end* of the
+  // new page and had to scroll up to read it. Jump back to the top of the
+  // results whenever the page changes — but not on first mount, which would
+  // yank a fresh visitor down past the header.
+  const didPageRef = useRef(false);
+  useEffect(() => {
+    if (!didPageRef.current) { didPageRef.current = true; return; }
+    resultsTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [catalogPage]);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showIosTip, setShowIosTip] = useState(false);
   const [platformSaveKey, setPlatformSaveKey] = useState(0);
@@ -911,6 +995,12 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const abortRef = useRef(null);
+  const resultsTopRef = useRef(null);
+  const tokenRef = useRef(token);
+  const watchedIdsRef = useRef(watchedIds);
+  const watchlistIdsRef = useRef(watchlistIds);
+  const modalRef = useRef(null);
+  const modalOpenerRef = useRef(null);
   // Read inside runSearch to discard responses for a query the user has
   // already typed past — a ref, so the callback identity stays stable.
   const searchQueryRef = useRef('');
@@ -928,6 +1018,44 @@ function App() {
     setInfo('');
   };
 
+  useEffect(() => { tokenRef.current = token; }, [token]);
+  useEffect(() => { watchedIdsRef.current = watchedIds; }, [watchedIds]);
+  useEffect(() => { watchlistIdsRef.current = watchlistIds; }, [watchlistIds]);
+
+  const closeDetail = useCallback(() => {
+    setSelectedMovie(null);
+    setMovieDetails(null);
+    // Hand focus back to whatever opened the dialog, or a keyboard user is
+    // dumped at the top of the document with no idea where they were.
+    modalOpenerRef.current?.focus?.();
+    modalOpenerRef.current = null;
+  }, []);
+
+  // Escape closes, and Tab is kept inside the dialog. Neither worked before:
+  // the modal was a plain div with no role, so assistive tech never announced
+  // it and focus stayed on the page behind.
+  // The page behind kept scrolling under the open dialog.
+  useEffect(() => {
+    if (!selectedMovie) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    modalRef.current?.focus();
+    return () => { document.body.style.overflow = previous; };
+  }, [selectedMovie]);
+
+  const onModalKeyDown = useCallback((event) => {
+    if (event.key === 'Escape') { event.stopPropagation(); closeDetail(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = modalRef.current?.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable || !focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }, [closeDetail]);
+
   const clearSession = () => {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     localStorage.removeItem(AUTH_USERNAME_KEY);
@@ -939,7 +1067,6 @@ function App() {
     setLanguages([]);
     setShowSettings(false);
     setPassword('');
-    setIsBypassMode(false);
     setServiceFilters([]);
     setLanguageFilters([]);
     setCatalogPage(1);
@@ -996,12 +1123,13 @@ function App() {
     }
   };
 
-  const apiFetch = async (path, options = {}) => {
+  const apiFetch = useCallback(async (path, options = {}) => {
+    const jwt = tokenRef.current;
     const response = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers: {
         ...(options.headers || {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
       },
     });
 
@@ -1011,7 +1139,7 @@ function App() {
     }
 
     return response;
-  };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPlatforms = async (jwt) => {
     const response = await fetch(`${API_BASE}/platforms`, {
@@ -1020,19 +1148,20 @@ function App() {
 
     if (response.status === 401 || response.status === 403) {
       logout('Your session expired. Sign in again.');
-      return false;
+      return { ok: false, platforms: [] };
     }
 
     const data = await parseResponseBody(response);
 
     if (!response.ok) {
       setError(buildApiErrorMessage(data, 'Failed to load your streaming platforms.'));
-      return false;
+      return { ok: false, platforms: [] };
     }
 
-    setSelected(Array.isArray(data.platforms) ? data.platforms : []);
+    const platforms = Array.isArray(data.platforms) ? data.platforms : [];
+    setSelected(platforms);
     setLanguages(Array.isArray(data.languages) ? data.languages : []);
-    return true;
+    return { ok: true, platforms };
   };
 
   const loadWatched = useCallback(async () => {
@@ -1069,9 +1198,9 @@ function App() {
     } catch { /* silent */ }
   };
 
-  const toggleWatchlist = async (movie) => {
+  const toggleWatchlist = useCallback(async (movie) => {
     const itemId = movie.id;
-    const isWatchlisted = watchlistIds.has(itemId);
+    const isWatchlisted = watchlistIdsRef.current.has(itemId);
     // Optimistic: the control reflects the change immediately and is reverted
     // if the request fails, so a slow network never looks like a dead button.
     setWatchlistIds((prev) => {
@@ -1109,7 +1238,7 @@ function App() {
         setError('Could not update your watchlist. Try again.');
       }
     }
-  };
+  }, [apiFetch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Empty one of the saved lists. Guarded by a confirm because there is no undo
@@ -1270,9 +1399,9 @@ function App() {
     setLbxDone(`✓ Imported ${totalMatched} of ${allItems.length} movies${totalNotFound > 0 ? ` (${totalNotFound} not found)` : ''}`);
   };
 
-  const toggleWatched = async (movie) => {
+  const toggleWatched = useCallback(async (movie) => {
     const itemId = movie.id;
-    const isWatched = watchedIds.has(itemId);
+    const isWatched = watchedIdsRef.current.has(itemId);
     if (isWatched) {
       try {
         await apiFetch(`/watched/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
@@ -1293,9 +1422,10 @@ function App() {
         }
       } catch { /* silent */ }
     }
-  };
+  }, [apiFetch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchMovieDetails = async (movie) => {
+  const fetchMovieDetails = useCallback(async (movie, openedBy) => {
+    modalOpenerRef.current = openedBy || document.activeElement;
     setSelectedMovie(movie);
     setMovieDetails(null);
     setLoadingDetails(true);
@@ -1307,7 +1437,7 @@ function App() {
       }
     } catch { /* silent */ }
     setLoadingDetails(false);
-  };
+  }, [apiFetch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCatalogStatus = async () => {
     try {
@@ -1432,35 +1562,10 @@ function App() {
     finally { setLoadingReset(false); }
   };
 
-  const getRatingChipStyle = (key, value) => {
-    if (key === 'imdb') return styles.ratingChipImdb;
-    if (key === 'tmdb') return styles.ratingChipTMDb;
-    if (key === 'rottenTomatoes') {
-      const pct = parsePercent(value);
-      return (pct !== null && pct >= 60) ? styles.ratingChipRT : styles.ratingChipRTRotten;
-    }
-    if (key === 'metacritic') {
-      const num = parseInt(value);
-      if (!isNaN(num)) {
-        if (num >= 61) return styles.ratingChipMC;
-        if (num >= 40) return styles.ratingChipMCMid;
-        return styles.ratingChipMCLow;
-      }
-    }
-    return {};
-  };
 
   const toggleFilterPanel = (key) => setOpenFilters((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const fetchMovies = useCallback(async () => {
-    if (isBypassMode) {
-      setMovies([]);
-      setCatalogMeta(null);
-      setError('');
-      setInfo('Tester mode is active. Sign in with a real account to load the live catalog.');
-      return;
-    }
-
     if (abortRef.current) {
       abortRef.current.abort();
     }
@@ -1537,23 +1642,8 @@ function App() {
         setLoadingMovies(false);
       }
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, streamingWatchlist, selected, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, streamingWatchlist, selected, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const formatMediaType = (value) => {
-    if (value === 'documentary') {
-      return 'Documentary';
-    }
-
-    if (value === 'tv') {
-      return 'TV';
-    }
-
-    if (value === 'movie') {
-      return 'Movie';
-    }
-
-    return value;
-  };
 
   const providerNameToPlatform = useMemo(
     () => Object.fromEntries(streamingPlatforms.map((platform) => [platform.name, platform])),
@@ -1625,34 +1715,6 @@ function App() {
 
   // parsePercent, ratingEntriesForItem imported from utils.js
 
-  const getRottenTomatoesCriticsLogo = (item) => {
-    const type = getRottenTomatoesType(parsePercent(item?.ratings?.rottenTomatoes), item?.mediaType);
-    if (!type) return null;
-    if (type === 'rotten') return ratingLogos.rtRotten;
-    if (type === 'certified') return ratingLogos.rtMovieCertified;
-    if (type === 'fresh-movie') return ratingLogos.rtMovieFresh;
-    return ratingLogos.rtTvFresh;
-  };
-
-  const getRatingVisual = (item, key) => {
-    if (key === 'tmdb') {
-      return ratingLogos.tmdb;
-    }
-
-    if (key === 'imdb') {
-      return ratingLogos.imdb;
-    }
-
-    if (key === 'rottenTomatoes') {
-      return getRottenTomatoesCriticsLogo(item);
-    }
-
-    if (key === 'metacritic') {
-      return ratingLogos.metacritic;
-    }
-
-    return null;
-  };
 
   // ratingEntriesForItem imported from utils.js
 
@@ -1660,16 +1722,10 @@ function App() {
     const restoreSession = async () => {
       const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
       const storedUsername = localStorage.getItem(AUTH_USERNAME_KEY);
-      const bypassMode = localStorage.getItem(BYPASS_MODE_KEY) === 'true';
-
-      if (bypassMode) {
-        setIsBypassMode(true);
-        setUsername(storedUsername || 'tester');
-        setPage('platforms');
-        setInfo('Tester mode is active.');
-        setLoadingSession(false);
-        return;
-      }
+      // A previous build shipped a "Bypass for Testing" button that set this
+      // flag and dropped people into a signed-out shell of the app. Clear it so
+      // anyone carrying one from that build lands on the sign-in screen instead.
+      localStorage.removeItem(BYPASS_MODE_KEY);
 
       if (!storedToken) {
         setLoadingSession(false);
@@ -1836,12 +1892,21 @@ function App() {
       storeSession(data.token, cleanUsername);
       setUsername(cleanUsername);
       setPassword('');
-      setPage('platforms');
       setAuthMode('login');
 
+      // Route on what the account actually has, the way session restore does.
+      // This used to setPage('platforms') unconditionally, so every returning
+      // user was made to walk back through a setup screen they had already
+      // completed — only people whose stored session survived skipped it.
       const restored = await fetchPlatforms(data.token);
-      if (restored) {
-        setInfo(authMode === 'register' ? 'Account created. Choose your services.' : 'Signed in successfully.');
+      const hasServices = restored.platforms.length > 0;
+      setPage(hasServices ? 'movies' : 'platforms');
+      if (restored.ok) {
+        setInfo(
+          authMode === 'register' || !hasServices
+            ? 'Account created. Choose your services.'
+            : 'Signed in successfully.'
+        );
       }
     } catch (err) {
       setError(`Network error: ${err.message}. Make sure the backend is running at ${API_BASE}.`);
@@ -1851,35 +1916,8 @@ function App() {
     }
   };
 
-  const handleBypassLogin = async () => {
-    clearFeedback();
-
-    const bypassUsername = username.trim() || 'tester';
-    localStorage.setItem(AUTH_USERNAME_KEY, bypassUsername);
-    localStorage.setItem(BYPASS_MODE_KEY, 'true');
-    setToken('');
-    setIsBypassMode(true);
-    setUsername(bypassUsername);
-    setPassword('');
-    setPage('platforms');
-    setSelected([]);
-    setMovies([]);
-    setCatalogMeta(null);
-    setInfo(`Tester mode enabled for ${bypassUsername}.`);
-  };
-
   const handleSavePlatforms = async () => {
     clearFeedback();
-
-    if (isBypassMode) {
-      setPage('movies');
-      setShowSettings(false);
-      setMovies([]);
-      setCatalogMeta(null);
-      setCatalogPage(1);
-      setInfo('Tester mode active. You skipped login, so live catalog data is disabled until you sign in.');
-      return;
-    }
 
     setLoadingPlatforms(true);
     try {
@@ -2079,14 +2117,6 @@ function App() {
               >
                 {loadingAuth ? 'Working…' : isRegister ? 'Create Account' : 'Sign In'}
               </button>
-              {!isRegister ? (
-                <button
-                  style={{ ...styles.button, ...styles.buttonSecondary }}
-                  className="btn-tap" onClick={handleBypassLogin} type="button"
-                >
-                  Bypass for Testing
-                </button>
-              ) : null}
             </form>
 
             {!isRegister && (
@@ -2265,7 +2295,7 @@ function App() {
                     </div>
                   )}
                   {lbxProgress && <div style={{ color: '#c0c8d8', fontSize: 13, marginTop: 8 }}>{lbxProgress}</div>}
-                  {lbxDone && <div style={{ color: lbxDone.startsWith('✓') ? '#01d277' : '#e94560', fontSize: 13, marginTop: 8 }}>{lbxDone}</div>}
+                  {lbxDone && <div style={{ color: lbxDone.startsWith('✓') ? '#01d277' : '#8C7BFF', fontSize: 13, marginTop: 8 }}>{lbxDone}</div>}
                   {lbxPreview && !lbxProgress && (
                     <div style={{ marginTop: 8 }}>
                       <div style={{ color: '#c0c8d8', fontSize: 13, marginBottom: lbxMismatch ? 8 : 12 }}>
@@ -2316,7 +2346,7 @@ function App() {
                         <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.mediaType || ''}</div>
                       </div>
                       <button type="button"
-                        style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
+                        style={{ background: 'none', border: 'none', color: '#8C7BFF', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
                         onClick={() => toggleWatched({ id: item.itemId, mediaType: item.mediaType, title: item.title, posterUrl: item.posterUrl })}>
                         Remove
                       </button>
@@ -2346,7 +2376,7 @@ function App() {
                         <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.mediaType || ''}</div>
                       </div>
                       <button type="button"
-                        style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
+                        style={{ background: 'none', border: 'none', color: '#8C7BFF', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
                         onClick={() => removeFromWatchlist(item.itemId)}>
                         Remove
                       </button>
@@ -2367,84 +2397,23 @@ function App() {
    * One catalog card. Shared by the catalog grid and the search results, so a
    * title looks and behaves the same wherever it appears.
    */
-  const renderMovieCard = (movie) => {
-    const ratingEntries = ratingEntriesForItem(movie);
-    const isTV = movie.mediaType === 'tv';
-    const isWatched = watchedIds.has(movie.id);
-    const isWatchlisted = watchlistIds.has(movie.id);
-    return (
-      <div key={movie.id} style={{ ...styles.movieCard, ...styles.movieCardClickable }} className="movie-card-wrap"
-        data-media={movie.mediaType} onClick={() => fetchMovieDetails(movie)}>
-        <div style={styles.cardActions}>
-          <button type="button"
-            style={{ ...styles.watchedBtn, ...(isWatchlisted ? styles.watchlistBtnActive : {}) }}
-            onClick={(e) => { e.stopPropagation(); toggleWatchlist(movie); }}
-            title={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
-            aria-label={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}>
-            {isWatchlisted ? '🔖' : '🏷'}
-          </button>
-          <button type="button"
-            style={{ ...styles.watchedBtn, ...(isWatched ? styles.watchedBtnActive : {}) }}
-            onClick={(e) => { e.stopPropagation(); toggleWatched(movie); }}
-            title={isWatched ? 'Remove from watched' : 'Mark as watched'}
-            aria-label={isWatched ? 'Remove from watched' : 'Mark as watched'}>
-            {isWatched ? '✓' : '○'}
-          </button>
-        </div>
-        {movie.posterUrl ? (
-          <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster}
-            className="movie-poster-el" loading="lazy"
-            onError={(e) => { e.currentTarget.style.display = 'none'; const ph = e.currentTarget.nextSibling; if (ph) ph.style.display = 'flex'; }} />
-        ) : null}
-        <div style={{ ...styles.moviePosterPlaceholder, display: movie.posterUrl ? 'none' : 'flex' }} className="movie-poster-ph">🎬</div>
-        <div style={styles.movieBody}>
-          <div style={styles.movieTitle} className="movie-title-el">{movie.title}</div>
-          <div style={styles.movieSubhead}>
-            <span style={{ ...styles.chip, ...(isTV ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(movie.mediaType)}</span>
-            {movie.year ? <span style={styles.chip}>{movie.year}</span> : null}
-          </div>
-          {movie.overview ? <div style={styles.movieOverview}>{movie.overview}</div> : null}
-          {movie.genres?.length ? (
-            <div style={styles.providerRow}>
-              {movie.genres.slice(0, 4).map((genre) => <span key={genre} style={styles.chipGenre}>{genre}</span>)}
-            </div>
-          ) : null}
-          {movie.availableOn?.length ? (
-            <div style={styles.providerRow}>
-              {movie.availableOn.map((providerName) => {
-                const platform = providerNameToPlatform[providerName];
-                return (
-                  <span key={providerName} style={styles.providerChip}>
-                    {platform?.logo ? <img src={platform.logo} alt={providerName} style={styles.providerLogo} /> : null}
-                    <span>{providerName}</span>
-                  </span>
-                );
-              })}
-            </div>
-          ) : null}
-          {ratingEntries.length ? (
-            <div style={styles.ratingGrid} className="rating-row">
-              {ratingEntries.map((entry) => {
-                const visual = getRatingVisual(movie, entry.key);
-                const chipAccent = getRatingChipStyle(entry.key, entry.value);
-                return (
-                  <span key={entry.key} style={{ ...styles.ratingChip, ...chipAccent }}>
-                    {visual ? <img src={visual} alt={entry.label} style={styles.ratingLogo} /> : null}
-                    <span style={styles.ratingContent}>
-                      <span style={styles.ratingLabel}>{entry.label}</span>
-                      <span style={styles.ratingValue}>{entry.value}</span>
-                    </span>
-                  </span>
-                );
-              })}
-            </div>
-          ) : catalogMeta?.refreshing ? (
-            <div style={{ fontSize: 11, color: 'rgba(110,122,147,0.7)', marginTop: 8 }}>⏳ Ratings loading…</div>
-          ) : null}
-        </div>
-      </div>
-    );
-  };
+  const renderMovieCard = (movie) => (
+    <MovieCard
+      key={movie.id}
+      movie={movie}
+      styles={styles}
+      isWatched={watchedIds.has(movie.id)}
+      isWatchlisted={watchlistIds.has(movie.id)}
+      ratingsLoading={Boolean(catalogMeta?.refreshing)}
+      providerNameToPlatform={providerNameToPlatform}
+      formatMediaType={formatMediaType}
+      getRatingVisual={getRatingVisual}
+      getRatingChipStyle={getRatingChipStyle}
+      onOpen={fetchMovieDetails}
+      onToggleWatchlist={toggleWatchlist}
+      onToggleWatched={toggleWatched}
+    />
+  );
 
     // A live search replaces the catalog grid rather than filtering it — the
     // results come from all of TMDB, not from the cached snapshot.
@@ -2479,14 +2448,15 @@ function App() {
               <div style={styles.topActions} className="top-actions-wrap">
                 <button
                   style={{ ...styles.button, ...styles.buttonSmall, ...(loadingMovies ? styles.buttonLoading : {}) }}
-                  className="btn-tap" onClick={fetchMovies} disabled={loadingMovies} type="button">
+                  className="btn-tap" onClick={fetchMovies} disabled={loadingMovies} type="button"
+                  title="Reload the list with your current filters">
                   {loadingMovies ? 'Loading…' : 'Refresh'}
                 </button>
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
                   className="btn-tap" onClick={requestCatalogRefresh} type="button"
-                  title="Rebuild the catalog from TMDB — takes a few minutes">
-                  ⟳ Rebuild
+                  title="Re-fetch everything from TMDB. Takes a few minutes — use this only if titles look out of date.">
+                  ⟳ Rebuild from TMDB
                 </button>
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
@@ -2593,7 +2563,7 @@ function App() {
 
             <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
               {renderFilterPanel('service', 'Service Filter',
-                <span style={serviceFilters.length ? { color: '#ff8fa3' } : {}}>{serviceFilters.length || 'All'}</span>,
+                <span style={serviceFilters.length ? { color: '#B7ADFF' } : {}}>{serviceFilters.length || 'All'}</span>,
                 <div style={styles.serviceFilterRow}>
                   {streamingPlatforms.filter((p) => selected.includes(p.key)).map((platform) => {
                     const isActive = serviceFilters.includes(platform.key);
@@ -2612,7 +2582,7 @@ function App() {
               )}
 
               {renderFilterPanel('language', 'Language Filter',
-                <span style={languageFilters.length ? { color: '#ff8fa3' } : {}}>{languageFilters.length || 'All'}</span>,
+                <span style={languageFilters.length ? { color: '#B7ADFF' } : {}}>{languageFilters.length || 'All'}</span>,
                 <div style={styles.serviceFilterRow}>
                   {/* Show all languages if user has none configured, otherwise show configured languages */}
                   {(languages.length ? languageOptions.filter((l) => languages.includes(l.key)) : languageOptions).map((language) => {
@@ -2647,7 +2617,7 @@ function App() {
                   </div>
                   {genreFilters.length > 0 && (
                     <button type="button" onClick={() => { setGenreFilters([]); setCatalogPage(1); }}
-                      style={{ background: 'none', border: 'none', color: '#e94560', fontSize: 12, cursor: 'pointer', marginTop: 8, fontFamily: 'inherit' }}>
+                      style={{ background: 'none', border: 'none', color: '#8C7BFF', fontSize: 12, cursor: 'pointer', marginTop: 8, fontFamily: 'inherit' }}>
                       Clear genres
                     </button>
                   )}
@@ -2655,7 +2625,7 @@ function App() {
               )}
 
               {renderFilterPanel('year', 'Year Range',
-                <span style={(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) ? { color: '#ff8fa3' } : {}}>
+                <span style={(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) ? { color: '#B7ADFF' } : {}}>
                   {(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) ? `${yearMin} – ${yearMax}` : 'All'}
                 </span>,
                 (() => {
@@ -2686,7 +2656,7 @@ function App() {
                       </div>
                       {(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) && (
                         <button type="button" onClick={() => { setYearMin(YEAR_RANGE_MIN); setYearMax(YEAR_RANGE_MAX); setCatalogPage(1); }}
-                          style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, marginTop: 6, padding: 0 }}>
+                          style={{ background: 'none', border: 'none', color: '#8C7BFF', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, marginTop: 6, padding: 0 }}>
                           Clear
                         </button>
                       )}
@@ -2711,7 +2681,18 @@ function App() {
 
             {!isSearching && catalogMeta ? (
               <div style={styles.catalogMeta}>
-                Showing {catalogMeta.visibleCount || movies.length} titles · page {catalogMeta.page || catalogPage} of {catalogMeta.totalPages || 1}{catalogMeta.lastUpdatedAt ? ` · Updated ${new Date(catalogMeta.lastUpdatedAt).toLocaleString()}` : ''}{catalogMeta.refreshing ? ' · ⟳ Syncing…' : ''}
+                {catalogMeta.refreshing && !(catalogMeta.visibleCount || movies.length)
+                  // A first sync used to read "Showing 0 titles · page 1 of 1",
+                  // which looks like an empty catalog rather than one still
+                  // being built.
+                  ? '⟳ Building your catalog — this takes a minute the first time.'
+                  : (
+                    <>
+                      Showing {catalogMeta.visibleCount || movies.length} titles · page {catalogMeta.page || catalogPage} of {catalogMeta.totalPages || 1}
+                      {catalogMeta.lastUpdatedAt ? ` · Updated ${formatUpdatedAt(catalogMeta.lastUpdatedAt)}` : ''}
+                      {catalogMeta.refreshing ? ' · ⟳ Syncing…' : ''}
+                    </>
+                  )}
               </div>
             ) : null}
 
@@ -2729,7 +2710,7 @@ function App() {
                 ))}
               </div>
             ) : (
-              <div style={styles.movieList}>
+              <div style={styles.movieList} ref={resultsTopRef}>
                 {(isSearching ? searchResults : movies).map((movie) => renderMovieCard(movie))}
               </div>
             )}
@@ -2763,10 +2744,19 @@ function App() {
 
         {/* ── Movie Detail Modal ── */}
         {selectedMovie && (
-          <div style={styles.modalOverlay} onClick={() => { setSelectedMovie(null); setMovieDetails(null); }}>
-            <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+          <div style={styles.modalOverlay} onClick={closeDetail}>
+            <div
+              style={styles.modalCard}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={selectedMovie.title}
+              ref={modalRef}
+              tabIndex={-1}
+              onKeyDown={onModalKeyDown}
+            >
               <button type="button" style={styles.modalClose}
-                onClick={() => { setSelectedMovie(null); setMovieDetails(null); }}>✕</button>
+                aria-label="Close" onClick={closeDetail}>✕</button>
               {/* Backdrops only. Falling back to the poster meant every title
                   opened on its own poster stretched across the modal and cropped
                   to a 220px band — the card you clicked, enlarged. Details load
