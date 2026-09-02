@@ -757,6 +757,14 @@ const styles = {
   // Placement comes from the cardActions row this sits in, not from the button.
   watchedBtn: { background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 999, width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#8a93a8', transition: 'all 0.18s ease', padding: 0, flexShrink: 0 },
   watchedBtnActive: { background: 'rgba(1,210,119,0.22)', border: '1px solid rgba(1,210,119,0.45)', color: '#01d277' },
+  // ── Currently Watching ────────────────────────────────────────────────────
+  // Amber, so the three list controls never read as the same state at a glance:
+  // green is finished, violet is saved for later, amber is in progress.
+  currentlyWatchingBtnActive: { background: 'rgba(245,158,11,0.22)', border: '1px solid rgba(245,158,11,0.5)', color: '#f5b544' },
+  scheduleRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 },
+  scheduleChip: { display: 'inline-flex', alignItems: 'center', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.02em', padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#c0c8d8' },
+  scheduleChipNew: { background: 'rgba(245,158,11,0.16)', border: '1px solid rgba(245,158,11,0.45)', color: '#f5b544' },
+  caughtUpButton: { background: 'none', border: 'none', padding: '4px 2px', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, color: '#8C7BFF', cursor: 'pointer', textDecoration: 'underline' },
   // ── Watchlist in settings ─────────────────────────────────────────────────
   watchlistRow: { display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' },
   watchlistPoster: { width: 40, height: 58, borderRadius: 8, objectFit: 'cover', background: 'rgba(255,255,255,0.05)', flexShrink: 0 },
@@ -977,6 +985,13 @@ function App() {
   const [watchlistOnlyItems, setWatchlistOnlyItems] = useState([]);
   const [watchlistIds, setWatchlistIds] = useState(new Set());
   const [watchlistOnly, setWatchlistOnly] = useState(false);
+  // Currently Watching — the third list. Series only, and unlike the other two
+  // its rows carry a schedule line and a "something aired since you last
+  // looked" flag, both computed by the server.
+  const [currentlyWatchingItems, setCurrentlyWatchingItems] = useState([]);
+  const [currentlyWatchingIds, setCurrentlyWatchingIds] = useState(new Set());
+  const [currentlyWatchingOnly, setCurrentlyWatchingOnly] = useState(false);
+  const [newEpisodesOnly, setNewEpisodesOnly] = useState(false);
   const [lbxFile, setLbxFile] = useState(null);
   const [lbxPreview, setLbxPreview] = useState(null);
   const [lbxProgress, setLbxProgress] = useState('');
@@ -998,6 +1013,7 @@ function App() {
   const resultsTopRef = useRef(null);
   const tokenRef = useRef(token);
   const watchedIdsRef = useRef(watchedIds);
+  const currentlyWatchingIdsRef = useRef(currentlyWatchingIds);
   const watchlistIdsRef = useRef(watchlistIds);
   const modalRef = useRef(null);
   const modalOpenerRef = useRef(null);
@@ -1021,6 +1037,7 @@ function App() {
   useEffect(() => { tokenRef.current = token; }, [token]);
   useEffect(() => { watchedIdsRef.current = watchedIds; }, [watchedIds]);
   useEffect(() => { watchlistIdsRef.current = watchlistIds; }, [watchlistIds]);
+  useEffect(() => { currentlyWatchingIdsRef.current = currentlyWatchingIds; }, [currentlyWatchingIds]);
 
   const closeDetail = useCallback(() => {
     setSelectedMovie(null);
@@ -1190,6 +1207,73 @@ function App() {
     } catch { /* silent */ }
   };
 
+  const loadCurrentlyWatching = useCallback(async () => {
+    if (!tokenRef.current) return;
+    try {
+      const response = await apiFetch('/currently-watching');
+      if (!response.ok) return;
+      const data = await parseResponseBody(response);
+      const items = Array.isArray(data.items) ? data.items : [];
+      setCurrentlyWatchingItems(items);
+      setCurrentlyWatchingIds(new Set(items.map((item) => item.itemId)));
+    } catch { /* silent */ }
+  }, [apiFetch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Add or drop a show. Series only — the button is not rendered for films, and
+   * the server rejects them, so this is belt and braces rather than the guard.
+   *
+   * Adding is not optimistic the way the watchlist toggle is: the server moves
+   * the show out of the watchlist as part of the same call, and reloading is
+   * how the other two lists learn about it.
+   */
+  const toggleCurrentlyWatching = useCallback(async (movie) => {
+    const itemId = movie.id;
+    if (movie.mediaType !== 'tv') return;
+    const isCurrent = currentlyWatchingIdsRef.current.has(itemId);
+    setCurrentlyWatchingIds((prev) => {
+      const next = new Set(prev);
+      if (isCurrent) next.delete(itemId); else next.add(itemId);
+      return next;
+    });
+    try {
+      if (isCurrent) {
+        await apiFetch(`/currently-watching/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+        setCurrentlyWatchingItems((prev) => prev.filter((item) => item.itemId !== itemId));
+      } else {
+        await apiFetch('/currently-watching', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId, title: movie.title, posterUrl: movie.posterUrl }),
+        });
+        // The show has just left the watchlist server-side; mirror that here so
+        // the bookmark control does not keep claiming otherwise.
+        setWatchlistIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
+        setWatchlistOnlyItems((prev) => prev.filter((item) => item.itemId !== itemId));
+        await loadCurrentlyWatching();
+      }
+    } catch (err) {
+      setCurrentlyWatchingIds((prev) => {
+        const next = new Set(prev);
+        if (isCurrent) next.add(itemId); else next.delete(itemId);
+        return next;
+      });
+      if (err.message !== 'Unauthorized') {
+        setError('Could not update Currently Watching. Try again.');
+      }
+    }
+  }, [apiFetch, loadCurrentlyWatching]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** "I am caught up" — clears the new-episode flag until something else airs. */
+  const markCaughtUp = useCallback(async (itemId) => {
+    setCurrentlyWatchingItems((prev) =>
+      prev.map((item) => (item.itemId === itemId ? { ...item, hasNewEpisode: false } : item))
+    );
+    try {
+      await apiFetch(`/currently-watching/${encodeURIComponent(itemId)}/caught-up`, { method: 'POST' });
+    } catch { await loadCurrentlyWatching(); }
+  }, [apiFetch, loadCurrentlyWatching]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const removeFromWatchlist = async (itemId) => {
     try {
       await apiFetch(`/watchlist/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
@@ -1245,8 +1329,14 @@ function App() {
    * and, for someone who imported from Letterboxd, this can be thousands of rows.
    */
   const clearSavedList = async (listType) => {
-    const label = listType === 'watchlist' ? 'watchlist' : 'watched list';
-    const count = listType === 'watchlist' ? watchlistIds.size : watchedIds.size;
+    const label =
+      listType === 'watchlist' ? 'watchlist'
+        : listType === 'currently-watching' ? 'currently watching list'
+          : 'watched list';
+    const count =
+      listType === 'watchlist' ? watchlistIds.size
+        : listType === 'currently-watching' ? currentlyWatchingIds.size
+          : watchedIds.size;
     if (!count) {
       setInfo(`Your ${label} is already empty.`);
       return;
@@ -1269,6 +1359,11 @@ function App() {
         setWatchlistOnlyItems([]);
         setWatchlistOnly(false);
         setStreamingWatchlist(false);
+      } else if (listType === 'currently-watching') {
+        setCurrentlyWatchingIds(new Set());
+        setCurrentlyWatchingItems([]);
+        setCurrentlyWatchingOnly(false);
+        setNewEpisodesOnly(false);
       } else {
         setWatchedIds(new Set());
         setWatchedItems([]);
@@ -1786,6 +1881,7 @@ function App() {
     if (page === 'movies' && token) {
       loadWatched();
       loadWatchlist();
+      loadCurrentlyWatching();
     }
   }, [page, token]); // eslint-disable-line
 
@@ -1794,7 +1890,7 @@ function App() {
     if (!showSettings) return;
     if (settingsTab === 'profile') fetchAccount();
     if (settingsTab === 'services') fetchCatalogStatus();
-    if (settingsTab === 'watchlist') { loadWatched(); loadWatchlist(); }
+    if (settingsTab === 'watchlist') { loadWatched(); loadWatchlist(); loadCurrentlyWatching(); }
   }, [settingsTab, showSettings]); // eslint-disable-line
 
   // Auto-retry when the backend is still warming up the catalog cache.
@@ -2323,13 +2419,47 @@ function App() {
             {/* ── Watchlist Tab ── */}
             {!isFirstSetup && settingsTab === 'watchlist' && (
               <div style={{ width: '100%' }}>
-                {/* Watched section */}
+                {/* Currently Watching section */}
                 <div style={styles.listHeaderRow}>
+                  <div style={{ fontWeight: 700, color: '#f5b544', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    📺 Currently Watching ({currentlyWatchingItems.length})
+                  </div>
+                  <button type="button" style={styles.clearListButton}
+                    onClick={() => clearSavedList('currently-watching')}
+                    aria-label="Clear all currently watching"
+                    disabled={clearingList !== null || currentlyWatchingItems.length === 0}>
+                    {clearingList === 'currently-watching' ? 'Clearing…' : 'Clear all'}
+                  </button>
+                </div>
+                {currentlyWatchingItems.length === 0
+                  ? <p style={{ ...styles.emptyState, marginBottom: 16 }}>No shows in progress. Add a series with ▷ from the catalog.</p>
+                  : currentlyWatchingItems.map((item) => (
+                    <div key={item.itemId} style={styles.watchlistRow}>
+                      {item.posterUrl
+                        ? <img src={item.posterUrl} alt={item.title} style={styles.watchlistPoster} />
+                        : <div style={{ ...styles.watchlistPoster, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📺</div>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.itemId}</div>
+                        <div style={{ fontSize: 11, color: item.hasNewEpisode ? '#f5b544' : '#6e7a93' }}>
+                          {item.hasNewEpisode ? '● ' : ''}{item.scheduleMessage}
+                        </div>
+                      </div>
+                      <button type="button"
+                        style={{ background: 'none', border: 'none', color: '#8C7BFF', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
+                        onClick={() => toggleCurrentlyWatching({ id: item.itemId, mediaType: 'tv', title: item.title, posterUrl: item.posterUrl })}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+
+                {/* Watched section */}
+                <div style={{ ...styles.listHeaderRow, marginTop: 24 }}>
                   <div style={{ fontWeight: 700, color: '#01d277', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                     ✓ Watched ({watchedItems.length})
                   </div>
                   <button type="button" style={styles.clearListButton}
                     onClick={() => clearSavedList('watched')}
+                    aria-label="Clear all watched"
                     disabled={clearingList !== null || watchedItems.length === 0}>
                     {clearingList === 'watched' ? 'Clearing…' : 'Clear all'}
                   </button>
@@ -2360,6 +2490,7 @@ function App() {
                   </div>
                   <button type="button" style={styles.clearListButton}
                     onClick={() => clearSavedList('watchlist')}
+                    aria-label="Clear all watchlist"
                     disabled={clearingList !== null || watchlistOnlyItems.length === 0}>
                     {clearingList === 'watchlist' ? 'Clearing…' : 'Clear all'}
                   </button>
@@ -2397,13 +2528,15 @@ function App() {
    * One catalog card. Shared by the catalog grid and the search results, so a
    * title looks and behaves the same wherever it appears.
    */
-  const renderMovieCard = (movie) => (
+  const renderMovieCard = (movie, schedule) => (
     <MovieCard
       key={movie.id}
       movie={movie}
       styles={styles}
       isWatched={watchedIds.has(movie.id)}
       isWatchlisted={watchlistIds.has(movie.id)}
+      isCurrentlyWatching={currentlyWatchingIds.has(movie.id)}
+      schedule={schedule}
       ratingsLoading={Boolean(catalogMeta?.refreshing)}
       providerNameToPlatform={providerNameToPlatform}
       formatMediaType={formatMediaType}
@@ -2412,8 +2545,33 @@ function App() {
       onOpen={fetchMovieDetails}
       onToggleWatchlist={toggleWatchlist}
       onToggleWatched={toggleWatched}
+      onToggleCurrentlyWatching={toggleCurrentlyWatching}
+      onCaughtUp={markCaughtUp}
     />
   );
+
+  /**
+   * The Currently Watching rows, shaped like catalog items so one card
+   * component renders both. The server has already sorted new-first and applied
+   * nothing else, so the "new episodes only" filter is applied here rather than
+   * costing a round trip every time it is toggled.
+   */
+  const currentlyWatchingCards = currentlyWatchingItems
+    .filter((item) => !newEpisodesOnly || item.hasNewEpisode)
+    .map((item) => ({
+      movie: {
+        id: item.itemId,
+        tmdbId: item.tmdbId,
+        mediaType: 'tv',
+        title: item.title || item.itemId,
+        posterUrl: item.posterUrl,
+        year: null,
+        overview: '',
+        genres: [],
+        availableOn: [],
+      },
+      schedule: { scheduleMessage: item.scheduleMessage, hasNewEpisode: item.hasNewEpisode },
+    }));
 
     // A live search replaces the catalog grid rather than filtering it — the
     // results come from all of TMDB, not from the cached snapshot.
@@ -2537,12 +2695,39 @@ function App() {
               </div>
             )}
 
+            {/* Currently Watching — the third list. A view, not a filter over the
+                catalog: these rows come from their own endpoint and carry a
+                schedule line the catalog has no concept of. */}
+            {!isSearching && currentlyWatchingIds.size > 0 && (
+              <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button type="button"
+                  style={{ ...styles.serviceFilterButton, ...(currentlyWatchingOnly ? { background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: '#f5b544' } : {}) }}
+                  onClick={() => {
+                    const next = !currentlyWatchingOnly;
+                    setCurrentlyWatchingOnly(next);
+                    if (next) { setWatchlistOnly(false); setStreamingWatchlist(false); loadCurrentlyWatching(); }
+                    else { setNewEpisodesOnly(false); }
+                    setCatalogPage(1);
+                  }}>
+                  {currentlyWatchingOnly ? '📺 Currently watching' : '○ Currently watching'}
+                </button>
+                <span style={{ color: '#6e7a93', fontSize: 12 }}>{currentlyWatchingIds.size} in progress</span>
+                {currentlyWatchingOnly && (
+                  <button type="button"
+                    style={{ ...styles.serviceFilterButton, ...(newEpisodesOnly ? { background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: '#f5b544' } : {}) }}
+                    onClick={() => setNewEpisodesOnly((v) => !v)}>
+                    {newEpisodesOnly ? '● New episodes only' : '○ New episodes only'}
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* From Watchlist toggle — the whole watchlist, streaming or not */}
             {!isSearching && watchlistIds.size > 0 && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(watchlistOnly ? { background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.5)', color: '#8b82ff' } : {}) }}
-                  onClick={() => { const next = !watchlistOnly; setWatchlistOnly(next); if (next) setStreamingWatchlist(false); setCatalogPage(1); }}>
+                  onClick={() => { const next = !watchlistOnly; setWatchlistOnly(next); if (next) { setStreamingWatchlist(false); setCurrentlyWatchingOnly(false); } setCatalogPage(1); }}>
                   {watchlistOnly ? '🔖 From watchlist' : '○ From watchlist'}
                 </button>
                 <span style={{ color: '#6e7a93', fontSize: 12 }}>all {watchlistIds.size} saved</span>
@@ -2554,7 +2739,7 @@ function App() {
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(streamingWatchlist ? { background: 'rgba(1,210,119,0.12)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277' } : {}) }}
-                  onClick={() => { const next = !streamingWatchlist; setStreamingWatchlist(next); if (next) setWatchlistOnly(false); setCatalogPage(1); }}>
+                  onClick={() => { const next = !streamingWatchlist; setStreamingWatchlist(next); if (next) { setWatchlistOnly(false); setCurrentlyWatchingOnly(false); } setCatalogPage(1); }}>
                   {streamingWatchlist ? '📡 Streaming watchlist' : '○ Streaming watchlist'}
                 </button>
                 <span style={{ color: '#6e7a93', fontSize: 12 }}>on my services</span>
@@ -2679,7 +2864,15 @@ function App() {
               </div>
             ) : null}
 
-            {!isSearching && catalogMeta ? (
+            {!isSearching && currentlyWatchingOnly ? (
+              <div style={styles.catalogMeta}>
+                Showing {currentlyWatchingCards.length} of {currentlyWatchingItems.length} shows
+                {newEpisodesOnly ? ' with new episodes' : ''}
+                {' · schedules update when you refresh the catalog'}
+              </div>
+            ) : null}
+
+            {!isSearching && !currentlyWatchingOnly && catalogMeta ? (
               <div style={styles.catalogMeta}>
                 {catalogMeta.refreshing && !(catalogMeta.visibleCount || movies.length)
                   // A first sync used to read "Showing 0 titles · page 1 of 1",
@@ -2696,7 +2889,7 @@ function App() {
               </div>
             ) : null}
 
-            {((isSearching && searchLoading) || (!isSearching && (loadingMovies || (!movies.length && catalogMeta?.refreshing)))) ? (
+            {((isSearching && searchLoading) || (!isSearching && !currentlyWatchingOnly && (loadingMovies || (!movies.length && catalogMeta?.refreshing)))) ? (
               <div style={styles.movieList}>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} style={{ ...styles.movieCard, opacity: 0.45 }} className="movie-card-wrap">
@@ -2711,7 +2904,11 @@ function App() {
               </div>
             ) : (
               <div style={styles.movieList} ref={resultsTopRef}>
-                {(isSearching ? searchResults : movies).map((movie) => renderMovieCard(movie))}
+                {isSearching
+                  ? searchResults.map((movie) => renderMovieCard(movie))
+                  : currentlyWatchingOnly
+                    ? currentlyWatchingCards.map(({ movie, schedule }) => renderMovieCard(movie, schedule))
+                    : movies.map((movie) => renderMovieCard(movie))}
               </div>
             )}
 
@@ -2719,11 +2916,19 @@ function App() {
               <div style={styles.emptyState}>Nothing matched “{searchQuery.trim()}”.</div>
             ) : null}
 
-            {!isSearching && !movies.length && !loadingMovies && !catalogMeta?.refreshing ? (
+            {!isSearching && currentlyWatchingOnly && !currentlyWatchingCards.length ? (
+              <div style={styles.emptyState}>
+                {newEpisodesOnly
+                  ? 'Nothing new since you were last caught up.'
+                  : 'No shows in progress. Add one with ▷ on any series.'}
+              </div>
+            ) : null}
+
+            {!isSearching && !currentlyWatchingOnly && !movies.length && !loadingMovies && !catalogMeta?.refreshing ? (
               <div style={styles.emptyState}>No catalog titles match the current filters.</div>
             ) : null}
 
-            {!isSearching && totalPages > 1 ? (
+            {!isSearching && !currentlyWatchingOnly && totalPages > 1 ? (
               <div style={styles.paginationRow}>
                 <span style={styles.paginationSummary}>Page {catalogPage} of {totalPages}</span>
                 <button type="button" style={styles.pageButton} className="btn-tap page-btn"
@@ -2842,8 +3047,33 @@ function App() {
                   </div>
                 ) : null}
 
+                {/* The show's schedule, for a series being followed. Same line
+                    the list shows, so the two never disagree. */}
+                {(() => {
+                  const followed = currentlyWatchingItems.find((item) => item.itemId === selectedMovie.id);
+                  return followed ? (
+                    <div style={{ ...styles.scheduleRow, marginTop: 16 }}>
+                      <span style={{ ...styles.scheduleChip, ...(followed.hasNewEpisode ? styles.scheduleChipNew : {}) }}>
+                        {followed.hasNewEpisode ? '● ' : ''}{followed.scheduleMessage}
+                      </span>
+                      {followed.hasNewEpisode ? (
+                        <button type="button" style={styles.caughtUpButton} onClick={() => markCaughtUp(followed.itemId)}>
+                          Mark caught up
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null;
+                })()}
+
                 {/* Watched + watchlist toggles in modal */}
                 <div style={{ marginTop: 20, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {selectedMovie.mediaType === 'tv' ? (
+                    <button type="button"
+                      style={{ ...styles.button, ...styles.buttonSecondary, flex: '1 1 200px', width: 'auto', margin: 0, ...(currentlyWatchingIds.has(selectedMovie.id) ? { background: 'rgba(245,158,11,0.18)', border: '1px solid rgba(245,158,11,0.45)', color: '#f5b544' } : {}) }}
+                      onClick={() => toggleCurrentlyWatching(selectedMovie)}>
+                      {currentlyWatchingIds.has(selectedMovie.id) ? '📺 Currently Watching — Click to Remove' : '▷ Currently Watching'}
+                    </button>
+                  ) : null}
                   <button type="button"
                     style={{ ...styles.button, flex: '1 1 200px', width: 'auto', margin: 0, ...(watchedIds.has(selectedMovie.id) ? { background: 'rgba(1,210,119,0.18)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277', boxShadow: 'none' } : {}) }}
                     onClick={() => toggleWatched(selectedMovie)}>

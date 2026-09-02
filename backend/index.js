@@ -1,7 +1,7 @@
 // Entry point — creates the real database, wires up the app, and starts listening.
 require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
-const { ensureCatalogTables, startDailyCatalogRefresh } = require('./catalogCache');
+const { ensureCatalogTables } = require('./catalogCache');
 const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 4000;
@@ -111,7 +111,10 @@ db.run(`CREATE TABLE IF NOT EXISTS reset_tokens (
 ensureCatalogTables(db).catch((error) => {
   console.error('Failed to initialize catalog cache tables:', error);
 });
-startDailyCatalogRefresh(db);
+
+// No scheduled refresh runs here on purpose. TMDB is called when data has never
+// been fetched, or when the Refresh Catalog button asks for it — never on a
+// timer. See the note above AUTO_SYNC_MS in catalogCache.js.
 
 const app = createApp(db);
 

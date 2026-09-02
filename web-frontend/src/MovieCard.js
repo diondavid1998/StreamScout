@@ -20,6 +20,10 @@ function MovieCard({
   styles,
   isWatched,
   isWatchlisted,
+  isCurrentlyWatching,
+  // The row's schedule, when the card is being shown in the Currently Watching
+  // view: { scheduleMessage, hasNewEpisode }. Absent everywhere else.
+  schedule,
   ratingsLoading,
   providerNameToPlatform,
   formatMediaType,
@@ -28,6 +32,8 @@ function MovieCard({
   onOpen,
   onToggleWatchlist,
   onToggleWatched,
+  onToggleCurrentlyWatching,
+  onCaughtUp,
 }) {
   const ratingEntries = ratingEntriesForItem(movie);
   const isTV = movie.mediaType === 'tv';
@@ -52,6 +58,17 @@ function MovieCard({
       }}
     >
       <div style={styles.cardActions}>
+        {/* Series only: a film has no next episode, so the control would toggle
+            a state that could never say anything. */}
+        {isTV ? (
+          <button type="button"
+            style={{ ...styles.watchedBtn, ...(isCurrentlyWatching ? styles.currentlyWatchingBtnActive : {}) }}
+            onClick={(e) => { e.stopPropagation(); onToggleCurrentlyWatching(movie); }}
+            title={isCurrentlyWatching ? 'Stop currently watching' : 'Currently watching'}
+            aria-label={isCurrentlyWatching ? 'Stop currently watching' : 'Currently watching'}>
+            {isCurrentlyWatching ? '📺' : '▷'}
+          </button>
+        ) : null}
         <button type="button"
           style={{ ...styles.watchedBtn, ...(isWatchlisted ? styles.watchlistBtnActive : {}) }}
           onClick={(e) => { e.stopPropagation(); onToggleWatchlist(movie); }}
@@ -79,6 +96,19 @@ function MovieCard({
           <span style={{ ...styles.chip, ...(isTV ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(movie.mediaType)}</span>
           {movie.year ? <span style={styles.chip}>{movie.year}</span> : null}
         </div>
+        {schedule ? (
+          <div style={styles.scheduleRow}>
+            <span style={{ ...styles.scheduleChip, ...(schedule.hasNewEpisode ? styles.scheduleChipNew : {}) }}>
+              {schedule.hasNewEpisode ? '● ' : ''}{schedule.scheduleMessage}
+            </span>
+            {schedule.hasNewEpisode ? (
+              <button type="button" style={styles.caughtUpButton}
+                onClick={(e) => { e.stopPropagation(); onCaughtUp(movie.id); }}>
+                Mark caught up
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {movie.overview ? <div style={styles.movieOverview}>{movie.overview}</div> : null}
         {movie.genres?.length ? (
           <div style={styles.providerRow}>

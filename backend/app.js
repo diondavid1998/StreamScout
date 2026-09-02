@@ -20,14 +20,25 @@ const {
   buildScopeKey,
   syncScope,
   withTransaction,
+  invalidateWatchlistAvailability,
 } = require('./catalogCache');
-const { fetchTitleWithCredits, searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
+const { getTitleDetails } = require('./titleCache');
+const {
+  listCurrentlyWatching,
+  addToCurrentlyWatching,
+  removeFromCurrentlyWatching,
+  clearCurrentlyWatching,
+  markCaughtUp,
+  refreshSeriesSchedules,
+  ensureSeriesDetails,
+  seriesTmdbId,
+} = require('./currentlyWatching');
+const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error('FATAL: JWT_SECRET environment variable must be set');
 }
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const DEFAULT_REGION = 'US';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // In-flight TMDB searches during an import. TMDB's published ceiling is well
@@ -590,36 +601,10 @@ function createApp(db, { disableRateLimit = false } = {}) {
       return res.status(400).json({ error: 'tmdb_id must be a positive integer' });
     }
     try {
-      const data = await fetchTitleWithCredits(mediaType, tmdb_id);
-      const cast = (data.credits?.cast || []).slice(0, 8).map((person) => ({
-        id: person.id,
-        name: person.name,
-        character: person.character || person.roles?.[0]?.character || '',
-        profileUrl: person.profile_path ? `${TMDB_IMAGE_BASE}/w185${person.profile_path}` : null,
-      }));
-      let directors = [];
-      if (mediaType === 'movie') {
-        directors = (data.credits?.crew || []).filter((m) => m.job === 'Director').map((m) => m.name);
-      } else {
-        directors = (data.created_by || []).map((m) => m.name);
-      }
-      res.json({
-        id: data.id,
-        mediaType,
-        title: data.title || data.name,
-        tagline: data.tagline || null,
-        overview: data.overview || '',
-        releaseDate: data.release_date || data.first_air_date || null,
-        runtime: data.runtime || null,
-        status: data.status || null,
-        genres: (data.genres || []).map((g) => g.name),
-        posterUrl: data.poster_path ? `${TMDB_IMAGE_BASE}/w500${data.poster_path}` : null,
-        backdropUrl: data.backdrop_path ? `${TMDB_IMAGE_BASE}/w1280${data.backdrop_path}` : null,
-        cast,
-        directors,
-        numberOfSeasons: data.number_of_seasons || null,
-        numberOfEpisodes: data.number_of_episodes || null,
-      });
+      // Served from title_details_cache whenever it has been fetched before —
+      // which, after the first open, is always. TMDB is only asked again when
+      // the refresh button explicitly asks it to be.
+      res.json(await getTitleDetails(db, mediaType, tmdb_id));
     } catch (e) {
       res.status(500).json({ error: 'Failed to fetch title details', details: e.message });
     }
@@ -682,9 +667,16 @@ function createApp(db, { disableRateLimit = false } = {}) {
         [scopeKey],
         (err2) => {
           if (err2) return res.status(500).json({ error: 'Database error' });
-          syncScope(db, { platforms, languages, region: DEFAULT_REGION, forceRatingsRefresh: true }).catch((e) =>
-            console.error('[catalog/refresh] background sync failed:', e)
-          );
+          // This button is now the only thing in the app that calls TMDB for
+          // data it already has. So it has to refresh everything that can go
+          // stale, not just the catalog: the saved-title availability rows and
+          // the schedules behind Currently Watching go with it.
+          const userId = req.user.id;
+          Promise.all([
+            syncScope(db, { platforms, languages, region: DEFAULT_REGION, forceRatingsRefresh: true }),
+            invalidateWatchlistAvailability(db, userId),
+            refreshSeriesSchedules(db, userId),
+          ]).catch((e) => console.error('[catalog/refresh] background sync failed:', e));
           res.json({ success: true, message: 'Catalog refresh started' });
         }
       );
@@ -720,6 +712,11 @@ function createApp(db, { disableRateLimit = false } = {}) {
       [req.user.id, itemId, mediaType || null, title || null, posterUrl || null],
       function (err) {
         if (err) return res.status(500).json({ error: 'Database error' });
+        // Finishing a show is how it leaves Currently Watching. The three lists
+        // are exclusive, so marking it watched has to take it out of the one it
+        // was in — otherwise it would sit there being told about episodes of a
+        // show the user has already finished.
+        db.run('DELETE FROM currently_watching WHERE user_id = ? AND item_id = ?', [req.user.id, itemId]);
         res.json({ success: true, added: this.changes > 0 });
       }
     );
@@ -745,6 +742,77 @@ function createApp(db, { disableRateLimit = false } = {}) {
         res.json({ success: true });
       }
     );
+  });
+
+  // ── Currently Watching ────────────────────────────────────────────────────
+  // A third list, series only. Unlike the other two it has an opinion about
+  // each row: what day new episodes land, and whether one has landed since the
+  // user last said they were caught up.
+
+  app.get('/currently-watching', authenticateToken, async (req, res) => {
+    try {
+      const onlyNew = req.query.new === '1' || req.query.new === 'true';
+      res.json({ items: await listCurrentlyWatching(db, req.user.id, { onlyNew }) });
+    } catch (e) {
+      res.status(500).json({ error: 'Database error', details: e.message });
+    }
+  });
+
+  app.post('/currently-watching', authenticateToken, async (req, res) => {
+    const { itemId, title, posterUrl } = req.body || {};
+    if (!itemId || typeof itemId !== 'string') {
+      return res.status(400).json({ error: 'itemId required' });
+    }
+    // Series only. A film has no next episode, so every column this list adds
+    // would be dead weight on one — and the copy would have nothing to say.
+    const tmdbId = seriesTmdbId(itemId);
+    if (tmdbId === null) {
+      return res.status(400).json({ error: 'Currently Watching is for TV series only' });
+    }
+    try {
+      const added = await addToCurrentlyWatching(db, req.user.id, { itemId, title, posterUrl });
+      // First fetch for a show nobody has looked at yet — the "never fetched"
+      // case, not a refresh. Deliberately not awaited: the row is already in
+      // the list, and the schedule line fills in on the next read.
+      if (added) {
+        ensureSeriesDetails(db, tmdbId).catch((e) =>
+          console.warn(`[currently-watching] could not load tv-${tmdbId}: ${e.message}`)
+        );
+      }
+      res.json({ success: true, added });
+    } catch (e) {
+      res.status(500).json({ error: 'Database error', details: e.message });
+    }
+  });
+
+  // Registered before the /:item_id route so "/currently-watching" is not read
+  // as an item id.
+  app.delete('/currently-watching', authenticateToken, async (req, res) => {
+    try {
+      res.json({ success: true, removed: await clearCurrentlyWatching(db, req.user.id) });
+    } catch (e) {
+      res.status(500).json({ error: 'Database error', details: e.message });
+    }
+  });
+
+  app.delete('/currently-watching/:item_id', authenticateToken, async (req, res) => {
+    try {
+      await removeFromCurrentlyWatching(db, req.user.id, decodeURIComponent(req.params.item_id));
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: 'Database error', details: e.message });
+    }
+  });
+
+  // "I am caught up." Clears the badge until something airs after today.
+  app.post('/currently-watching/:item_id/caught-up', authenticateToken, async (req, res) => {
+    try {
+      const updated = await markCaughtUp(db, req.user.id, decodeURIComponent(req.params.item_id));
+      if (!updated) return res.status(404).json({ error: 'Not in Currently Watching' });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: 'Database error', details: e.message });
+    }
   });
 
   // ── Forgot password ───────────────────────────────────────────────────────
@@ -1034,6 +1102,8 @@ function createApp(db, { disableRateLimit = false } = {}) {
       [req.user.id, itemId, mediaType || null, title || null, posterUrl || null],
       function (err) {
         if (err) return res.status(500).json({ error: 'Database error' });
+        // Deliberately moving a show back to "later" takes it out of the run.
+        db.run('DELETE FROM currently_watching WHERE user_id = ? AND item_id = ?', [req.user.id, itemId]);
         res.json({ success: true, added: this.changes > 0 });
       }
     );
@@ -1213,6 +1283,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
     // — and one disk sync — per title.
     try {
       await withTransaction(db, async () => {
+        const imported = [];
         for (const result of results) {
           if (!result) { notFound++; continue; }
           const { changes } = await runSql(
@@ -1221,6 +1292,26 @@ function createApp(db, { disableRateLimit = false } = {}) {
             [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl]
           );
           if (changes > 0) matched++;
+          imported.push(result.itemId);
+        }
+
+        // Keep the three lists exclusive across an import too. A watched import
+        // ends any run in progress for the shows it names; a watchlist import
+        // loses to Currently Watching, because "I am watching this now" is the
+        // more specific claim than "I might watch this".
+        if (imported.length) {
+          const placeholders = imported.map(() => '?').join(',');
+          const sql =
+            importType === 'watched'
+              ? `DELETE FROM currently_watching WHERE user_id = ? AND item_id IN (${placeholders})`
+              : `DELETE FROM watchlist_items
+                  WHERE user_id = ? AND item_id IN (${placeholders})
+                    AND item_id IN (SELECT item_id FROM currently_watching WHERE user_id = ?)`;
+          const params =
+            importType === 'watched'
+              ? [req.user.id, ...imported]
+              : [req.user.id, ...imported, req.user.id];
+          await runSql(db, sql, params);
         }
       });
     } catch (err) {

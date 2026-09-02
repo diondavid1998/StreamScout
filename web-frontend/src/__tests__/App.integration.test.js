@@ -181,7 +181,7 @@ describe('Auth page', () => {
  * requests concurrently (/movies, /watched, /watchlist), so an index-based
  * mock hands the wrong body to whichever happens to land second.
  */
-function setupApiMock({ platforms = ['netflix'], catalog = EMPTY_CATALOG, watchlist = [], watched = [], search = [] } = {}) {
+function setupApiMock({ platforms = ['netflix'], catalog = EMPTY_CATALOG, watchlist = [], watched = [], search = [], currentlyWatching = [] } = {}) {
   global.fetch = jest.fn((url, options = {}) => {
     const href = String(url);
     if (href.includes('/platforms')) {
@@ -191,6 +191,9 @@ function setupApiMock({ platforms = ['netflix'], catalog = EMPTY_CATALOG, watchl
           : mockResponse({ platforms, languages: [] })
       );
     }
+    // Before /watchlist and /watched: none of them are substrings of each
+    // other, but keeping the most specific path first makes that not matter.
+    if (href.includes('/currently-watching')) return Promise.resolve(mockResponse({ items: currentlyWatching, success: true }));
     if (href.includes('/search')) return Promise.resolve(mockResponse({ items: search }));
     if (href.includes('/movies')) return Promise.resolve(mockResponse(catalog));
     if (href.includes('/watchlist')) return Promise.resolve(mockResponse({ items: watchlist }));
@@ -444,8 +447,9 @@ describe('Clearing and importing saved lists', () => {
       watchlist: [{ itemId: 'movie-9', title: 'Saved', mediaType: 'movie' }],
     });
 
-    const clearButtons = await screen.findAllByRole('button', { name: /Clear all/i });
-    fireEvent.click(clearButtons[1]);
+    // By name, not by position: the panel holds three of these, and which one
+    // is second is not something this test should be asserting.
+    fireEvent.click(await screen.findByRole('button', { name: /Clear all watchlist/i }));
 
     await waitFor(() => {
       const call = global.fetch.mock.calls.find(
@@ -461,8 +465,7 @@ describe('Clearing and importing saved lists', () => {
       watched: [{ itemId: 'movie-1', title: 'Seen', mediaType: 'movie' }],
     });
 
-    const clearButtons = await screen.findAllByRole('button', { name: /Clear all/i });
-    fireEvent.click(clearButtons[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /Clear all watched/i }));
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     const deletes = global.fetch.mock.calls.filter((c) => c[1]?.method === 'DELETE');
@@ -575,6 +578,110 @@ describe('Watchlist from the catalog', () => {
     await waitFor(() => {
       const urls = global.fetch.mock.calls.map((c) => String(c[0]));
       expect(urls.some((u) => u.includes('watchlistOnly=true') && u.includes('streamingOnly=true'))).toBe(true);
+    }, { timeout: 8000 });
+  });
+});
+
+describe('Currently Watching', () => {
+  const FOLLOWED = [
+    {
+      itemId: 'tv-456',
+      tmdbId: 456,
+      mediaType: 'tv',
+      title: 'Test Show',
+      posterUrl: null,
+      state: 'airing',
+      scheduleMessage: 'New episodes Thursdays',
+      hasNewEpisode: true,
+      caughtUpOn: '2026-01-01',
+    },
+    {
+      itemId: 'tv-789',
+      tmdbId: 789,
+      mediaType: 'tv',
+      title: 'Finished Show',
+      posterUrl: null,
+      state: 'ended',
+      scheduleMessage: 'All episodes and seasons out',
+      hasNewEpisode: false,
+      caughtUpOn: '2026-01-01',
+    },
+  ];
+
+  beforeEach(() => {
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
+  });
+
+  async function renderWithFollowed(currentlyWatching = FOLLOWED) {
+    setupApiMock({ catalog: SAMPLE_CATALOG, currentlyWatching });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+  }
+
+  it('offers the toggle on series only', async () => {
+    await renderWithFollowed([]);
+
+    // Two catalog cards, one film and one show; only the show gets the control.
+    const controls = screen.getAllByRole('button', { name: /currently watching/i });
+    expect(controls).toHaveLength(1);
+  });
+
+  it('shows the schedule line for each followed show, new ones first', async () => {
+    await renderWithFollowed();
+
+    fireEvent.click(await screen.findByRole('button', { name: /○ Currently watching/i }));
+
+    expect(await screen.findByText(/New episodes Thursdays/)).toBeInTheDocument();
+    expect(screen.getByText(/All episodes and seasons out/)).toBeInTheDocument();
+  });
+
+  it('filters down to shows with something new', async () => {
+    await renderWithFollowed();
+
+    fireEvent.click(await screen.findByRole('button', { name: /○ Currently watching/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /New episodes only/i }));
+
+    expect(await screen.findByText(/New episodes Thursdays/)).toBeInTheDocument();
+    expect(screen.queryByText(/All episodes and seasons out/)).not.toBeInTheDocument();
+  });
+
+  it('marks a show caught up without reloading the list', async () => {
+    await renderWithFollowed();
+
+    fireEvent.click(await screen.findByRole('button', { name: /○ Currently watching/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Mark caught up/i }));
+
+    await waitFor(() => {
+      const call = global.fetch.mock.calls.find(
+        (c) => String(c[0]).includes('/currently-watching/tv-456/caught-up') && c[1]?.method === 'POST'
+      );
+      expect(call).toBeTruthy();
+    }, { timeout: 8000 });
+
+    // The badge clears optimistically, so the button it belongs to goes with it.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Mark caught up/i })).not.toBeInTheDocument()
+    );
+  });
+
+  it('adding a show takes it out of the watchlist', async () => {
+    setupApiMock({
+      catalog: SAMPLE_CATALOG,
+      watchlist: [{ itemId: 'tv-456', title: 'Test Show', mediaType: 'tv' }],
+      currentlyWatching: [],
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Show')).toBeInTheDocument(), { timeout: 8000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Currently watching$/i }));
+
+    await waitFor(() => {
+      const call = global.fetch.mock.calls.find(
+        (c) => String(c[0]).endsWith('/currently-watching') && c[1]?.method === 'POST'
+      );
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call[1].body)).toMatchObject({ itemId: 'tv-456' });
     }, { timeout: 8000 });
   });
 });
