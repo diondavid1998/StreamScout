@@ -6,7 +6,7 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 
 ## 🚀 Deploy
 
-Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on **Netlify**.
+Backend runs on **Railway** (no sleep, persistent disk). The client is the native iOS app.
 
 ### Step 1 — Deploy the backend on Railway
 
@@ -22,24 +22,15 @@ Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on *
    - `FRONTEND_URL` → leave blank for now; update after Step 2
 5. Railway will deploy automatically. Copy your Railway URL (e.g. `https://your-app.up.railway.app`).
 
-### Step 2 — Deploy the frontend on Netlify
+### Step 2 — Build the iOS app
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/diondavid1998/StreamScout)
+1. Open `WhatsOn.xcodeproj` in Xcode 26 or later.
+2. Set your signing team on the **WhatsOn** target.
+3. Point the app at your Railway URL by editing `API.baseURL` in `WhatsOn/APIModels.swift`.
+4. Build to a device, or archive and upload to TestFlight.
 
-1. Click the button above and sign in / create a free [Netlify](https://netlify.com) account.
-2. Netlify will detect `netlify.toml` and use `web-frontend/` as the build root automatically.
-3. After the deploy finishes, go to **Site configuration → Environment variables** and add:
-   - Key: `REACT_APP_API_BASE` → Value: your Railway URL from Step 1
-4. Go to **Deploys → Trigger deploy → Deploy site** to rebuild with the new variable.
-5. Copy your Netlify site URL (e.g. `https://your-site.netlify.app`).
-
-### Step 3 — Connect frontend ↔ backend
-
-1. Back on the Railway dashboard, open your service → **Variables**
-2. Set `FRONTEND_URL` to your Netlify URL from Step 2
-3. Railway will redeploy automatically.
-
-> ✅ Both services are now live and talking to each other.
+> `FRONTEND_URL` on Railway only gates browser CORS. The iOS app is not a browser
+> and does not send an `Origin` header, so it can be left unset.
 
 ---
 
@@ -54,28 +45,9 @@ Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on *
 - **Watchlist** — save titles from the catalog, search, or a Letterboxd import; view the whole list or just what's streaming on your services
 - **Sort & filter** — sort by rating, release date, recently added, or alphabetically; filter by media type
 - **Pagination** — smooth page-based browsing with a background sync indicator
-- **Progressive Web App (PWA)** — installable on iPhone via Safari, works offline via service worker
 - **User accounts** — JWT-based auth with register/login; preferences saved per user
-- **iOS app** — native Swift/SwiftUI companion app (Xcode project included)
-
----
-
-## 📱 Install on iPhone (PWA)
-
-WhatsOn is a Progressive Web App — you can add it to your iPhone Home Screen and it will run like a native app (full screen, no browser chrome).
-
-**Requirements:** iPhone running iOS 16.4 or later, Safari browser.
-
-**Steps:**
-
-1. Open **Safari** on your iPhone (must be Safari — Chrome/Firefox won't show the install option)
-2. Navigate to your WhatsOn Netlify URL — e.g. **`https://your-site-name.netlify.app`** (replace with the URL you got after deploying above)
-3. Tap the **Share** button (the box with an arrow pointing up) in the bottom toolbar
-4. Scroll down in the share sheet and tap **"Add to Home Screen"**
-5. Edit the name if you like (it defaults to "WhatsOn"), then tap **Add**
-6. The WhatsOn icon will appear on your Home Screen — tap it to launch
-
-> ℹ️ The app runs in standalone mode (no Safari address bar), caches content for offline use, and behaves like a native app.
+- **Letterboxd analytics** — import your export and see your history by rating, genre, director, decade and habit
+- **iOS app** — native Swift/SwiftUI, the only client
 
 ---
 
@@ -85,23 +57,14 @@ Three names appear in this repository, and all three are load-bearing:
 
 | Name | Where it appears | Why |
 |---|---|---|
-| **WhatsOn** | The product — app title, PWA manifest, iOS bundle, `WhatsOn/` sources | The current, user-facing brand |
-| **StreamScout** | The GitHub repository and the root `package.json` | The original project name; renaming the repo would break existing clones and the Netlify/Railway links |
-| **streamscore** | The Railway hostname in `netlify.toml` | The deployed backend's actual URL — changing it means re-pointing the service |
+| **WhatsOn** | The product — app title, iOS bundle, `WhatsOn/` sources | The current, user-facing brand |
+| **StreamScout** | The GitHub repository and the root `package.json` | The original project name; renaming the repo would break existing clones and the Railway link |
+| **streamscore** | The Railway hostname baked into the iOS client | The deployed backend's actual URL — changing it means re-pointing the service |
 
 New user-facing strings should say **WhatsOn**. The other two are infrastructure
 identifiers; leave them alone unless you are also updating the service they name.
 
 ## Tech Stack
-
-### Frontend (`web-frontend/`)
-| Layer | Tech |
-|---|---|
-| Framework | React 18 (Create React App) |
-| Styling | Inline styles + CSS-in-JS |
-| State | `useState`, `useReducer`, `useCallback`, `useMemo` |
-| PWA | Service Worker via CRA's `serviceWorkerRegistration` |
-| Build | `npm run build` → static files in `build/` |
 
 ### Backend (`backend/`)
 | Layer | Tech |
@@ -111,11 +74,12 @@ identifiers; leave them alone unless you are also updating the service they name
 | Auth | JWT (`jsonwebtoken`) + bcrypt |
 | External APIs | [TMDB](https://www.themoviedb.org/documentation/api) + [OMDB](https://www.omdbapi.com/) |
 | Rate limiting | `express-rate-limit` (20 req / 15 min on auth) |
-| Caching | Daily catalog cache in SQLite with background hydration |
+| Caching | Everything TMDB returns, kept in SQLite with no expiry; refreshed only on request |
 
 ### iOS (`WhatsOn/`)
-- Swift / SwiftUI
-- Native companion app — same backend, same account
+- Swift / SwiftUI, iOS 26, Liquid Glass
+- Swift Charts for the analytics screen
+- The only client
 
 ---
 
@@ -126,12 +90,10 @@ WhatsOn/
 ├── backend/              # Node/Express API server
 │   ├── index.js          # Express app, routes, auth
 │   ├── catalogCache.js   # SQLite catalog caching & rating hydration
+│   ├── titleCache.js     # Durable per-title detail cache
+│   ├── letterboxd.js     # Export parsing
+│   ├── analytics.js      # Diary aggregation
 │   ├── movieService.js   # TMDB + OMDB API calls
-│   └── package.json
-├── web-frontend/         # React PWA
-│   ├── src/
-│   │   ├── App.js        # Main single-file React app
-│   │   └── logos/        # Rating & platform logo assets
 │   └── package.json
 ├── logo/                 # Source logo assets
 ├── WhatsOn/          # iOS Swift app
@@ -145,19 +107,13 @@ WhatsOn/
 
 The icon source of truth is `/design/whatson-icon.svg`.
 
-Rebuild native iOS and web/PWA icons from that file with:
+Rebuild the native iOS icons from that file with:
 
 ```bash
 npm run icons
 ```
 
-This regenerates:
-- `WhatsOn/Assets.xcassets/AppIcon.appiconset/*.png`
-- `web-frontend/public/apple-touch-icon.png`
-- `web-frontend/public/logo192.png`
-- `web-frontend/public/logo512.png`
-- `web-frontend/public/whatson-logo.png`
-- `web-frontend/public/favicon.ico`
+This regenerates `WhatsOn/Assets.xcassets/AppIcon.appiconset/*.png`.
 
 ---
 
@@ -179,7 +135,6 @@ Create a `.env` file in `backend/`:
 
 ```env
 PORT=4000
-FRONTEND_URL=http://localhost:3000
 JWT_SECRET=your_jwt_secret_here
 TMDB_API_KEY=your_tmdb_key_here
 OMDB_API_KEY=your_omdb_key_here
@@ -193,24 +148,20 @@ npm start
 npx nodemon index.js
 ```
 
-### Frontend Setup
+### iOS Setup
 
-```bash
-cd web-frontend
-npm install
-npm start        # dev server at http://localhost:3000
-npm run build    # production build
-```
+Open `WhatsOn.xcodeproj` in Xcode 26+, set a signing team, and run. Point
+`API.baseURL` in `WhatsOn/APIModels.swift` at your backend.
 
 ---
 
 ## How It Works
 
-1. **Register / Log in** — creates a user account with hashed password; JWT returned and stored in `localStorage`
+1. **Register / Log in** — creates a user account with hashed password; JWT returned and stored in the iOS Keychain
 2. **Pick streaming platforms** — saved to your account; sent as query params to the catalog endpoint
-3. **Catalog fetch** — backend checks SQLite cache; if stale (> 24h), fetches fresh data from TMDB
+3. **Catalog fetch** — backend serves the SQLite snapshot. TMDB is called only when a scope has never been synced, or when Refresh Catalog asks for it
 4. **Rating hydration** — a background job enriches entries with IMDb/RT/Metacritic scores from OMDB. Titles you have saved go first: watchlist entries before watched ones, both before merely popular ones. Saved titles that never made the popular snapshot are hydrated separately, so an obscure film on your watchlist still gets scores. Everything lands in `title_ratings`, keyed by IMDb ID and shared across every user and platform combination, so each title costs one OMDB call ever
-5. **Daily refresh** — scheduled refresh at midnight recalculates catalog for all active scopes
+5. **Refresh** — nothing runs on a timer. Pressing Refresh Catalog re-syncs the catalog, revalidates saved-title availability, and re-reads the schedules behind Currently Watching
 
 ---
 
