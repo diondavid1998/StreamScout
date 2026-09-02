@@ -22,7 +22,7 @@ const {
   withTransaction,
   invalidateWatchlistAvailability,
 } = require('./catalogCache');
-const { getTitleDetails } = require('./titleCache');
+const { getTitleDetails, ensureAnalyticsDetails } = require('./titleCache');
 const {
   listCurrentlyWatching,
   addToCurrentlyWatching,
@@ -33,6 +33,8 @@ const {
   ensureSeriesDetails,
   seriesTmdbId,
 } = require('./currentlyWatching');
+const { readExport, filmKey } = require('./letterboxd');
+const { computeAnalytics } = require('./analytics');
 const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -742,6 +744,139 @@ function createApp(db, { disableRateLimit = false } = {}) {
         res.json({ success: true });
       }
     );
+  });
+
+  // ── Letterboxd diary ──────────────────────────────────────────────────────
+  //
+  // The whole export in one upload. The client hands over every CSV it found;
+  // this merges them, and the merged result *replaces* the user's diary, because
+  // a fresh export is the complete truth about their history and anything left
+  // from a previous upload is by definition stale.
+
+  app.post('/letterboxd/diary', authenticateToken, async (req, res) => {
+    const { files } = req.body || {};
+    if (!Array.isArray(files) || !files.length) {
+      return res.status(400).json({ error: 'files array required' });
+    }
+    if (files.length > 20) {
+      return res.status(400).json({ error: 'Too many files — a Letterboxd export has fewer than twenty' });
+    }
+
+    let parsed;
+    try {
+      parsed = readExport(files);
+    } catch (e) {
+      return res.status(400).json({ error: 'Could not read those CSVs', details: e.message });
+    }
+    if (!parsed.entries.length && !parsed.watchlist.length) {
+      return res.status(400).json({
+        error: 'No films found. Upload the folder from your Letterboxd export, not a single file.',
+        files: parsed.files,
+      });
+    }
+
+    try {
+      await withTransaction(db, async () => {
+        await runSql(db, 'DELETE FROM letterboxd_entries WHERE user_id = ?', [req.user.id]);
+        for (const entry of parsed.entries) {
+          await runSql(
+            db,
+            `INSERT INTO letterboxd_entries
+               (user_id, name, year, film_key, rating, watched_on, is_rewatch, tags_json, uri, source)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              req.user.id, entry.name, entry.year, filmKey(entry.name, entry.year),
+              entry.rating, entry.watchedOn, entry.isRewatch,
+              JSON.stringify(entry.tags), entry.uri, entry.source,
+            ]
+          );
+        }
+      });
+    } catch (e) {
+      console.error('[letterboxd] diary import failed:', e.message);
+      return res.status(500).json({ error: 'Could not save your diary' });
+    }
+
+    res.json({ success: true, ...parsed.stats, files: parsed.files });
+  });
+
+  app.get('/analytics', authenticateToken, async (req, res) => {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : null;
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : null;
+    try {
+      res.json(await computeAnalytics(db, req.user.id, { from, to }));
+    } catch (e) {
+      console.error('[analytics] failed:', e.message);
+      res.status(500).json({ error: 'Could not build your analytics', details: e.message });
+    }
+  });
+
+  /**
+   * Fill in genre and people data for films the diary has never resolved.
+   *
+   * Deliberately batched and resumable rather than one long request: a large
+   * history is thousands of films, and the client shows progress by calling
+   * this until `pending` reaches zero. Nothing here runs on a timer — it only
+   * happens because someone pressed the button.
+   */
+  app.post('/analytics/resolve', catalogLimiter, authenticateToken, async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 60, 1), 200);
+    try {
+      const pendingRows = await getRows(
+        db,
+        `SELECT film_key, name, year FROM letterboxd_entries
+          WHERE user_id = ? AND item_id IS NULL
+          GROUP BY film_key
+          LIMIT ?`,
+        [req.user.id, limit]
+      );
+      if (!pendingRows.length) {
+        const [{ pending = 0 } = {}] = await getRows(
+          db,
+          'SELECT COUNT(DISTINCT film_key) AS pending FROM letterboxd_entries WHERE user_id = ? AND item_id IS NULL',
+          [req.user.id]
+        );
+        return res.json({ resolved: 0, failed: 0, pending });
+      }
+
+      const matches = await resolveImportBatch(db, pendingRows.map(({ name, year }) => ({ name, year })));
+
+      let resolved = 0;
+      let failed = 0;
+      for (let i = 0; i < pendingRows.length; i++) {
+        const match = matches[i];
+        // A film TMDB cannot find is marked with the empty string rather than
+        // left NULL, so the next batch moves past it instead of retrying the
+        // same unresolvable rows forever.
+        const itemId = match?.itemId || '';
+        if (match?.itemId) resolved++; else failed++;
+        await runSql(
+          db,
+          'UPDATE letterboxd_entries SET item_id = ? WHERE user_id = ? AND film_key = ?',
+          [itemId, req.user.id, pendingRows[i].film_key]
+        );
+      }
+
+      // Now make sure the details behind each match are cached. Shared across
+      // every user, so a popular film is fetched once for the whole service.
+      const tmdbIds = matches
+        .filter((m) => m?.itemId && m.mediaType === 'movie')
+        .map((m) => parseInt(String(m.itemId).split('-')[1], 10))
+        .filter(Number.isInteger);
+      await mapWithConcurrency(tmdbIds, IMPORT_LOOKUP_CONCURRENCY, async (tmdbId) => {
+        try { await ensureAnalyticsDetails(db, tmdbId); } catch { /* one miss must not stop the batch */ }
+      });
+
+      const [{ pending = 0 } = {}] = await getRows(
+        db,
+        'SELECT COUNT(DISTINCT film_key) AS pending FROM letterboxd_entries WHERE user_id = ? AND item_id IS NULL',
+        [req.user.id]
+      );
+      res.json({ resolved, failed, pending });
+    } catch (e) {
+      console.error('[analytics/resolve] failed:', e.message);
+      res.status(500).json({ error: 'Could not resolve titles', details: e.message });
+    }
   });
 
   // ── Currently Watching ────────────────────────────────────────────────────

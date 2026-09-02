@@ -8,6 +8,7 @@ const {
 } = require('./movieService');
 const { ensureTitleCacheTables } = require('./titleCache');
 const { ensureCurrentlyWatchingTables } = require('./currentlyWatching');
+const { ensureAnalyticsTables } = require('./analytics');
 
 // Nothing in this app refreshes on a clock.
 //
@@ -357,6 +358,7 @@ async function ensureCatalogTables(db) {
   // so every bootstrap path — production, tests — gets them from one place.
   await ensureTitleCacheTables(db);
   await ensureCurrentlyWatchingTables(db);
+  await ensureAnalyticsTables(db);
 
   // Invalidate catalog cache if provider IDs have changed since last deploy
   const versionRow = await get(db, `SELECT value FROM app_settings WHERE key = 'provider_config_version'`);

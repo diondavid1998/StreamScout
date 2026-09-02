@@ -52,6 +52,26 @@ async function ensureTitleCacheTables(db) {
       PRIMARY KEY (media_type, tmdb_id)
     )`
   );
+
+  // Added after the table shipped, so existing rows have them as NULL. A NULL
+  // imdb_id is treated as "not resolved for analytics" rather than migrated,
+  // which lets the resolve step refill it on demand instead of forcing a sweep.
+  const columns = await new Promise((resolve) =>
+    db.all('PRAGMA table_info(title_details_cache)', [], (err, rows) => resolve(err ? [] : rows || []))
+  );
+  for (const [name, ddl] of [
+    ['imdb_id', 'imdb_id TEXT'],
+    ['original_language', 'original_language TEXT'],
+    ['production_countries', 'production_countries TEXT'],
+  ]) {
+    if (columns.some((c) => c.name === name)) continue;
+    await new Promise((resolve) =>
+      db.run(`ALTER TABLE title_details_cache ADD COLUMN ${ddl}`, (err) => {
+        if (err) console.warn(`Could not add title_details_cache.${name}: ${err.message}`);
+        resolve();
+      })
+    );
+  }
 }
 
 /** The three fields the Currently Watching copy is derived from. */
@@ -96,6 +116,9 @@ function normalizeDetails(data, mediaType) {
     directors,
     numberOfSeasons: data.number_of_seasons || null,
     numberOfEpisodes: data.number_of_episodes || null,
+    imdbId: data.external_ids?.imdb_id || null,
+    originalLanguage: data.original_language || null,
+    productionCountries: (data.production_countries || []).map((c) => c.name),
   };
 }
 
@@ -121,8 +144,9 @@ async function storeDetails(db, mediaType, tmdbId, data) {
   await run(
     db,
     `INSERT OR REPLACE INTO title_details_cache
-       (media_type, tmdb_id, payload_json, series_status, next_air_date, last_air_date, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (media_type, tmdb_id, payload_json, series_status, next_air_date, last_air_date,
+        imdb_id, original_language, production_countries, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       mediaType,
       tmdbId,
@@ -130,6 +154,9 @@ async function storeDetails(db, mediaType, tmdbId, data) {
       series.status,
       series.nextAirDate,
       series.lastAirDate,
+      payload.imdbId,
+      payload.originalLanguage,
+      JSON.stringify(payload.productionCountries || []),
       new Date().toISOString(),
     ]
   );
@@ -159,6 +186,27 @@ async function getTitleDetails(db, mediaType, tmdbId, { forceRefresh = false } =
 
   const { payload } = await storeDetails(db, mediaType, tmdbId, data);
   return { ...payload, cached: false };
+}
+
+/**
+ * Make sure a film's details are cached, and carry an IMDb id.
+ *
+ * A row written before `imdb_id` existed is complete for the detail page but
+ * useless to the analytics page, which reaches the shared ratings table through
+ * that id. Treating a NULL as a miss refills those rows the first time someone
+ * actually needs them, rather than sweeping the whole table.
+ */
+async function ensureAnalyticsDetails(db, tmdbId) {
+  const row = await get(
+    db,
+    'SELECT imdb_id FROM title_details_cache WHERE media_type = ? AND tmdb_id = ?',
+    ['movie', tmdbId]
+  );
+  if (row && row.imdb_id) return false;
+  const data = await fetchTitleWithCredits('movie', tmdbId);
+  if (!data?.id) return false;
+  await storeDetails(db, 'movie', tmdbId, data);
+  return true;
 }
 
 /** The stored schedule fields for a set of TMDB series ids, keyed by id. */
@@ -192,5 +240,6 @@ module.exports = {
   readCachedDetails,
   storeDetails,
   getTitleDetails,
+  ensureAnalyticsDetails,
   readSeriesStatuses,
 };
