@@ -334,3 +334,81 @@ describe('an export with no diary.csv', () => {
     expect(res.body.files[0].kind).toBe('ratings');
   });
 });
+
+describe('re-importing an export', () => {
+  const BASE = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Alpha,2001,https://boxd.it/a,4',
+    '2026-01-01,Beta,2002,https://boxd.it/b,5',
+    '2026-01-01,Gamma,2003,https://boxd.it/c,3',
+  ].join('\n');
+  const PLUS_ONE = `${BASE}\n2026-02-01,Delta,2004,https://boxd.it/d,4`;
+
+  beforeEach(() => {
+    let next = 100;
+    searchTitleOnTmdb.mockImplementation(async (name) => ({
+      itemId: `movie-${++next}`, mediaType: 'movie', title: name, posterUrl: null,
+    }));
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: `Film ${id}`, genres: [{ name: 'Drama' }], runtime: 100,
+      external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: [{ id: 1, name: 'An Actor' }], crew: [{ job: 'Director', name: 'A Director' }] },
+    }));
+  });
+
+  test('only the genuinely new film needs looking up', async () => {
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: BASE }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect((await auth(request(app).get('/analytics'))).body.coverage.pending).toBe(0);
+
+    searchTitleOnTmdb.mockClear();
+    fetchTitleWithCredits.mockClear();
+
+    // A re-upload writes fresh rows with a NULL item_id. Without adopting what
+    // the shared cache already knows, all four would report as pending and the
+    // page would offer to look up a whole history to learn one film.
+    const reimport = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: PLUS_ONE }] });
+    expect(reimport.body.alreadyKnown).toBe(3);
+
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(body.coverage.films).toBe(4);
+    expect(body.coverage.resolved).toBe(3);
+    expect(body.coverage.pending).toBe(1);
+
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect(searchTitleOnTmdb).toHaveBeenCalledTimes(1);
+    expect(fetchTitleWithCredits).toHaveBeenCalledTimes(1);
+  });
+
+  test('an identical re-import leaves nothing to do', async () => {
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: BASE }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+
+    searchTitleOnTmdb.mockClear();
+    const again = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: BASE }] });
+
+    expect(again.body.alreadyKnown).toBe(3);
+    expect((await auth(request(app).get('/analytics'))).body.coverage.pending).toBe(0);
+    expect(searchTitleOnTmdb).not.toHaveBeenCalled();
+  });
+
+  test('a film another user resolved is adopted without a lookup', async () => {
+    // The lookup cache is shared, so the second account inherits the first
+    // account's work the moment it imports.
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: BASE }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+
+    const second = await request(app).post('/register').send({ username: 'othercinephile', password: 'secret1' });
+    const auth2 = (req) => req.set('Authorization', `Bearer ${second.body.token}`);
+
+    searchTitleOnTmdb.mockClear();
+    const imported = await auth2(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: BASE }] });
+
+    expect(imported.body.alreadyKnown).toBe(3);
+    expect((await auth2(request(app).get('/analytics'))).body.coverage.pending).toBe(0);
+    expect(searchTitleOnTmdb).not.toHaveBeenCalled();
+  });
+});
