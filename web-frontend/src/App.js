@@ -298,31 +298,76 @@ const styles = {
   },
   platformGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(108px, 1fr))',
+    // 84px rather than 108px, and the panel is no longer squeezed into half the
+    // width, so the same 25 services fit in four rows instead of nine.
+    gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))',
     gap: 14,
     width: '100%',
-    marginBottom: 24,
+    marginBottom: 8,
     marginTop: 8,
   },
-  platformCard: {
+  // Services and Languages stack instead of sharing a two-column grid.
+  //
+  // Side by side, the service grid got half the width — three tiles per row,
+  // nine rows — while Languages needed 465px and was stretched to match, so the
+  // settings page ran to 2,055px with about 1,100px of that empty.
+  settingsPanelStack: {
     width: '100%',
-    minHeight: 108,
-    borderRadius: 16,
-    background: 'rgba(255,255,255,0.04)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    marginBottom: 20,
+  },
+  // A service tile is one box, not two.
+  //
+  // It used to be a bordered card containing a *second* bordered square for the
+  // logo — a box inside a box, with a third grey inside that for the monogram
+  // services. Now the logo square is the whole control and the name sits under
+  // it on the page, the way an icon grid reads.
+  platformCard: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
-    border: '1.5px solid rgba(255,255,255,0.07)',
-    cursor: 'pointer',
-    padding: '12px 8px',
-    boxSizing: 'border-box',
     gap: 8,
+    cursor: 'pointer',
+    userSelect: 'none',
   },
-  platformCardSelected: {
-    border: '1.5px solid rgba(140,123,255,0.65)',
-    background: 'linear-gradient(160deg, rgba(140,123,255,0.14) 0%, rgba(95,77,214,0.09) 100%)',
-    boxShadow: '0 8px 28px rgba(140,123,255,0.22), inset 0 1px 0 rgba(255,255,255,0.07)',
+  platformFace: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: '1 / 1',
+    borderRadius: 18,
+    background: 'rgba(255,255,255,0.055)',
+    border: '1px solid rgba(255,255,255,0.09)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    boxSizing: 'border-box',
+    transition: 'border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease',
+  },
+  platformFaceSelected: {
+    border: '1px solid rgba(140,123,255,0.8)',
+    background: 'rgba(140,123,255,0.16)',
+    // A ring rather than a wash: it reads at a glance without repainting the
+    // brand logo underneath it.
+    boxShadow: '0 0 0 3px rgba(140,123,255,0.2)',
+  },
+  platformCheck: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 19,
+    height: 19,
+    borderRadius: 999,
+    background: '#6D5BE8',
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 800,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.45)',
   },
   platformLabel: {
     textAlign: 'center',
@@ -331,11 +376,17 @@ const styles = {
     fontWeight: 600,
     userSelect: 'none',
     maxWidth: '100%',
-    lineHeight: 1.3,
+    lineHeight: 1.25,
+    // Five of the names wrap to two lines. Reserving both for every tile keeps
+    // the gaps between rows equal instead of jumping wherever a name is long.
+    minHeight: 28,
+  },
+  platformLabelSelected: {
+    color: '#C4BAFF',
   },
   platformLogo: {
-    width: 70,
-    height: 70,
+    width: '100%',
+    height: '100%',
     objectFit: 'contain',
     objectPosition: 'center',
     display: 'block',
@@ -407,20 +458,13 @@ const styles = {
     fontFamily: 'inherit',
     flexShrink: 0,
   },
-  // Stand-in for services with no bundled logo asset.
+  // Stand-in for services with no bundled logo. No background of its own — the
+  // face it sits on is the surface.
   platformMonogram: {
-    width: 70,
-    height: 70,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    background: 'rgba(255,255,255,0.07)',
-    border: '1px solid rgba(255,255,255,0.1)',
     color: '#c0c8d8',
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 800,
-    letterSpacing: '0.02em',
+    letterSpacing: '0.06em',
   },
   sectionActions: {
     width: '100%',
@@ -895,10 +939,45 @@ function formatUpdatedAt(iso) {
     : then.toLocaleDateString([], { day: 'numeric', month: 'short' });
 }
 
+/**
+ * A stable hue for a service with no bundled logo, derived from its name.
+ *
+ * Fifteen of the twenty-five services have no logo asset, and rendering them
+ * all on the same grey read as fifteen broken images sitting next to ten brand
+ * marks. A tint per service makes them look chosen rather than missing, and
+ * because the hue comes from the name it never moves between sessions.
+ *
+ * Lightness is fixed at 24% behind 84% text, which holds well past 4.5:1 at
+ * every hue, so this cannot quietly create an unreadable tile.
+ */
+function platformTint(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 360;
+  return {
+    background: `hsl(${hash} 34% 24%)`,
+    borderColor: `hsl(${hash} 34% 34%)`,
+    color: `hsl(${hash} 52% 84%)`,
+  };
+}
+
+/**
+ * Stand-in mark for a service with no bundled logo.
+ *
+ * Two letters collided four ways across the current service list — Starz and
+ * Sling TV were both "ST", Showtime and Shudder both "SH" — which put two
+ * identical tiles in the same grid. Three letters for a one-word name settles
+ * all of them, and dropping a leading "The" turns "The Roku Channel" into RC
+ * rather than TR.
+ */
 function platformMonogram(name) {
-  const words = String(name).split(/[\s+]+/).filter(Boolean);
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const words = String(name)
+    .replace(/\+/g, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word, i) => !(i === 0 && /^the$/i.test(word)));
+  if (!words.length) return '?';
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+  return words.slice(0, 3).map((w) => w[0]).join('').toUpperCase();
 }
 
 const ratingLogos = {
@@ -2070,24 +2149,41 @@ function App() {
                   setSelected((current) => current.filter((value) => value !== platform.key));
                 }
               }}
-              style={{ display: 'none' }}
+              className="platform-input"
             />
             <label
               htmlFor={`platform-${platform.key}`}
               className="platform-tile"
-              style={{
-                ...styles.platformCard,
-                ...(isSelected ? styles.platformCardSelected : {}),
-              }}
+              style={styles.platformCard}
             >
-              {platform.logo ? (
-                <img src={platform.logo} alt={platform.name} style={styles.platformLogo} className="platform-tile-logo" />
-              ) : (
-                <span style={styles.platformMonogram} className="platform-tile-logo">
-                  {platformMonogram(platform.name)}
-                </span>
-              )}
-              <span style={styles.platformLabel} className="platform-tile-label">{platform.name}</span>
+              <span
+                className="platform-tile-face"
+                style={{
+                  ...styles.platformFace,
+                  ...(platform.logo ? {} : platformTint(platform.name)),
+                  ...(isSelected ? styles.platformFaceSelected : {}),
+                }}
+              >
+                {platform.logo ? (
+                  <img src={platform.logo} alt="" style={styles.platformLogo} className="platform-tile-logo" />
+                ) : (
+                  <span
+                    style={{ ...styles.platformMonogram, color: platformTint(platform.name).color }}
+                    className="platform-tile-logo"
+                  >
+                    {platformMonogram(platform.name)}
+                  </span>
+                )}
+                {/* A tick as well as the ring: colour alone should not be the
+                    only thing carrying "this one is on". */}
+                {isSelected ? <span style={styles.platformCheck} aria-hidden="true">✓</span> : null}
+              </span>
+              <span
+                style={{ ...styles.platformLabel, ...(isSelected ? styles.platformLabelSelected : {}) }}
+                className="platform-tile-label"
+              >
+                {platform.name}
+              </span>
             </label>
           </div>
         );
@@ -2282,7 +2378,7 @@ function App() {
             {/* ── Services Tab ── */}
             {(isFirstSetup || settingsTab === 'services') && (
               <>
-                <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
+                <div style={styles.settingsPanelStack}>
                   <details style={styles.dropdownPanel} open>
                     <summary style={styles.dropdownSummary}>
                       <span>Streaming Services</span>

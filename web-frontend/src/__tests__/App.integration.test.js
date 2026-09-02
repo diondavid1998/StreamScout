@@ -720,3 +720,45 @@ describe('View toggles stay reachable', () => {
     );
   });
 });
+
+describe('Service picker', () => {
+  beforeEach(() => {
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
+  });
+
+  it('gives every service a distinct mark and a reachable checkbox', async () => {
+    setupApiMock({ platforms: [], catalog: SAMPLE_CATALOG });
+    render(<App />);
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /Save and Continue/i })).toBeInTheDocument(),
+      { timeout: 8000 }
+    );
+
+    // The checkbox used to be display:none, which takes it out of the tab order
+    // entirely — the whole picker was unreachable without a mouse.
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes.length).toBeGreaterThan(20);
+    boxes[0].focus();
+    expect(document.activeElement).toBe(boxes[0]);
+
+    // Two-letter monograms collided four ways (Starz/Sling TV, Showtime/Shudder).
+    const marks = Array.from(document.querySelectorAll('.platform-tile-face span.platform-tile-logo'))
+      .map((el) => el.textContent.trim())
+      .filter(Boolean);
+    expect(marks.length).toBeGreaterThan(10);
+    expect(new Set(marks).size).toBe(marks.length);
+  });
+
+  it('marks a selected service with a tick, not colour alone', async () => {
+    setupApiMock({ platforms: ['netflix'], catalog: SAMPLE_CATALOG });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+    fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+
+    const netflix = await screen.findByRole('checkbox', { name: /Netflix/i });
+    expect(netflix.checked).toBe(true);
+    // The tick lives on the face next to the hidden input.
+    expect(netflix.nextElementSibling.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+  });
+});
