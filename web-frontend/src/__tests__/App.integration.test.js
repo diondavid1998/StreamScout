@@ -685,3 +685,38 @@ describe('Currently Watching', () => {
     }, { timeout: 8000 });
   });
 });
+
+describe('View toggles stay reachable', () => {
+  beforeEach(() => {
+    localStorage.setItem('whatsOn.authToken', 'mock-jwt');
+    localStorage.setItem('whatsOn.username', 'testuser');
+  });
+
+  it('keeps the Currently Watching toggle when the last show is removed', async () => {
+    setupApiMock({
+      catalog: SAMPLE_CATALOG,
+      currentlyWatching: [{
+        itemId: 'tv-456',
+        tmdbId: 456,
+        title: 'Test Show',
+        posterUrl: null,
+        state: 'ended',
+        scheduleMessage: 'All episodes and seasons out',
+        hasNewEpisode: false,
+      }],
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('Test Movie')).toBeInTheDocument(), { timeout: 8000 });
+
+    fireEvent.click(await screen.findByRole('button', { name: /○ Currently watching/i }));
+    expect(await screen.findByText(/All episodes and seasons out/)).toBeInTheDocument();
+
+    // Drop the only show while the view is open. The toggle is the only way
+    // back to the catalog, so it has to outlive the last row.
+    fireEvent.click(screen.getByRole('button', { name: /Stop currently watching/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /📺 Currently watching/i })).toBeInTheDocument()
+    );
+  });
+});

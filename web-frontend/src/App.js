@@ -2698,7 +2698,10 @@ function App() {
             {/* Currently Watching — the third list. A view, not a filter over the
                 catalog: these rows come from their own endpoint and carry a
                 schedule line the catalog has no concept of. */}
-            {!isSearching && currentlyWatchingIds.size > 0 && (
+            {/* `|| currentlyWatchingOnly` matters: removing the last show while
+                the view is on would otherwise take the toggle away with it and
+                strand the user in an empty list with no way back to the catalog. */}
+            {!isSearching && (currentlyWatchingIds.size > 0 || currentlyWatchingOnly) && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(currentlyWatchingOnly ? { background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.5)', color: '#f5b544' } : {}) }}
@@ -2723,7 +2726,7 @@ function App() {
             )}
 
             {/* From Watchlist toggle — the whole watchlist, streaming or not */}
-            {!isSearching && watchlistIds.size > 0 && (
+            {!isSearching && (watchlistIds.size > 0 || watchlistOnly) && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(watchlistOnly ? { background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.5)', color: '#8b82ff' } : {}) }}
@@ -2735,7 +2738,7 @@ function App() {
             )}
 
             {/* Streaming Watchlist toggle — only the ones you can watch now */}
-            {!isSearching && watchlistIds.size > 0 && selected.length > 0 && (
+            {!isSearching && (watchlistIds.size > 0 || streamingWatchlist) && selected.length > 0 && (
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(streamingWatchlist ? { background: 'rgba(1,210,119,0.12)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277' } : {}) }}
