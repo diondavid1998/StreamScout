@@ -68,6 +68,9 @@ final class AppState {
     var selectedLanguages: [String] = []
     var watchedIds: Set<String> = []
     var watchlistIds: Set<String> = []
+    /// Series in progress. Series only, and exclusive with the other two: the
+    /// server moves a show out of the watchlist when it lands here.
+    var currentlyWatchingIds: Set<String> = []
     var selectedThemeId: String = AppTheme.defaultTheme.id
 
     private let tokenKey      = "mk_token"
@@ -76,6 +79,7 @@ final class AppState {
     private let languagesKey  = "mk_languages"
     private let watchedKey    = "mk_watched_ids"
     private let watchlistKey  = "mk_watchlist_ids"
+    private let currentKey    = "mk_currently_watching_ids"
     private let themeKey      = "mk_theme_id"
     private let defaults: UserDefaults
 
@@ -95,6 +99,7 @@ final class AppState {
         selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
         watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])
         watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])
+        currentlyWatchingIds = Set(defaults.stringArray(forKey: currentKey) ?? [])
 
         let theme = AppTheme.theme(with: defaults.string(forKey: themeKey) ?? AppTheme.defaultTheme.id)
         selectedThemeId = theme.id
@@ -152,6 +157,23 @@ final class AppState {
         defaults.set(ids, forKey: watchlistKey)
     }
 
+    func setCurrentlyWatching(_ id: String, on: Bool) {
+        if on {
+            currentlyWatchingIds.insert(id)
+            // Mirrors what the server just did, so the bookmark control does not
+            // keep claiming the show is still saved for later.
+            setWatchlisted(id, on: false)
+        } else {
+            currentlyWatchingIds.remove(id)
+        }
+        defaults.set(Array(currentlyWatchingIds), forKey: currentKey)
+    }
+
+    func replaceCurrentlyWatchingIds(_ ids: [String]) {
+        currentlyWatchingIds = Set(ids)
+        defaults.set(ids, forKey: currentKey)
+    }
+
     func saveTheme(_ id: String) {
         let theme = AppTheme.theme(with: id)
         selectedThemeId = theme.id
@@ -166,6 +188,7 @@ final class AppState {
         selectedLanguages = []
         watchedIds = []
         watchlistIds = []
+        currentlyWatchingIds = []
 
         KeychainStore.delete()
         defaults.removeObject(forKey: tokenKey)
@@ -174,6 +197,7 @@ final class AppState {
         defaults.removeObject(forKey: languagesKey)
         defaults.removeObject(forKey: watchedKey)
         defaults.removeObject(forKey: watchlistKey)
+        defaults.removeObject(forKey: currentKey)
         page = .auth
     }
 }
@@ -755,6 +779,7 @@ struct PlatformTile: View {
 struct CatalogView: View {
     enum MainTab: String, CaseIterable, Identifiable {
         case discover
+        case watching
         case watched
         case watchlist
 
@@ -762,6 +787,7 @@ struct CatalogView: View {
         var label: String {
             switch self {
             case .discover: return "Discover"
+            case .watching: return "Watching"
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
             }
@@ -769,6 +795,7 @@ struct CatalogView: View {
         var systemImage: String {
             switch self {
             case .discover: return "safari"
+            case .watching: return "play.tv"
             case .watched: return "checkmark.circle"
             case .watchlist: return "bookmark"
             }
@@ -776,6 +803,7 @@ struct CatalogView: View {
         var title: String {
             switch self {
             case .discover: return "Streaming Catalog"
+            case .watching: return "Currently Watching"
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
             }
@@ -828,6 +856,7 @@ struct CatalogView: View {
     @State private var isSearchLoading = false
     @State private var searchTask: Task<Void, Never>?
     @State private var showLogoutAlert = false
+    @State private var showAnalytics = false
 
     static let allGenres: [(key: String, label: String)] = [
         ("Action","Action"), ("Adventure","Adventure"), ("Animation","Animation"),
@@ -853,6 +882,8 @@ struct CatalogView: View {
                     switch mainTab {
                     case .discover:
                         discoverContent
+                    case .watching:
+                        CurrentlyWatchingTabView().environment(app)
                     case .watched:
                         WatchedOnlyTabView().environment(app)
                     case .watchlist:
@@ -867,6 +898,9 @@ struct CatalogView: View {
         }
         .sheet(isPresented: $showSettingsView) {
             SettingsView().environment(app)
+        }
+        .sheet(isPresented: $showAnalytics) {
+            AnalyticsView().environment(app)
         }
         .sheet(isPresented: $showGenrePicker) {
             GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
@@ -997,6 +1031,7 @@ struct CatalogView: View {
             if mainTab == .discover {
                 IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
             }
+            IconButton(icon: "chart.bar.xaxis") { showAnalytics = true }
             IconButton(icon: "gearshape.fill") { showSettingsView = true }
             IconButton(icon: "rectangle.portrait.and.arrow.right") { showLogoutAlert = true }
         }
@@ -1385,12 +1420,14 @@ struct MovieCardView: View {
     @Environment(AppState.self) private var app
     @State private var isTogglingWatched = false
     @State private var isTogglingWatchlist = false
+    @State private var isTogglingCurrent = false
     /// Dominant color extracted from the poster; nil until the async fetch completes.
     /// It no longer tints the whole card — see `edgeTint`.
     @State private var dominantColor: Color? = nil
     var isTV: Bool { movie.mediaType == "tv" }
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
     var isWatchlisted: Bool { app.watchlistIds.contains(movie.id) }
+    var isCurrentlyWatching: Bool { app.currentlyWatchingIds.contains(movie.id) }
     var mediaType: String { movie.mediaType ?? "movie" }
     var tmdbId: String {
         let parts = movie.id.split(separator: "-")
@@ -1543,6 +1580,9 @@ struct MovieCardView: View {
                 // Watchlist and watched sit together. The bookmark used to hide in
                 // the poster's corner, where it read as decoration.
                 HStack(spacing: 6) {
+                    // Series only — a film has no next episode, so the control
+                    // would toggle a state with nothing to say.
+                    if isTV { currentlyWatchingToggleButton }
                     watchlistToggleButton
                     watchedToggleButton
                 }
@@ -1640,6 +1680,51 @@ struct MovieCardView: View {
             if case .unauthorized = err { app.logout() }
         } catch { }
         isTogglingWatched = false
+    }
+
+    var currentlyWatchingToggleButton: some View {
+        Button { Task { await toggleCurrentlyWatching() } } label: {
+            Group {
+                if isTogglingCurrent {
+                    ProgressView().scaleEffect(0.6).tint(.orange)
+                        .frame(width: 22, height: 22)
+                } else {
+                    Image(systemName: isCurrentlyWatching ? "play.tv.fill" : "play.tv")
+                        .font(.system(size: 17))
+                        .foregroundColor(isCurrentlyWatching ? .orange : .mkMuted.opacity(0.7))
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: isCurrentlyWatching)
+                }
+            }
+            .frame(width: 26, height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isTogglingCurrent)
+        .accessibilityLabel(isCurrentlyWatching ? "Stop currently watching" : "Currently watching")
+        .sensoryFeedback(.success, trigger: isCurrentlyWatching)
+    }
+
+    @MainActor func toggleCurrentlyWatching() async {
+        isTogglingCurrent = true
+        do {
+            if isCurrentlyWatching {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/currently-watching/\(movie.id)", token: app.token
+                )
+                app.setCurrentlyWatching(movie.id, on: false)
+            } else {
+                let body: [String: String] = ["itemId": movie.id, "title": movie.title,
+                                              "posterUrl": movie.posterUrl ?? ""]
+                let _: ToggleWatchedResponse = try await APIService.shared.post(
+                    "/currently-watching", body: body, token: app.token
+                )
+                app.setCurrentlyWatching(movie.id, on: true)
+            }
+        } catch let err as APIError {
+            if case .unauthorized = err { app.logout() }
+        } catch { }
+        isTogglingCurrent = false
     }
 
     var watchlistToggleButton: some View {
@@ -2427,12 +2512,15 @@ struct DetailSheet: View {
     @State private var detailsError: String? = nil
     @State private var isTogglingWatched = false
     @State private var isTogglingWatchlist = false
+    @State private var isTogglingCurrent = false
     /// Drives the hero wash. One title on screen, so a full-strength tint reads
     /// as this film's colour rather than as noise.
     @State private var dominantColor: Color? = nil
 
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
     var isWatchlisted: Bool { app.watchlistIds.contains(movie.id) }
+    var isCurrentlyWatching: Bool { app.currentlyWatchingIds.contains(movie.id) }
+    var isTV: Bool { movie.mediaType == "tv" }
     var mediaType: String { movie.mediaType ?? "movie" }
     var tmdbId: String {
         let parts = movie.id.split(separator: "-")
@@ -2730,6 +2818,36 @@ struct DetailSheet: View {
     var actionBar: some View {
         GlassEffectContainer {
             HStack(spacing: 6) {
+                // Series only. Three capsules is the most this bar can hold at a
+                // readable size, which is why the labels here are one word.
+                if isTV {
+                    Button { Task { await toggleCurrentlyWatching() } } label: {
+                        HStack(spacing: 8) {
+                            if isTogglingCurrent {
+                                ProgressView().scaleEffect(0.7).tint(.orange)
+                            } else {
+                                Image(systemName: isCurrentlyWatching ? "play.tv.fill" : "play.tv")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .contentTransition(.symbolEffect(.replace))
+                            }
+                            Text("Watching")
+                                .font(.system(size: 14.5, weight: .semibold))
+                        }
+                        .foregroundColor(isCurrentlyWatching ? .orange : .mkText)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isTogglingCurrent)
+                    .glassEffect(
+                        isCurrentlyWatching ? .regular.tint(Color.orange.opacity(0.5)).interactive() : .clear,
+                        in: Capsule()
+                    )
+                    .accessibilityLabel(isCurrentlyWatching ? "Stop currently watching" : "Currently watching")
+                    .sensoryFeedback(.success, trigger: isCurrentlyWatching)
+                }
+
                 Button { Task { await toggleWatchlist() } } label: {
                     HStack(spacing: 8) {
                         if isTogglingWatchlist {
@@ -2785,6 +2903,28 @@ struct DetailSheet: View {
         .glassEffect(.regular, in: Capsule())
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
+    }
+
+    @MainActor func toggleCurrentlyWatching() async {
+        isTogglingCurrent = true
+        do {
+            if isCurrentlyWatching {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/currently-watching/\(movie.id)", token: app.token
+                )
+                app.setCurrentlyWatching(movie.id, on: false)
+            } else {
+                let body: [String: String] = ["itemId": movie.id, "title": movie.title,
+                                              "posterUrl": movie.posterUrl ?? ""]
+                let _: ToggleWatchedResponse = try await APIService.shared.post(
+                    "/currently-watching", body: body, token: app.token
+                )
+                app.setCurrentlyWatching(movie.id, on: true)
+            }
+        } catch let err as APIError {
+            if case .unauthorized = err { app.logout() }
+        } catch { }
+        isTogglingCurrent = false
     }
 
     // Reusable labeled section block
@@ -3835,6 +3975,235 @@ struct ClearListBar: View {
 }
 
 // MARK: Watchlist Tab
+
+/// Currently Watching — the third list.
+///
+/// It differs from the other two lists in one way: each row carries a sentence
+/// about the show's schedule, and a dot when something has aired since the user
+/// last said they were caught up. Both come from the server, which composes the
+/// copy once so this app and the web app never say different things about the
+/// same show.
+struct CurrentlyWatchingTabView: View {
+    @Environment(AppState.self) private var app
+    @State private var items: [CurrentlyWatchingItem] = []
+    @State private var isLoading = true
+    @State private var isClearing = false
+    @State private var confirmClear = false
+    @State private var newEpisodesOnly = false
+
+    /// Filtered locally: the server already sorts new-first, and a round trip
+    /// for a toggle the user may flip twice is not worth the latency.
+    var visible: [CurrentlyWatchingItem] {
+        newEpisodesOnly ? items.filter { $0.hasNewEpisode == true } : items
+    }
+
+    var newCount: Int { items.filter { $0.hasNewEpisode == true }.count }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !items.isEmpty {
+                filterBar
+                ClearListBar(
+                    count: items.count,
+                    label: "currently watching list",
+                    isClearing: isClearing,
+                    action: { confirmClear = true }
+                )
+            }
+            content
+        }
+        .confirmationDialog(
+            "Clear Currently Watching?",
+            isPresented: $confirmClear,
+            titleVisibility: .visible
+        ) {
+            Button("Remove all \(items.count) shows", role: .destructive) {
+                Task { await clearAll() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    var filterBar: some View {
+        HStack {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { newEpisodesOnly.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: newEpisodesOnly ? "largecircle.fill.circle" : "circle")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("New episodes only")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(newEpisodesOnly ? .orange : .mkMuted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    (newEpisodesOnly ? Color.orange.opacity(0.14) : Color.mkSubtleFill),
+                    in: Capsule()
+                )
+                .overlay(
+                    Capsule().stroke(
+                        newEpisodesOnly ? Color.orange.opacity(0.4) : Color.mkBorder,
+                        lineWidth: 1
+                    )
+                )
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            if newCount > 0 {
+                Text("\(newCount) with new episodes")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.orange)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+    }
+
+    var content: some View {
+        Group {
+            if isLoading {
+                VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
+            } else if items.isEmpty {
+                emptyState(
+                    icon: "play.tv",
+                    title: "Nothing in progress",
+                    detail: "Add a series from the catalog and this list will tell you what day new episodes land."
+                )
+            } else if visible.isEmpty {
+                emptyState(
+                    icon: "checkmark.circle",
+                    title: "All caught up",
+                    detail: "Nothing has aired since you last marked these shows as caught up."
+                )
+            } else {
+                List {
+                    ForEach(visible) { item in
+                        showRow(item)
+                    }
+                    .onDelete { offsets in Task { await removeItem(at: offsets) } }
+                }
+                .listStyle(.plain)
+                .background(Color.mkBackground)
+            }
+        }
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    func emptyState(icon: String, title: String, detail: String) -> some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: icon).font(.system(size: 44)).foregroundColor(.mkMuted)
+            Text(title).font(.title3).bold().foregroundColor(.mkMuted)
+            Text(detail)
+                .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
+                .multilineTextAlignment(.center).padding(.horizontal, 40)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    func showRow(_ item: CurrentlyWatchingItem) -> some View {
+        let isNew = item.hasNewEpisode == true
+        HStack(spacing: 12) {
+            Image(systemName: isNew ? "play.tv.fill" : "play.tv")
+                .foregroundColor(isNew ? .orange : .mkAccent)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title ?? "Unknown Title")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.mkText)
+                HStack(spacing: 5) {
+                    if isNew {
+                        Circle().fill(Color.orange).frame(width: 6, height: 6)
+                    }
+                    Text(item.scheduleMessage ?? "Schedule not loaded yet")
+                        .font(.caption)
+                        .foregroundColor(isNew ? .orange : .mkMuted)
+                }
+            }
+            Spacer()
+            if isNew {
+                Button {
+                    Task { await markCaughtUp(item) }
+                } label: {
+                    Text("Caught up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.mkAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.mkAccent.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Mark \(item.title ?? "show") caught up")
+            }
+        }
+        .listRowBackground(Color.mkSurface)
+    }
+
+    @MainActor func load() async {
+        isLoading = true
+        if let resp: CurrentlyWatchingResponse = try? await APIService.shared.get(
+            "/currently-watching", token: app.token
+        ) {
+            let loaded = resp.items ?? []
+            items = loaded
+            app.replaceCurrentlyWatchingIds(loaded.map { $0.itemId })
+        }
+        isLoading = false
+    }
+
+    @MainActor func markCaughtUp(_ item: CurrentlyWatchingItem) async {
+        // Optimistic: the dot is the whole point of the row, so it should clear
+        // the moment it is tapped rather than after a round trip.
+        items = items.map { row in
+            row.itemId == item.itemId ? row.markedCaughtUp() : row
+        }
+        do {
+            let _: SimpleResponse = try await APIService.shared.post(
+                "/currently-watching/\(item.itemId)/caught-up", body: [:], token: app.token
+            )
+        } catch {
+            await load()
+        }
+    }
+
+    @MainActor func clearAll() async {
+        isClearing = true
+        let previous = items
+        items = []
+        do {
+            let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                "/currently-watching", token: app.token
+            )
+            app.replaceCurrentlyWatchingIds([])
+        } catch let err as APIError {
+            items = previous
+            if case .unauthorized = err { app.logout() }
+        } catch {
+            items = previous
+        }
+        isClearing = false
+    }
+
+    @MainActor func removeItem(at offsets: IndexSet) async {
+        // `visible` is what the list is showing, so offsets index into it, not
+        // into `items` — with the filter on those are different arrays.
+        let doomed = offsets.map { visible[$0] }
+        for item in doomed {
+            _ = try? await APIService.shared.delete(
+                "/currently-watching/\(item.itemId)", token: app.token
+            ) as SimpleResponse
+            app.setCurrentlyWatching(item.itemId, on: false)
+        }
+        let removedIds = Set(doomed.map { $0.itemId })
+        items.removeAll { removedIds.contains($0.itemId) }
+    }
+}
 
 struct WatchlistOnlyTabView: View {
     @Environment(AppState.self) private var app

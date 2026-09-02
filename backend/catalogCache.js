@@ -6,10 +6,33 @@ const {
   isOmdbRateLimited,
   PLATFORM_CONFIG,
 } = require('./movieService');
+const { ensureTitleCacheTables } = require('./titleCache');
+const { ensureCurrentlyWatchingTables } = require('./currentlyWatching');
+const { ensureAnalyticsTables } = require('./analytics');
 
-const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24, 1);
-const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
-const WATCHLIST_STREAMING_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// Nothing in this app refreshes on a clock.
+//
+// It used to: a nightly job walked every cached scope, the catalog went stale
+// after 24 hours and re-synced on the next page load, and watchlist
+// availability re-fetched itself a day after it was written. All three meant
+// TMDB was being called on days nobody asked for anything new, and a title's
+// data could churn under a user who had not touched the app.
+//
+// Now a fetch happens for exactly two reasons: the data has never been fetched,
+// or the Refresh Catalog button was pressed. Everything already fetched is
+// served from SQLite, indefinitely, until one of those two things happens.
+//
+// CATALOG_SYNC_HOURS remains as a deliberate opt-in — set it and the old
+// time-based staleness comes back, for anyone who wants a server that keeps
+// itself current. Unset (the default) it is 0, meaning never.
+const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 0, 0);
+const AUTO_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
+
+// Written to watchlist_streaming_cache.checked_at by a manual refresh to mark a
+// row for re-fetch on next read. A sentinel rather than a DELETE because a
+// failed re-fetch must still have something to fall back on — dropping the row
+// would make the title disappear from the streaming view until TMDB recovered.
+const REVALIDATE_MARKER = '1970-01-01T00:00:00.000Z';
 const DEFAULT_REGION = 'US';
 // Ratings rarely change — keep them indefinitely once fetched.
 // They are only re-fetched when a manual full refresh explicitly requests it.
@@ -331,6 +354,12 @@ async function ensureCatalogTables(db) {
     )`
   );
 
+  // The durable per-title cache and the Currently Watching list. Created here
+  // so every bootstrap path — production, tests — gets them from one place.
+  await ensureTitleCacheTables(db);
+  await ensureCurrentlyWatchingTables(db);
+  await ensureAnalyticsTables(db);
+
   // Invalidate catalog cache if provider IDs have changed since last deploy
   const versionRow = await get(db, `SELECT value FROM app_settings WHERE key = 'provider_config_version'`);
   const storedVersion = versionRow ? Number(versionRow.value) : 0;
@@ -346,11 +375,38 @@ async function ensureCatalogTables(db) {
 }
 
 function isScopeStale(stateRow) {
+  // Never synced, or explicitly invalidated by the refresh button, which nulls
+  // this column before kicking off the sync.
   if (!stateRow?.last_synced_at) {
     return true;
   }
 
-  return Date.now() - new Date(stateRow.last_synced_at).getTime() >= DAILY_SYNC_MS;
+  if (AUTO_SYNC_MS <= 0) {
+    return false;
+  }
+
+  return Date.now() - new Date(stateRow.last_synced_at).getTime() >= AUTO_SYNC_MS;
+}
+
+/** Whether a cached availability row can be served as-is. See AUTO_SYNC_MS. */
+function isAvailabilityFresh(cached) {
+  if (!cached?.checked_at) return false;
+  if (cached.checked_at === REVALIDATE_MARKER) return false;
+  if (AUTO_SYNC_MS <= 0) return true;
+  return Date.now() - new Date(cached.checked_at).getTime() < AUTO_SYNC_MS;
+}
+
+/**
+ * Mark a user's cached availability rows for re-fetch. Called by the refresh
+ * button; the re-fetch itself is lazy, on the next read of the watchlist view,
+ * so pressing refresh never blocks on a walk of the whole saved list.
+ */
+async function invalidateWatchlistAvailability(db, userId) {
+  await run(
+    db,
+    'UPDATE watchlist_streaming_cache SET checked_at = ? WHERE user_id = ?',
+    [REVALIDATE_MARKER, String(userId)]
+  );
 }
 
 // Bulk-copy ratings from title_ratings → catalog_cache_entries for a scope.
@@ -1182,50 +1238,9 @@ async function readCachedCatalog(
         syncLocks.has(scopeKey) ||
         identifierBackfillLocks.has(scopeKey) ||
         ratingHydrationLocks.has(scopeKey),
-      cacheMode: 'daily_snapshot',
+      cacheMode: 'manual_refresh',
     },
   };
-}
-
-function nextMidnightDelayMs() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(24, 0, 0, 0);
-  return next.getTime() - now.getTime();
-}
-
-async function refreshAllCachedScopes(db) {
-  const rows = await all(db, 'SELECT * FROM catalog_cache_state');
-  for (const row of rows) {
-    const platforms = JSON.parse(row.platforms_json || '[]');
-    const languages = JSON.parse(row.languages_json || '[]');
-    if (!platforms.length) {
-      continue;
-    }
-
-    try {
-      await syncScope(db, {
-        platforms,
-        languages,
-        region: row.region || DEFAULT_REGION,
-      });
-    } catch (error) {
-      console.error(`Daily catalog sync failed for ${row.scope_key}:`, error);
-    }
-  }
-}
-
-function startDailyCatalogRefresh(db) {
-  const scheduleNext = () => {
-    setTimeout(async () => {
-      await refreshAllCachedScopes(db).catch((error) => {
-        console.error('Scheduled catalog refresh failed:', error);
-      });
-      scheduleNext();
-    }, nextMidnightDelayMs());
-  };
-
-  scheduleNext();
 }
 
 // ── Watchlist streaming availability ─────────────────────────────────────────
@@ -1305,7 +1320,6 @@ async function getWatchlistItemsWithAvailability(
 
   const providerMap = buildProviderLookupMap(platforms);
   const platformSet = new Set(platforms);
-  const nowMs = Date.now();
   const nowIso = new Date().toISOString();
   const result = [];
 
@@ -1320,10 +1334,7 @@ async function getWatchlistItemsWithAvailability(
       [userId, row.item_id]
     );
 
-    const isFresh = cached &&
-      (nowMs - new Date(cached.checked_at).getTime() < WATCHLIST_STREAMING_TTL_MS);
-
-    if (!isFresh) {
+    if (!isAvailabilityFresh(cached)) {
       try {
         const details = await fetchTitleDetails(mediaType, tmdbId, { includeExternalIds: true });
         if (!details) {
@@ -1450,20 +1461,20 @@ function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, regio
 }
 
 module.exports = {
-  DAILY_SYNC_MS,
+  AUTO_SYNC_MS,
   ensureCatalogTables,
   ensureScopeSynced,
   readCachedCatalog,
   getWatchlistItemsWithAvailability,
   getStreamableWatchlistItems,
-  refreshAllCachedScopes,
-  startDailyCatalogRefresh,
+  invalidateWatchlistAvailability,
   syncScope,
   withTransaction,
   // Exported for unit testing
   buildScopeKey,
   mapWithConcurrency,
   isRateLimitError,
+  isAvailabilityFresh,
   hydrateScopeRatings,
   hydrateSavedTitleRatings,
   backfillScopeIdentifiers,

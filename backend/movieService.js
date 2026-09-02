@@ -331,7 +331,11 @@ async function fetchTitleDetails(mediaType, tmdbId, { includeExternalIds = true 
 
 async function fetchTitleWithCredits(mediaType, tmdbId) {
   return fetchTmdb(`/${mediaType}/${tmdbId}`, {
-    append_to_response: 'credits',
+    // external_ids rides along on the same request and costs nothing extra. It
+    // carries the IMDb id, which is how a title reaches the shared ratings
+    // table — without it the analytics page cannot compare a rating to the
+    // crowd's.
+    append_to_response: 'credits,external_ids',
     language: 'en-US',
   });
 }
