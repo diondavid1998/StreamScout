@@ -322,7 +322,10 @@ struct AnalyticsView: View {
             switch a.dimension {
             case "overview":
                 summaryTiles(a)
+                if let mosaic = a.mosaic, !mosaic.isEmpty { posterMosaic(mosaic) }
                 if let rating = a.rating { ratingChart(rating) }
+                if let quadrant = a.quadrant { quadrantChart(quadrant) }
+                if let watchlist = a.watchlist { watchlistCard(watchlist) }
                 if let highlights = a.highlights { highlightCards(highlights) }
             case "ratings":
                 summaryTiles(a)
@@ -333,6 +336,7 @@ struct AnalyticsView: View {
             default:
                 if let b = a.breakdown {
                     if b.needsLookup && a.coverage.pending > 0 { lookupPrompt(a) }
+                    if a.dimension == "genres", let quadrant = a.quadrant { quadrantChart(quadrant) }
                     breakdownList(b, a)
                     if !b.best.isEmpty { deltaEnds(b) }
                 } else if let collection = a.collection {
@@ -620,6 +624,124 @@ struct AnalyticsView: View {
     }
 
     // MARK: Overview highlights
+
+    // MARK: Posters
+
+    /// The best-rated films, as artwork. Analytics was the only screen in a film
+    /// app with no film on it.
+    private func posterMosaic(_ films: [MosaicFilm]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Your highest rated", note: "\(films.count) films")
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
+                spacing: 6
+            ) {
+                ForEach(films) { film in
+                    posterTile(film)
+                }
+            }
+        }
+    }
+
+    private func posterTile(_ film: MosaicFilm) -> some View {
+        Group {
+            if let urlString = film.posterUrl, let url = URL(string: urlString) {
+                CachedAsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    default: Color.mkSurface
+                    }
+                }
+            } else {
+                Color.mkSurface
+            }
+        }
+        .aspectRatio(2.0 / 3.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.mkHairline, lineWidth: 1)
+        )
+        .accessibilityLabel("\(film.name), rated \(stars(film.rating))")
+    }
+
+    // MARK: The taste quadrant
+
+    /// Genres on two axes: how often against how highly. The crosshair sits at
+    /// the medians of this history, so the corners describe the reader relative
+    /// to themselves rather than to an absolute scale.
+    private func quadrantChart(_ q: AnalyticsQuadrant) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Taste map", note: "watched against rated")
+            Chart {
+                RuleMark(x: .value("Median films", q.filmsMedian))
+                    .foregroundStyle(Color.mkHairline)
+                RuleMark(y: .value("Median rating", q.ratingMedian))
+                    .foregroundStyle(Color.mkHairline)
+                ForEach(q.points) { point in
+                    // Double on both axes: the median RuleMarks above are
+                    // Doubles, and Swift Charts needs one plottable type per axis.
+                    PointMark(
+                        x: .value("Films", Double(point.films)),
+                        y: .value("Mean rating", point.meanRating)
+                    )
+                    .foregroundStyle(
+                        point.meanRating >= q.ratingMedian ? Color.mkAccent : Color.mkText.opacity(0.4)
+                    )
+                    .symbolSize(120)
+                    .annotation(position: .top, spacing: 2) {
+                        Text(point.name)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.mkMuted)
+                    }
+                }
+            }
+            .chartXAxis { AxisMarks { _ in
+                AxisGridLine().foregroundStyle(Color.mkHairline)
+                AxisValueLabel()
+            } }
+            .chartYAxis { AxisMarks(position: .leading) { _ in
+                AxisGridLine().foregroundStyle(Color.mkHairline)
+                AxisValueLabel()
+            } }
+            .frame(height: 210)
+            caption("Right of the line is what you watch most; above it is what you rate best. The top-left corner is what you love but rarely reach for.")
+        }
+    }
+
+    // MARK: Watchlist
+
+    /// Intent against history — the one thing the diary alone cannot say.
+    private func watchlistCard(_ w: AnalyticsWatchlist) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Saved for later", note: "\(w.saved) on your watchlist")
+            HStack(spacing: 10) {
+                tile("Watched", "\(w.watched)",
+                     detail: w.conversion.map { "\(Int($0))% of saved" })
+                tile("Still waiting", "\(w.waiting)", detail: nil)
+            }
+            if !w.stillWaiting.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(w.stillWaiting.enumerated()), id: \.element.id) { index, film in
+                        HStack {
+                            Text(film.name)
+                                .font(.subheadline).foregroundColor(.mkText).lineLimit(1)
+                            Spacer(minLength: 10)
+                            if let year = film.year {
+                                Text(String(year))
+                                    .font(.caption).foregroundColor(.mkMuted).monospacedDigit()
+                            }
+                        }
+                        .padding(.vertical, 9).padding(.horizontal, 13)
+                        if index < w.stillWaiting.count - 1 {
+                            Divider().overlay(Color.mkBorder)
+                        }
+                    }
+                }
+                .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
 
     private func highlightCards(_ highlights: [AnalyticsHighlight]) -> some View {
         VStack(alignment: .leading, spacing: 14) {
