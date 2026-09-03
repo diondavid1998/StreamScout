@@ -381,10 +381,15 @@ struct AnalyticsCollection: Decodable {
     let topTags: [TagBucket]
 }
 
-/// A director, actor or genre with the films behind it.
-struct PersonStat: Decodable, Identifiable {
+/// One entry in a ranked dimension — a director, actor, genre, language,
+/// decade or tag, with the films behind it.
+///
+/// `label` is what to show: for most dimensions it equals `name`, but a language
+/// arrives as a code the server has already turned into "Japanese".
+struct BreakdownEntry: Decodable, Identifiable {
     var id: String { name }
     let name: String
+    let label: String
     let films: Int
     let rated: Int
     let meanRating: Double?
@@ -392,24 +397,96 @@ struct PersonStat: Decodable, Identifiable {
     let delta: Double?
 }
 
-struct AnalyticsPeople: Decodable {
-    let genres: [PersonStat]
-    let directors: [PersonStat]
-    let cast: [PersonStat]
-    let affinity: [PersonStat]
-    let leastFavouriteDirectors: [PersonStat]
-    let castAffinity: [PersonStat]
-    let bestRatedGenres: [PersonStat]
-    let worstRatedGenres: [PersonStat]
+/// The focused dimension: its ranking, and the two ends of it by rating.
+struct AnalyticsBreakdown: Decodable {
+    let id: String
+    let title: String
+    let unit: String?
+    /// The filter this dimension's entries set when tapped, so drilling in is
+    /// just adding a filter. Nil on dimensions that aren't rankable.
+    let filterKey: String?
+    let total: Int
+    let entries: [BreakdownEntry]
+    let best: [BreakdownEntry]
+    let worst: [BreakdownEntry]
+    let needsLookup: Bool
+}
+
+/// A lens the page can be pointed at. Named by the server so the two can't drift.
+struct AnalyticsDimension: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let needsLookup: Bool
+}
+
+/// An applied filter, already labelled for a removable chip.
+struct AppliedFilter: Decodable, Identifiable, Equatable {
+    var id: String { "\(key)=\(value)" }
+    let key: String
+    let value: String
+    let label: String
+}
+
+/// One option in a filter picker, with how many films it would leave.
+struct FilterOption: Decodable, Identifiable, Equatable {
+    var id: String { value }
+    let value: String
+    let label: String
+    let films: Int
+}
+
+struct AvailableFilters: Decodable {
+    let languages: [FilterOption]
+    let genres: [FilterOption]
+    let decades: [FilterOption]
+    let directors: [FilterOption]
+    let cast: [FilterOption]
+    let tags: [FilterOption]
+
+    func options(for key: String) -> [FilterOption] {
+        switch key {
+        case "language": return languages
+        case "genre":    return genres
+        case "decade":   return decades
+        case "director": return directors
+        case "actor":    return cast
+        case "tag":      return tags
+        default:         return []
+        }
+    }
+}
+
+struct AnalyticsFilters: Decodable {
+    let applied: [AppliedFilter]
+    let available: AvailableFilters
+}
+
+/// What the filters left, against what the library holds.
+struct AnalyticsScope: Decodable {
+    let films: Int
+    let filmsTotal: Int
+    let filtered: Bool
+}
+
+/// The top of one dimension, for the overview to point at the rest.
+struct AnalyticsHighlight: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let entries: [BreakdownEntry]
 }
 
 struct AnalyticsResponse: Decodable {
+    let dimension: String
+    let dimensions: [AnalyticsDimension]
+    let filters: AnalyticsFilters
+    let scope: AnalyticsScope
     let coverage: AnalyticsCoverage
     let summary: AnalyticsSummary
-    let rating: AnalyticsRating
-    let eras: AnalyticsEras
-    let collection: AnalyticsCollection
-    let people: AnalyticsPeople
+    let breakdown: AnalyticsBreakdown?
+    let rating: AnalyticsRating?
+    let eras: AnalyticsEras?
+    let collection: AnalyticsCollection?
+    let highlights: [AnalyticsHighlight]?
 }
 
 struct ResolveResponse: Decodable {

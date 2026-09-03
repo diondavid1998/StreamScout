@@ -104,10 +104,13 @@ enum LetterboxdExport {
 
 /// The Letterboxd analytics page.
 ///
-/// Everything above the People section is computed from the uploaded CSVs and
-/// needs no network at all, so it renders the moment an import lands. People and
-/// genres are the exception — no Letterboxd export contains a director or a
-/// genre — and they fill in only when the reader asks.
+/// Built as one lens over one filtered slice rather than a single long scroll.
+/// The reader picks a question — who directed these, what language were they in
+/// — and only that question is answered; picking an entry inside a lens adds it
+/// as a filter, so drilling down and filtering are the same gesture.
+///
+/// Everything except the people, genre and language lenses is computed from the
+/// uploaded CSVs and needs no network, so it renders the moment an import lands.
 struct AnalyticsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -116,6 +119,13 @@ struct AnalyticsView: View {
     @State private var isLoading = true
     @State private var loadError: String?
 
+    /// The lens, and the filters narrowing the history under it. Both go
+    /// straight into the query string, so the server stays the only place that
+    /// knows how either is computed.
+    @State private var dimension = "overview"
+    @State private var filters: [String: String] = [:]
+
+    @State private var showFilterSheet = false
     @State private var showImporter = false
     @State private var importStatus: String?
     @State private var importError: String?
@@ -123,6 +133,12 @@ struct AnalyticsView: View {
 
     @State private var isResolving = false
     @State private var resolveStatus: String?
+
+    /// Above and below the reader's own average. Fixed mid-tones rather than
+    /// `.green`/`.orange`, which sit outside every palette and read differently
+    /// on a light ground than a dark one.
+    private static let over = Color(hex: "#2E9E6B")
+    private static let under = Color(hex: "#C4562F")
 
     var body: some View {
         NavigationStack {
@@ -148,6 +164,14 @@ struct AnalyticsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showFilterSheet) {
+            if let a = analytics {
+                FilterSheet(available: a.filters.available, applied: filters) { next in
+                    filters = next
+                    Task { await load() }
+                }
+            }
+        }
         .fileImporter(
             isPresented: $showImporter,
             // A folder first, because that is what uncompressing the export
@@ -165,25 +189,493 @@ struct AnalyticsView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        if isLoading && analytics == nil {
             VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
-        } else if let analytics, analytics.summary.films > 0 {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    if let importStatus { banner(importStatus, tone: .accent) }
-                    if let importError { banner(importError, tone: .error) }
-                    summarySection(analytics)
-                    peopleSection(analytics)
-                    ratingSection(analytics)
-                    erasSection(analytics)
-                    collectionSection(analytics)
+        } else if let a = analytics, a.summary.films > 0 {
+            VStack(spacing: 0) {
+                chrome(a)
+                Divider().overlay(Color.mkBorder)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        if let importStatus { banner(importStatus, tone: .accent) }
+                        if let importError { banner(importError, tone: .error) }
+                        lensBody(a)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 18)
+                // A lens change replaces the whole view; without this the scroll
+                // position carries over and the new lens opens half-way down.
+                .id(a.dimension)
             }
         } else {
             emptyState
         }
+    }
+
+    // MARK: Chrome — scope, filters, lenses
+
+    private func chrome(_ a: AnalyticsResponse) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(scopeLine(a))
+                    .font(.footnote)
+                    .foregroundColor(.mkMuted)
+                Spacer()
+                Button {
+                    showFilterSheet = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "line.3.horizontal.decrease")
+                        Text(filters.isEmpty ? "Filter" : "Filters")
+                        if !filters.isEmpty {
+                            Text("\(filters.count)")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.mkOnAccent.opacity(0.9), in: Capsule())
+                                .foregroundColor(.mkAccent)
+                        }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(filters.isEmpty ? .mkText : .mkOnAccent)
+                    .padding(.horizontal, 11).padding(.vertical, 6)
+                    .background(filters.isEmpty ? Color.mkSubtleFill : Color.mkAccent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !a.filters.applied.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(a.filters.applied) { chip in
+                            Button {
+                                filters.removeValue(forKey: chip.key)
+                                Task { await load() }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(chip.label)
+                                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.mkAccent)
+                                .padding(.horizontal, 9).padding(.vertical, 5)
+                                .background(Color.mkAccent.opacity(0.14), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove filter \(chip.label)")
+                        }
+                        Button("Clear all") {
+                            filters = [:]
+                            Task { await load() }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.mkMuted)
+                        .buttonStyle(.plain)
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(a.dimensions) { lens in
+                        Button {
+                            guard dimension != lens.id else { return }
+                            dimension = lens.id
+                            Task { await load() }
+                        } label: {
+                            Text(lens.title)
+                                .font(.subheadline.weight(dimension == lens.id ? .bold : .medium))
+                                .foregroundColor(dimension == lens.id ? .mkOnAccent : .mkText.opacity(0.8))
+                                .padding(.horizontal, 13).padding(.vertical, 7)
+                                .background(
+                                    dimension == lens.id ? Color.mkAccent : Color.mkSubtleFill,
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(dimension == lens.id ? [.isSelected] : [])
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+    }
+
+    private func scopeLine(_ a: AnalyticsResponse) -> String {
+        let films = a.scope.films
+        if !a.scope.filtered { return "\(films) film\(films == 1 ? "" : "s")" }
+        return "\(films) of \(a.scope.filmsTotal) films"
+    }
+
+    // MARK: Lens bodies
+
+    @ViewBuilder
+    private func lensBody(_ a: AnalyticsResponse) -> some View {
+        if a.scope.films == 0 {
+            noMatches
+        } else {
+            switch a.dimension {
+            case "overview":
+                summaryTiles(a)
+                if let rating = a.rating { ratingChart(rating) }
+                if let highlights = a.highlights { highlightCards(highlights) }
+            case "ratings":
+                summaryTiles(a)
+                if let rating = a.rating { ratingDetail(rating) }
+            case "decades":
+                if let eras = a.eras { erasDetail(eras) }
+                if let b = a.breakdown { breakdownList(b, a) }
+            default:
+                if let b = a.breakdown {
+                    if b.needsLookup && a.coverage.pending > 0 { lookupPrompt(a) }
+                    breakdownList(b, a)
+                    if !b.best.isEmpty { deltaEnds(b) }
+                } else if let collection = a.collection {
+                    tagList(collection)
+                }
+            }
+        }
+    }
+
+    private var noMatches: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Nothing matches these filters")
+                .font(.headline).foregroundColor(.mkText)
+            Text("Remove one above, or clear them all.")
+                .font(.subheadline).foregroundColor(.mkMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: Summary
+
+    private func summaryTiles(_ a: AnalyticsResponse) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 148), spacing: 10)], spacing: 10) {
+            tile("Films", "\(a.summary.films)", detail: a.scope.filtered ? "of \(a.scope.filmsTotal)" : nil)
+            tile("Time in the dark", hours(a.summary.runtimeMinutes),
+                 detail: a.coverage.resolved < a.coverage.films ? "of \(a.coverage.resolved) resolved" : nil)
+            tile("Your mean", a.summary.meanRating.map { String(format: "%.2f", $0) } ?? "—",
+                 detail: "\(a.summary.rated) rated")
+            tile("Versus the crowd", offsetLabel(a.summary.tasteOffset),
+                 detail: (a.summary.comparedOn ?? 0) > 0 ? "over \(a.summary.comparedOn ?? 0) films" : "not compared yet")
+        }
+    }
+
+    private func tile(_ label: String, _ value: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.caption2.weight(.bold)).tracking(0.7)
+                .foregroundColor(.mkMuted)
+            Text(value)
+                .font(.system(.title2, design: .rounded, weight: .bold))
+                .foregroundColor(.mkText)
+                .minimumScaleFactor(0.6).lineLimit(1)
+            if let detail {
+                Text(detail).font(.caption2).foregroundColor(.mkMuted).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: Ratings
+
+    private func ratingChart(_ rating: AnalyticsRating) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("How you rate")
+            Chart(rating.histogram) { bucket in
+                BarMark(x: .value("Rating", bucket.rating), y: .value("Films", bucket.films), width: .fixed(16))
+                    .foregroundStyle(
+                        // The mode carries the accent; the rest stay quiet, so
+                        // the shape of the distribution reads before the numbers.
+                        bucket.rating == rating.mode?.rating ? Color.mkAccent : Color.mkMuted.opacity(0.35)
+                    )
+                    .cornerRadius(3)
+            }
+            .chartXScale(domain: 0.25...5.25)
+            // Whole stars only: ten half-star labels collide at phone width.
+            .chartXAxis { AxisMarks(values: .stride(by: 1.0)) }
+            .chartYAxis { AxisMarks(position: .leading) }
+            .frame(height: 150)
+            if let mode = rating.mode, mode.films > 0 {
+                caption("Most common: \(stars(mode.rating)) — \(mode.films) films")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ratingDetail(_ rating: AnalyticsRating) -> some View {
+        ratingChart(rating)
+        if !rating.byYear.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("Mean by year watched")
+                Chart(rating.byYear) { year in
+                    LineMark(x: .value("Year", year.year), y: .value("Mean", year.meanRating ?? 0))
+                        .foregroundStyle(Color.mkAccent)
+                        .lineStyle(StrokeStyle(lineWidth: 2))
+                    PointMark(x: .value("Year", year.year), y: .value("Mean", year.meanRating ?? 0))
+                        .foregroundStyle(Color.mkAccent)
+                        .symbolSize(56)
+                }
+                .chartYScale(domain: 0.0...5.0)
+                .frame(height: 140)
+            }
+        }
+        if !rating.hottestTakes.above.isEmpty || !rating.hottestTakes.below.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("Where you disagree most")
+                VStack(spacing: 0) {
+                    ForEach(rating.hottestTakes.above.prefix(4)) { takeRow($0, positive: true) }
+                    ForEach(rating.hottestTakes.below.prefix(4)) { takeRow($0, positive: false) }
+                }
+                .padding(.horizontal, 13).padding(.vertical, 4)
+                .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    private func takeRow(_ film: TitleDelta, positive: Bool) -> some View {
+        HStack(spacing: 8) {
+            // Direction is carried by the arrow and the sign as well as colour,
+            // so the row still reads without it.
+            Image(systemName: positive ? "arrow.up" : "arrow.down")
+                .font(.caption2.weight(.bold))
+                .foregroundColor(positive ? Self.over : Self.under)
+            Text(film.name).font(.subheadline).foregroundColor(.mkText).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(String(format: "%+.1f", film.delta))
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundColor(positive ? Self.over : Self.under)
+        }
+        .padding(.vertical, 8)
+    }
+
+    // MARK: Decades
+
+    @ViewBuilder
+    private func erasDetail(_ eras: AnalyticsEras) -> some View {
+        if !eras.decades.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("Films by decade")
+                Chart(eras.decades) { decade in
+                    BarMark(x: .value("Decade", decade.decade), y: .value("Films", decade.films), width: .fixed(20))
+                        .foregroundStyle(Color.mkAccent)
+                        .cornerRadius(3)
+                }
+                .frame(height: 150)
+            }
+        }
+        if let lag = eras.lagYearsMedian {
+            caption("You typically watch a film \(String(format: "%.0f", lag)) years after it comes out.")
+        }
+    }
+
+    // MARK: The focused dimension
+
+    private func breakdownList(_ b: AnalyticsBreakdown, _ a: AnalyticsResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader(
+                b.title,
+                note: b.total > b.entries.count ? "top \(b.entries.count) of \(b.total)" : nil
+            )
+            if b.entries.isEmpty {
+                Text(b.needsLookup
+                     ? "Nothing here yet — these come from the film database, not the export."
+                     : "Nothing to show for this slice.")
+                    .font(.subheadline).foregroundColor(.mkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(b.entries.enumerated()), id: \.element.id) { index, entry in
+                        entryRow(entry, filterKey: b.filterKey, showsDivider: index < b.entries.count - 1)
+                    }
+                }
+                .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    /// One ranked entry. Tapping it narrows the whole page to that subject,
+    /// which is the same thing as adding a filter — so it does exactly that.
+    private func entryRow(_ entry: BreakdownEntry, filterKey: String?, showsDivider: Bool) -> some View {
+        Button {
+            guard let key = filterKey else { return }
+            filters[key] = entry.name
+            Task { await load() }
+        } label: {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Text(entry.label)
+                        .font(.subheadline)
+                        .foregroundColor(.mkText)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text("\(entry.films)")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundColor(.mkAccent)
+                    if let mean = entry.meanRating {
+                        Text(String(format: "%.1f★", mean))
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.mkMuted)
+                            .frame(minWidth: 38, alignment: .trailing)
+                    }
+                    if let delta = entry.delta {
+                        Text(String(format: "%+.1f", delta))
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundColor(delta >= 0 ? Self.over : Self.under)
+                            .frame(minWidth: 34, alignment: .trailing)
+                    }
+                    if filterKey != nil {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.mkMuted.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 10)
+                if showsDivider { Divider().overlay(Color.mkBorder).padding(.leading, 13) }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(filterKey == nil)
+        .accessibilityLabel("\(entry.label), \(entry.films) films")
+        .accessibilityHint(filterKey == nil ? "" : "Filters the page to \(entry.label)")
+    }
+
+    private func deltaEnds(_ b: AnalyticsBreakdown) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            endList("Rated well above your average", b.best)
+            endList("Rated below your average", b.worst)
+        }
+    }
+
+    @ViewBuilder
+    private func endList(_ title: String, _ entries: [BreakdownEntry]) -> some View {
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader(title)
+                VStack(spacing: 0) {
+                    ForEach(Array(entries.prefix(6).enumerated()), id: \.element.id) { index, entry in
+                        HStack(spacing: 10) {
+                            Text(entry.label).font(.subheadline).foregroundColor(.mkText).lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text("\(entry.films) film\(entry.films == 1 ? "" : "s")")
+                                .font(.caption).foregroundColor(.mkMuted)
+                            Text(String(format: "%+.1f", entry.delta ?? 0))
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .foregroundColor((entry.delta ?? 0) >= 0 ? Self.over : Self.under)
+                        }
+                        .padding(.horizontal, 13).padding(.vertical, 9)
+                        if index < min(entries.count, 6) - 1 {
+                            Divider().overlay(Color.mkBorder).padding(.leading, 13)
+                        }
+                    }
+                }
+                .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tagList(_ collection: AnalyticsCollection) -> some View {
+        if collection.topTags.isEmpty {
+            Text("No tags in this export.").font(.subheadline).foregroundColor(.mkMuted)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("Your tags")
+                FlowRow(spacing: 6) {
+                    ForEach(collection.topTags) { tag in
+                        Text("\(tag.tag) · \(tag.films)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.mkText)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Color.mkSubtleFill, in: Capsule())
+                            .overlay(Capsule().stroke(Color.mkHairline, lineWidth: 1))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Overview highlights
+
+    private func highlightCards(_ highlights: [AnalyticsHighlight]) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(highlights) { group in
+                if !group.entries.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            dimension = group.id
+                            Task { await load() }
+                        } label: {
+                            HStack {
+                                Text(group.title)
+                                    .font(.headline).foregroundColor(.mkText)
+                                Spacer()
+                                Text("See all")
+                                    .font(.caption.weight(.semibold)).foregroundColor(.mkAccent)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .bold)).foregroundColor(.mkAccent)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        VStack(spacing: 0) {
+                            ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
+                                HStack(spacing: 10) {
+                                    Text(entry.label).font(.subheadline).foregroundColor(.mkText).lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text("\(entry.films)")
+                                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                                        .foregroundColor(.mkAccent)
+                                }
+                                .padding(.horizontal, 13).padding(.vertical, 9)
+                                if index < group.entries.count - 1 {
+                                    Divider().overlay(Color.mkBorder).padding(.leading, 13)
+                                }
+                            }
+                        }
+                        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: The lookup
+
+    private func lookupPrompt(_ a: AnalyticsResponse) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("No Letterboxd export contains a director, a cast list or a genre — those come from the film database, and only when you ask.")
+                .font(.footnote).foregroundColor(.mkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            if let resolveStatus {
+                HStack(spacing: 8) {
+                    if isResolving { ProgressView().tint(.mkAccent).scaleEffect(0.8) }
+                    Text(resolveStatus).font(.footnote).foregroundColor(.mkMuted)
+                }
+            }
+            Button {
+                Task { await resolveAll(pending: a.coverage.pending) }
+            } label: {
+                Text(isResolving ? "Working…" : "Look up \(a.coverage.pending) films")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.mkText)
+                    .padding(.horizontal, 16).frame(height: 42)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(Color.mkAccent).interactive(), in: Capsule())
+            .disabled(isResolving)
+        }
+        .padding(14)
+        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: Empty state
@@ -207,7 +699,7 @@ struct AnalyticsView: View {
                     if isImporting { ProgressView().tint(.mkText).scaleEffect(0.8) }
                     else { Image(systemName: "folder.badge.plus") }
                     Text(isImporting ? (importStatus ?? "Importing…") : "Import Letterboxd export")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                 }
                 .foregroundColor(.mkText)
                 .padding(.horizontal, 20).frame(height: 48)
@@ -220,211 +712,11 @@ struct AnalyticsView: View {
         }
     }
 
-    // MARK: Bands
-
-    private func summarySection(_ a: AnalyticsResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("At a glance")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                stat("Films", "\(a.summary.films)", detail: nil)
-                stat("Time in the dark", hours(a.summary.runtimeMinutes),
-                     detail: a.coverage.resolved < a.coverage.films ? "of \(a.coverage.resolved) resolved" : nil)
-                stat("Your mean", a.summary.meanRating.map { String(format: "%.2f", $0) } ?? "—",
-                     detail: "\(a.summary.rated) rated")
-                stat("Versus the crowd", offsetLabel(a.summary.tasteOffset),
-                     detail: (a.summary.comparedOn ?? 0) > 0 ? "over \(a.summary.comparedOn ?? 0) films" : "not compared yet")
-            }
-        }
-    }
-
-    private func ratingSection(_ a: AnalyticsResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Rating", note: "\(a.summary.rated) of \(a.summary.films) rated")
-            card {
-                Chart(a.rating.histogram) { bucket in
-                    BarMark(
-                        x: .value("Rating", bucket.rating),
-                        y: .value("Films", bucket.films),
-                        width: .fixed(18)
-                    )
-                    .foregroundStyle(Color.mkAccent)
-                    .cornerRadius(4)
-                }
-                .chartXScale(domain: 0.25...5.25)
-                // Whole stars only: ten half-star labels collide at phone width.
-                .chartXAxis { AxisMarks(values: .stride(by: 1.0)) }
-                .chartYAxis { AxisMarks(position: .leading) }
-                .frame(height: 168)
-            }
-            if let mode = a.rating.mode, mode.films > 0 {
-                caption("Most common rating: \(stars(mode.rating)) — \(mode.films) films")
-            }
-
-            if !a.rating.byYear.isEmpty {
-                card {
-                    Chart(a.rating.byYear) { year in
-                        LineMark(x: .value("Year", year.year), y: .value("Mean", year.meanRating ?? 0))
-                            .foregroundStyle(Color.mkAccent)
-                            .lineStyle(StrokeStyle(lineWidth: 2))
-                        PointMark(x: .value("Year", year.year), y: .value("Mean", year.meanRating ?? 0))
-                            .foregroundStyle(Color.mkAccent)
-                            .symbolSize(60)
-                    }
-                    .chartYScale(domain: 0.0...5.0)
-                    .frame(height: 150)
-                }
-                caption("Your mean rating by year watched")
-            }
-
-            if !a.rating.hottestTakes.above.isEmpty || !a.rating.hottestTakes.below.isEmpty {
-                deltaList("Hottest takes", above: a.rating.hottestTakes.above, below: a.rating.hottestTakes.below)
-            }
-        }
-    }
-
-    private func erasSection(_ a: AnalyticsResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Eras")
-            if !a.eras.decades.isEmpty {
-                card {
-                    Chart(a.eras.decades) { decade in
-                        BarMark(x: .value("Decade", decade.decade), y: .value("Films", decade.films), width: .fixed(22))
-                            .foregroundStyle(Color.mkAccent)
-                            .cornerRadius(4)
-                    }
-                    .frame(height: 160)
-                }
-            }
-            if let lag = a.eras.lagYearsMedian {
-                caption("You typically watch a film \(String(format: "%.0f", lag)) years after it comes out.")
-            }
-            if !a.eras.languages.isEmpty {
-                chipRow(a.eras.languages.map { "\($0.code.uppercased()) · \($0.films)" })
-            }
-        }
-    }
-
-    private func collectionSection(_ a: AnalyticsResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !a.collection.topTags.isEmpty {
-                sectionHeader("Your tags")
-            }
-            if !a.collection.topTags.isEmpty {
-                chipRow(a.collection.topTags.map { "\($0.tag) - \($0.films)" })
-            }
-        }
-    }
-
-    private func peopleSection(_ a: AnalyticsResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Genres & people",
-                          note: a.coverage.resolved < a.coverage.films
-                              ? "\(a.coverage.resolved) of \(a.coverage.films)" : nil)
-
-            // Nothing left to look up, but some films never matched. Say so
-            // once rather than leaving the counts above unexplained.
-            if a.coverage.pending == 0, let unmatched = a.coverage.unmatched, unmatched > 0 {
-                Text("\(unmatched) \(unmatched == 1 ? "film" : "films") had no match in the film database, so they are missing from the sections below.")
-                    .font(.footnote).foregroundColor(.mkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if a.coverage.pending > 0 {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("No Letterboxd export contains a director, a cast list or a genre — those come from the film database, and only when you ask.")
-                        .font(.footnote).foregroundColor(.mkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let resolveStatus {
-                        HStack(spacing: 8) {
-                            if isResolving { ProgressView().tint(.mkAccent).scaleEffect(0.8) }
-                            Text(resolveStatus).font(.footnote).foregroundColor(.mkMuted)
-                        }
-                    }
-                    Button {
-                        Task { await resolveAll(pending: a.coverage.pending) }
-                    } label: {
-                        Text(isResolving ? "Working…" : "Look up \(a.coverage.pending) films")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.mkText)
-                            .padding(.horizontal, 16).frame(height: 42)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.tint(Color.mkAccent).interactive(), in: Capsule())
-                    .disabled(isResolving)
-                }
-                .padding(14)
-                .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-
-            if !a.people.genres.isEmpty {
-                rankedList("Most-watched genres", a.people.genres.map { ($0.name, countAndMean($0)) })
-            }
-            if !a.people.bestRatedGenres.isEmpty {
-                deltaRanked("Genres you rate highest", a.people.bestRatedGenres,
-                            note: "against your own average")
-            }
-            if !a.people.worstRatedGenres.isEmpty {
-                deltaRanked("Genres you rate lowest", a.people.worstRatedGenres, note: nil)
-            }
-            if !a.people.directors.isEmpty {
-                rankedList("Most-watched directors", a.people.directors.map { ($0.name, countAndMean($0)) })
-            }
-            if !a.people.affinity.isEmpty {
-                deltaRanked("Directors you rate highest", a.people.affinity,
-                            note: "three films minimum")
-            }
-            if !a.people.leastFavouriteDirectors.isEmpty {
-                deltaRanked("Directors you rate lowest", a.people.leastFavouriteDirectors, note: nil)
-            }
-            if !a.people.cast.isEmpty {
-                rankedList("Faces you see most", a.people.cast.map { ($0.name, countAndMean($0)) },
-                           note: "top-billed roles only")
-            }
-            if !a.people.castAffinity.isEmpty {
-                deltaRanked("Actors you rate highest", a.people.castAffinity, note: "three films minimum")
-            }
-        }
-    }
-
-    /// A ranked list whose right-hand column is a signed distance from the
-    /// reader's own mean, with the sign and an arrow carrying direction so the
-    /// row does not depend on colour.
-    private func deltaRanked(_ title: String, _ rows: [PersonStat], note: String?) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.mkText)
-                Spacer()
-                if let note { Text(note).font(.caption2).foregroundColor(.mkMuted) }
-            }
-            .padding(.bottom, 8)
-            ForEach(rows) { row in
-                let delta = row.delta ?? 0
-                let up = delta >= 0
-                HStack(spacing: 8) {
-                    Text(row.name).font(.system(size: 14)).foregroundColor(.mkText).lineLimit(1)
-                    Spacer(minLength: 10)
-                    Text("\(row.films) · \(row.meanRating.map { String(format: "%.1f", $0) } ?? "—")★")
-                        .font(.system(size: 12)).foregroundColor(.mkMuted)
-                    Image(systemName: up ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(up ? .green : .orange)
-                    Text(String(format: "%+.1f", delta))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(up ? .green : .orange)
-                }
-                .padding(.vertical, 7)
-                Divider().overlay(Color.mkBorder)
-            }
-        }
-        .padding(14)
-        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
     // MARK: Pieces
 
     private func sectionHeader(_ title: String, note: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.system(size: 19, weight: .bold)).foregroundColor(.mkText)
+            Text(title).font(.headline).foregroundColor(.mkText)
             Spacer()
             if let note {
                 Text(note).font(.caption).foregroundColor(.mkMuted)
@@ -432,32 +724,9 @@ struct AnalyticsView: View {
         }
     }
 
-    private func stat(_ label: String, _ value: String, detail: String?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .bold)).tracking(0.8)
-                .foregroundColor(.mkMuted)
-            Text(value)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .foregroundColor(.mkText)
-                .minimumScaleFactor(0.6).lineLimit(1)
-            if let detail {
-                Text(detail).font(.caption2).foregroundColor(.mkMuted).lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(12)
-            .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
     private func caption(_ text: String) -> some View {
         Text(text).font(.caption).foregroundColor(.mkMuted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func banner(_ text: String, tone: BannerTone) -> some View {
@@ -471,78 +740,12 @@ struct AnalyticsView: View {
 
     private enum BannerTone { case accent, error }
 
-    private func rankedList(_ title: String, _ rows: [(String, String)], note: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.mkText)
-                Spacer()
-                if let note { Text(note).font(.caption2).foregroundColor(.mkMuted) }
-            }
-            .padding(.bottom, 8)
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack {
-                    Text(row.0).font(.system(size: 14)).foregroundColor(.mkText).lineLimit(1)
-                    Spacer(minLength: 12)
-                    Text(row.1).font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
-                }
-                .padding(.vertical, 7)
-                Divider().overlay(Color.mkBorder)
-            }
-        }
-        .padding(14)
-        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func deltaList(_ title: String, above: [TitleDelta], below: [TitleDelta]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.mkText)
-            ForEach(above.prefix(3)) { film in
-                deltaRow(film, positive: true)
-            }
-            ForEach(below.prefix(3)) { film in
-                deltaRow(film, positive: false)
-            }
-        }
-        .padding(14)
-        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func deltaRow(_ film: TitleDelta, positive: Bool) -> some View {
-        HStack {
-            // Direction is carried by the sign and the arrow as well as colour,
-            // so the row still reads without it.
-            Image(systemName: positive ? "arrow.up" : "arrow.down")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(positive ? .blue : .red)
-            Text(film.name).font(.system(size: 14)).foregroundColor(.mkText).lineLimit(1)
-            Spacer(minLength: 10)
-            Text(String(format: "%+.1f", film.delta))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(positive ? .blue : .red)
-        }
-    }
-
-    private func chipRow(_ labels: [String]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(labels, id: \.self) { label in
-                    Text(label)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.mkMuted)
-                        .padding(.horizontal, 11).padding(.vertical, 7)
-                        .background(Color.mkSubtleFill, in: Capsule())
-                }
-            }
-        }
-    }
-
-    // MARK: Formatting
-
     private func hours(_ minutes: Int) -> String {
         guard minutes > 0 else { return "—" }
-        let days = minutes / 1440
-        let remainder = (minutes % 1440) / 60
-        return days > 0 ? "\(days)d \(remainder)h" : "\(minutes / 60)h"
+        let h = minutes / 60
+        if h < 1 { return "\(minutes)m" }
+        if h < 100 { return "\(h)h" }
+        return "\(h.formatted())h"
     }
 
     private func offsetLabel(_ offset: Double?) -> String {
@@ -551,22 +754,20 @@ struct AnalyticsView: View {
     }
 
     private func stars(_ rating: Double) -> String {
-        rating == rating.rounded() ? "\(Int(rating))★" : String(format: "%.1f★", rating)
+        let full = Int(rating)
+        return String(repeating: "★", count: full) + (rating - Double(full) >= 0.5 ? "½" : "")
     }
 
-    /// "24 · 3.8★" — the count answers how much of a history something is, the
-    /// mean answers how it was received. Neither is much use alone.
-    private func countAndMean(_ stat: PersonStat) -> String {
-        guard let mean = stat.meanRating else { return "\(stat.films)" }
-        return String(format: "%d · %.1f★", stat.films, mean)
-    }
-
-    // MARK: Work
+    // MARK: Networking
 
     @MainActor private func load() async {
         isLoading = analytics == nil
         do {
-            let response: AnalyticsResponse = try await APIService.shared.get("/analytics", token: app.token)
+            var params = filters
+            params["dimension"] = dimension
+            let response: AnalyticsResponse = try await APIService.shared.get(
+                "/analytics", params: params, token: app.token
+            )
             analytics = response
             loadError = nil
         } catch let error as APIError {
@@ -589,7 +790,7 @@ struct AnalyticsView: View {
             files = try LetterboxdExport.read(urls: urls)
         } catch {
             importStatus = nil
-            importError = error.localizedDescription
+            importError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             return
         }
 
@@ -602,6 +803,9 @@ struct AnalyticsView: View {
             let films = response.films ?? 0
             let viewings = response.viewings ?? 0
             importStatus = "Imported \(films) films across \(viewings) viewings."
+            // A fresh import invalidates whatever was filtered before it.
+            filters = [:]
+            dimension = "overview"
             await load()
         } catch let error as APIError {
             importStatus = nil
@@ -658,5 +862,163 @@ struct AnalyticsView: View {
             resolveStatus = "\(remaining) still to look up."
         }
         await load()
+    }
+}
+
+// MARK: - Filter sheet
+
+/// Every facet in one sheet, each option carrying how many films it would leave.
+///
+/// The counts come from the server, computed against every filter except the one
+/// being picked — so switching language still shows what the alternatives give
+/// you, while the genre list narrows to what the current language offers.
+private struct FilterSheet: View {
+    let available: AvailableFilters
+    let applied: [String: String]
+    let onApply: ([String: String]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: [String: String]
+
+    init(available: AvailableFilters, applied: [String: String], onApply: @escaping ([String: String]) -> Void) {
+        self.available = available
+        self.applied = applied
+        self.onApply = onApply
+        _draft = State(initialValue: applied)
+    }
+
+    private static let facets: [(key: String, title: String)] = [
+        ("language", "Language"),
+        ("genre", "Genre"),
+        ("decade", "Decade"),
+        ("director", "Director"),
+        ("actor", "Actor"),
+        ("tag", "Tag"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("Rating", selection: ratedBinding) {
+                        Text("All films").tag("")
+                        Text("Rated only").tag("yes")
+                        Text("Unrated only").tag("no")
+                    }
+                    Picker("At least", selection: minBinding) {
+                        Text("Any").tag("")
+                        ForEach(["1", "2", "3", "3.5", "4", "4.5"], id: \.self) { value in
+                            Text("\(value)★").tag(value)
+                        }
+                    }
+                } header: {
+                    Text("Your rating")
+                }
+
+                ForEach(Self.facets, id: \.key) { facet in
+                    let options = available.options(for: facet.key)
+                    if !options.isEmpty {
+                        Section {
+                            NavigationLink {
+                                OptionPicker(
+                                    title: facet.title,
+                                    options: options,
+                                    selection: binding(for: facet.key)
+                                )
+                            } label: {
+                                HStack {
+                                    Text(facet.title)
+                                    Spacer()
+                                    Text(label(for: facet.key, options: options))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Filters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Clear") { draft = [:] }
+                        .disabled(draft.isEmpty)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply") {
+                        onApply(draft)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func label(for key: String, options: [FilterOption]) -> String {
+        guard let value = draft[key] else { return "Any" }
+        return options.first { $0.value == value }?.label ?? value
+    }
+
+    private func binding(for key: String) -> Binding<String> {
+        Binding(
+            get: { draft[key] ?? "" },
+            set: { newValue in
+                if newValue.isEmpty { draft.removeValue(forKey: key) } else { draft[key] = newValue }
+            }
+        )
+    }
+
+    private var ratedBinding: Binding<String> { binding(for: "rated") }
+    private var minBinding: Binding<String> { binding(for: "ratingMin") }
+}
+
+/// One facet's options, searchable because a director list runs to sixty names.
+private struct OptionPicker: View {
+    let title: String
+    let options: [FilterOption]
+    @Binding var selection: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var shown: [FilterOption] {
+        guard !query.isEmpty else { return options }
+        return options.filter { $0.label.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        List {
+            Button {
+                selection = ""
+                dismiss()
+            } label: {
+                HStack {
+                    Text("Any")
+                    Spacer()
+                    if selection.isEmpty { Image(systemName: "checkmark").foregroundColor(.accentColor) }
+                }
+            }
+            ForEach(shown) { option in
+                Button {
+                    selection = option.value
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(option.label)
+                        Spacer()
+                        Text("\(option.films)")
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                        if selection == option.value {
+                            Image(systemName: "checkmark").foregroundColor(.accentColor)
+                        }
+                    }
+                }
+            }
+        }
+        .searchable(text: $query, prompt: "Search \(title.lowercased())")
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
