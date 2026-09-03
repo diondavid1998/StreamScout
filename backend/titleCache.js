@@ -117,6 +117,10 @@ function normalizeDetails(data, mediaType) {
     numberOfSeasons: data.number_of_seasons || null,
     numberOfEpisodes: data.number_of_episodes || null,
     imdbId: data.external_ids?.imdb_id || null,
+    // TMDB's own audience score. Kept because it is the only crowd rating the
+    // analytics page can rely on: OMDB is the other source, and its daily quota
+    // rules out asking about a history of thousands of films.
+    voteAverage: typeof data.vote_average === 'number' ? data.vote_average : null,
     originalLanguage: data.original_language || null,
     productionCountries: (data.production_countries || []).map((c) => c.name),
   };
@@ -188,21 +192,31 @@ async function getTitleDetails(db, mediaType, tmdbId, { forceRefresh = false } =
   return { ...payload, cached: false };
 }
 
+/** Whether a stored payload predates the audience score being kept. */
+function payloadHasVoteAverage(payloadJson) {
+  if (!payloadJson) return false;
+  try { return 'voteAverage' in JSON.parse(payloadJson); } catch { return false; }
+}
+
 /**
  * Make sure a film's details are cached, and carry an IMDb id.
  *
- * A row written before `imdb_id` existed is complete for the detail page but
- * useless to the analytics page, which reaches the shared ratings table through
- * that id. Treating a NULL as a miss refills those rows the first time someone
+ * A row written before `imdb_id` — or before the audience score — was kept is
+ * complete for the detail page but short of what the analytics page needs.
+ * Treating either gap as a miss refills those rows the first time someone
  * actually needs them, rather than sweeping the whole table.
  */
 async function ensureAnalyticsDetails(db, tmdbId) {
   const row = await get(
     db,
-    'SELECT imdb_id FROM title_details_cache WHERE media_type = ? AND tmdb_id = ?',
+    'SELECT imdb_id, payload_json FROM title_details_cache WHERE media_type = ? AND tmdb_id = ?',
     ['movie', tmdbId]
   );
-  if (row && row.imdb_id) return false;
+  // A row stored before the audience score was kept has everything else the
+  // page needs but cannot answer "versus the crowd". Treating it as a miss
+  // refills it on the next lookup rather than stranding it. The test is for the
+  // key, not a value: an unrated film legitimately scores null.
+  if (row && row.imdb_id && payloadHasVoteAverage(row.payload_json)) return false;
   const data = await fetchTitleWithCredits('movie', tmdbId);
   if (!data?.id) return false;
   await storeDetails(db, 'movie', tmdbId, data);

@@ -799,6 +799,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
     const keys = [...byLookupKey.keys()];
     const known = [];
+    const freshMisses = new Date(Date.now() - NEGATIVE_LOOKUP_TTL_MS).toISOString();
     // SQLite's default parameter ceiling is 999; a large history needs chunking.
     for (let i = 0; i < keys.length; i += 500) {
       const chunk = keys.slice(i, i + 500);
@@ -806,23 +807,30 @@ function createApp(db, { disableRateLimit = false } = {}) {
         db,
         `SELECT lookup_key, item_id FROM title_lookup_cache
           WHERE lookup_key IN (${chunk.map(() => '?').join(',')})
-            AND item_id IS NOT NULL`,
-        chunk
+            AND (item_id IS NOT NULL OR resolved_at > ?)`,
+        [...chunk, freshMisses]
       );
       known.push(...rows);
     }
     if (!known.length) return 0;
 
+    // A recent miss is adopted too, as the empty-string marker. A re-import
+    // rewrites every row with a null id, so without this the films the database
+    // has nothing for come back as pending each time and the page offers a
+    // lookup that can only fail again. The cache's TTL still governs when they
+    // are genuinely retried.
     await withTransaction(db, async () => {
       for (const row of known) {
         await runSql(
           db,
           'UPDATE letterboxd_entries SET item_id = ? WHERE user_id = ? AND film_key = ?',
-          [row.item_id, userId, byLookupKey.get(row.lookup_key)]
+          [row.item_id ?? '', userId, byLookupKey.get(row.lookup_key)]
         );
       }
     });
-    return known.length;
+    // Only real matches count as "already known" — a remembered miss is not
+    // work the user gets to skip, and reporting it as such overstates the import.
+    return known.filter((row) => row.item_id).length;
   }
 
   // ── Letterboxd diary ──────────────────────────────────────────────────────

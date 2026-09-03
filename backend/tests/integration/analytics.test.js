@@ -472,6 +472,56 @@ describe('the lookup finishes the job it advertises', () => {
     expect(after.body.people.genres.map((g) => g.name)).toContain('Noir');
   });
 
+  test('a film the database has nothing for stops counting as pending', async () => {
+    // The empty-string marker is falsy, and coalescing it to null on the way out
+    // put those films straight back into the pending count — so the page kept
+    // offering a lookup the resolve endpoint had already finished with.
+    searchTitleOnTmdb.mockResolvedValue(null);
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+
+    const done = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect(done.body.pending).toBe(0);
+
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(body.coverage).toMatchObject({ films: 2, resolved: 0, pending: 0, unmatched: 2 });
+  });
+
+  test('a remembered miss is not re-offered on the next import', async () => {
+    searchTitleOnTmdb.mockResolvedValue(null);
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+
+    // A re-import rewrites every row with a null id. Without adopting the
+    // cached miss, both films come back as pending and the page offers a
+    // lookup that can only fail again.
+    const again = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+    expect(again.body.alreadyKnown).toBe(0);   // a miss is not work the user skips
+    expect((await auth(request(app).get('/analytics'))).body.coverage.pending).toBe(0);
+  });
+
+  test('the crowd comparison works without any IMDb ratings', async () => {
+    // Nothing fetches IMDb scores for an imported history — OMDB's daily quota
+    // rules it out for thousands of films — so the comparison has to come from
+    // the audience score TMDB already returns with the details.
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: `Film ${id}`, vote_average: 8.0, genres: [{ name: 'Noir' }], runtime: 100,
+      external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: [], crew: [{ job: 'Director', name: 'Some Director' }] },
+    }));
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+
+    const { body } = await auth(request(app).get('/analytics'));
+    // Alpha 4, Beta 5 against a crowd score of 4 for both.
+    expect(body.summary.comparedOn).toBe(2);
+    expect(body.summary.crowdMean).toBe(4);
+    expect(body.summary.tasteOffset).toBe(0.5);
+  });
+
   test('write-off markers left by the old rule are cleared once, and only once', async () => {
     await auth(request(app).post('/letterboxd/diary'))
       .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });

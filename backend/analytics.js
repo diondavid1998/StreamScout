@@ -141,6 +141,16 @@ async function ensureAnalyticsTables(db) {
   }
 }
 
+/** A /5 crowd score from whichever source has one, or null. */
+function pickCrowdRating(imdbRating, details) {
+  const imdb = imdbRating === null || imdbRating === undefined ? null : Number(imdbRating);
+  if (imdb !== null && Number.isFinite(imdb) && imdb > 0) return imdb / 2;
+  const tmdb = details?.voteAverage;
+  // TMDB reports an unrated film as 0, which is an absence, not an opinion.
+  if (typeof tmdb === 'number' && Number.isFinite(tmdb) && tmdb > 0) return tmdb / 2;
+  return null;
+}
+
 /**
  * Every diary row, with whatever metadata has resolved for its film.
  *
@@ -177,18 +187,24 @@ async function readDiary(db, userId) {
       watchedOn: row.watched_on,
       isRewatch: Boolean(row.is_rewatch),
       tags,
-      itemId: row.item_id || null,
+      // Not `|| null`: the empty string is the marker for a film the database
+      // has nothing for, and coalescing it away would hide those films back
+      // into the pending count the lookup has already finished with.
+      itemId: row.item_id === null || row.item_id === undefined ? null : String(row.item_id),
       resolved: Boolean(details),
       genres: details?.genres || [],
       directors: details?.directors || [],
       cast: (details?.cast || []).map((c) => c.name),
       runtime: details?.runtime || null,
       language: row.original_language || null,
-      // IMDb's audience score, rebased from /10 to the same 5-star scale the
-      // user's own ratings use, so "you versus the crowd" subtracts like for like.
-      crowdRating: row.crowd_rating === null || row.crowd_rating === undefined
-        ? null
-        : Number(row.crowd_rating) / 2,
+      // The audience score, rebased from /10 to the same 5-star scale the user's
+      // own ratings use, so "you versus the crowd" subtracts like for like.
+      // IMDb's is preferred where the catalog happens to have fetched it;
+      // otherwise TMDB's, which arrives free with the details every looked-up
+      // film already needs. Without the fallback the whole comparison — the
+      // offset, the per-person deltas, the biggest disagreements — stays empty
+      // for an imported history, since nothing fetches IMDb scores for it.
+      crowdRating: pickCrowdRating(row.crowd_rating, details),
     };
   });
 }
