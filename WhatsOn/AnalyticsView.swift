@@ -396,14 +396,19 @@ struct AnalyticsView: View {
                     .foregroundStyle(
                         // The mode carries the accent; the rest stay quiet, so
                         // the shape of the distribution reads before the numbers.
-                        bucket.rating == rating.mode?.rating ? Color.mkAccent : Color.mkMuted.opacity(0.35)
+                        // Quiet bars are keyed off the text colour rather than a
+                        // faint muted grey, so they stay legible on every theme.
+                        bucket.rating == rating.mode?.rating ? Color.mkAccent : Color.mkText.opacity(0.26)
                     )
                     .cornerRadius(3)
             }
             .chartXScale(domain: 0.25...5.25)
             // Whole stars only: ten half-star labels collide at phone width.
             .chartXAxis { AxisMarks(values: .stride(by: 1.0)) }
-            .chartYAxis { AxisMarks(position: .leading) }
+            .chartYAxis { AxisMarks(position: .leading) { _ in
+                AxisGridLine().foregroundStyle(Color.mkHairline)
+                AxisValueLabel()
+            } }
             .frame(height: 150)
             if let mode = rating.mode, mode.films > 0 {
                 caption("Most common: \(stars(mode.rating)) — \(mode.films) films")
@@ -465,11 +470,20 @@ struct AnalyticsView: View {
         if !eras.decades.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 sectionHeader("Films by decade")
+                // The busiest decade carries the accent, matching the rating
+                // histogram; the rest stay quiet so the peak reads at a glance.
+                let peakFilms = eras.decades.map(\.films).max() ?? 0
                 Chart(eras.decades) { decade in
                     BarMark(x: .value("Decade", decade.decade), y: .value("Films", decade.films), width: .fixed(20))
-                        .foregroundStyle(Color.mkAccent)
+                        .foregroundStyle(decade.films == peakFilms ? Color.mkAccent : Color.mkText.opacity(0.26))
                         .cornerRadius(3)
                 }
+                // Categorical X: labels only, no gridline noise between decades.
+                .chartXAxis { AxisMarks { _ in AxisValueLabel() } }
+                .chartYAxis { AxisMarks(position: .leading) { _ in
+                    AxisGridLine().foregroundStyle(Color.mkHairline)
+                    AxisValueLabel()
+                } }
                 .frame(height: 150)
             }
         }
