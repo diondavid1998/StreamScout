@@ -157,6 +157,18 @@ function buildTmdbHeaders() {
   };
 }
 
+/**
+ * Raised when a title search could not reach TMDB at all, as opposed to
+ * reaching it and being told the film does not exist. Only the second is an
+ * answer, and only the second may be remembered.
+ */
+class TmdbUnreachableError extends Error {
+  constructor(name) {
+    super(`Could not reach TMDB while searching for "${name}"`);
+    this.name = 'TmdbUnreachableError';
+  }
+}
+
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -654,9 +666,14 @@ async function searchTitleOnTmdb(name, year) {
 
   // Whether the year-scoped searches below are worth issuing at all.
   let worthFallingBack = true;
+  // Whether TMDB answered any of the requests below. A null return means two
+  // very different things — "no such film" and "nobody picked up" — and callers
+  // cache the first one. Tracking this lets the second throw instead.
+  let tmdbAnswered = false;
 
   try {
     const data = await fetchTmdb('/search/multi', { query: name, language: 'en-US' });
+    tmdbAnswered = true;
     const results = data.results || [];
     const candidates = results.filter((r) => r.media_type === 'movie' || r.media_type === 'tv');
     // Films first, matching the old movie-before-TV precedence.
@@ -687,6 +704,7 @@ async function searchTitleOnTmdb(name, year) {
   const trySearch = async (endpoint, yearParam, yearValue) => {
     try {
       const data = await fetchTmdb(endpoint, { query: name, [yearParam]: yearValue, language: 'en-US' });
+      tmdbAnswered = true;
       return (data.results || []).find((r) => titleMatches(r.title || r.name, normName)) || null;
     } catch {
       return null;
@@ -702,6 +720,9 @@ async function searchTitleOnTmdb(name, year) {
     const match = await trySearch('/search/tv', 'first_air_date_year', yr);
     if (match) return shapeSearchResult(match, 'tv');
   }
+
+  // Every request failed, so nothing here is evidence about the film itself.
+  if (!tmdbAnswered) throw new TmdbUnreachableError(name);
 
   return null;
 }
@@ -804,6 +825,7 @@ module.exports = {
   fetchTitleWithCredits,
   isOmdbRateLimited,
   searchTitleOnTmdb,
+  TmdbUnreachableError,
   includedProviders,
   searchCatalog,
   fetchTitlesByPerson,

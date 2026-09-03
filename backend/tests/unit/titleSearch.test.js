@@ -173,4 +173,12 @@ describe('searchTitleOnTmdb', () => {
     expect(result).toMatchObject({ itemId: 'movie-61' });
     expect(requestedPaths()).toEqual(['/search/multi', '/search/movie']);
   });
+
+  it('throws rather than returning null when TMDB never answers', async () => {
+    // Null is what callers cache as "no such film". An outage must not be
+    // recorded as one, so a search that reached nothing has to say so.
+    global.fetch.mockRejectedValue(new Error('network down'));
+
+    await expect(searchTitleOnTmdb('Nobody Answered', 2012)).rejects.toThrow(/could not reach tmdb/i);
+  });
 });

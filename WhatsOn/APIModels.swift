@@ -296,7 +296,12 @@ struct DiaryImportFile: Decodable, Identifiable {
 struct AnalyticsCoverage: Decodable {
     let films: Int
     let resolved: Int
+    /// Films still worth looking up. Excludes the ones the film database has
+    /// already been asked about and had nothing for.
     let pending: Int
+    /// Films that were looked up and could not be matched. Optional so a
+    /// payload from an older server still decodes.
+    let unmatched: Int?
 }
 
 struct AnalyticsSummary: Decodable {

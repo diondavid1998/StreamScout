@@ -115,6 +115,40 @@ async function ensureAnalyticsTables(db) {
   );
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_user ON letterboxd_entries(user_id)');
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_film ON letterboxd_entries(user_id, film_key)');
+
+  // One-off repair, and it has to be genuinely one-off: clearing on every boot
+  // would put the films TMDB really has nothing for back in the queue each
+  // restart, so the page would keep offering a lookup that can never finish.
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS analytics_repairs (
+      name       TEXT PRIMARY KEY,
+      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`
+  );
+  const { changes } = await run(
+    db,
+    "INSERT OR IGNORE INTO analytics_repairs (name) VALUES ('clear-unreliable-miss-markers')"
+  );
+  if (changes > 0) {
+    // The empty string means "the film database has nothing under this name",
+    // and a film carrying it is never searched again. It used to be written for
+    // a failed request too, so one TMDB outage could retire a whole history —
+    // and the page it fed would stay empty with nothing left to press. Every
+    // marker written under that rule is unreliable, so they are cleared and
+    // earned back a search at a time.
+    await run(db, "UPDATE letterboxd_entries SET item_id = NULL WHERE item_id = ''");
+  }
+}
+
+/** A /5 crowd score from whichever source has one, or null. */
+function pickCrowdRating(imdbRating, details) {
+  const imdb = imdbRating === null || imdbRating === undefined ? null : Number(imdbRating);
+  if (imdb !== null && Number.isFinite(imdb) && imdb > 0) return imdb / 2;
+  const tmdb = details?.voteAverage;
+  // TMDB reports an unrated film as 0, which is an absence, not an opinion.
+  if (typeof tmdb === 'number' && Number.isFinite(tmdb) && tmdb > 0) return tmdb / 2;
+  return null;
 }
 
 /**
@@ -153,17 +187,24 @@ async function readDiary(db, userId) {
       watchedOn: row.watched_on,
       isRewatch: Boolean(row.is_rewatch),
       tags,
+      // Not `|| null`: the empty string is the marker for a film the database
+      // has nothing for, and coalescing it away would hide those films back
+      // into the pending count the lookup has already finished with.
+      itemId: row.item_id === null || row.item_id === undefined ? null : String(row.item_id),
       resolved: Boolean(details),
       genres: details?.genres || [],
       directors: details?.directors || [],
       cast: (details?.cast || []).map((c) => c.name),
       runtime: details?.runtime || null,
       language: row.original_language || null,
-      // IMDb's audience score, rebased from /10 to the same 5-star scale the
-      // user's own ratings use, so "you versus the crowd" subtracts like for like.
-      crowdRating: row.crowd_rating === null || row.crowd_rating === undefined
-        ? null
-        : Number(row.crowd_rating) / 2,
+      // The audience score, rebased from /10 to the same 5-star scale the user's
+      // own ratings use, so "you versus the crowd" subtracts like for like.
+      // IMDb's is preferred where the catalog happens to have fetched it;
+      // otherwise TMDB's, which arrives free with the details every looked-up
+      // film already needs. Without the fallback the whole comparison — the
+      // offset, the per-person deltas, the biggest disagreements — stays empty
+      // for an imported history, since nothing fetches IMDb scores for it.
+      crowdRating: pickCrowdRating(row.crowd_rating, details),
     };
   });
 }
@@ -341,6 +382,17 @@ async function computeAnalytics(db, userId) {
   const rows = await readDiary(db, userId);
   const films = new Set(rows.map((r) => r.filmKey));
   const resolvedFilms = new Set(rows.filter((r) => r.resolved).map((r) => r.filmKey));
+  // Films the lookup has already given its final answer on: TMDB had nothing
+  // under that name and year (the empty-string marker), or the only match was a
+  // series, which has no entry in the film details cache. Counting these as
+  // pending would leave the page permanently offering a lookup that can never
+  // move, so they are reported on their own line instead.
+  const unmatchedFilms = new Set(
+    rows
+      .filter((r) => !r.resolved && r.itemId !== null && !String(r.itemId).startsWith('movie-'))
+      .map((r) => r.filmKey)
+  );
+  for (const key of resolvedFilms) unmatchedFilms.delete(key);
   const summary = buildSummary(rows);
   const overallMean = summary.meanRating;
 
@@ -348,7 +400,8 @@ async function computeAnalytics(db, userId) {
     coverage: {
       films: films.size,
       resolved: resolvedFilms.size,
-      pending: films.size - resolvedFilms.size,
+      pending: films.size - resolvedFilms.size - unmatchedFilms.size,
+      unmatched: unmatchedFilms.size,
       // The sections below that need TMDB; everything else works regardless.
       needsResolution: ['genres', 'directors', 'cast', 'affinity', 'runtime'],
     },
