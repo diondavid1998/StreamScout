@@ -228,7 +228,7 @@ struct AnalyticsView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                 stat("Films", "\(a.summary.films)", detail: nil)
                 stat("Time in the dark", hours(a.summary.runtimeMinutes),
-                     detail: a.coverage.pending > 0 ? "of \(a.coverage.resolved) resolved" : nil)
+                     detail: a.coverage.resolved < a.coverage.films ? "of \(a.coverage.resolved) resolved" : nil)
                 stat("Your mean", a.summary.meanRating.map { String(format: "%.2f", $0) } ?? "—",
                      detail: "\(a.summary.rated) rated")
                 stat("Versus the crowd", offsetLabel(a.summary.tasteOffset),
@@ -317,7 +317,17 @@ struct AnalyticsView: View {
 
     private func peopleSection(_ a: AnalyticsResponse) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Genres & people", note: a.coverage.pending > 0 ? "\(a.coverage.resolved) of \(a.coverage.films)" : nil)
+            sectionHeader("Genres & people",
+                          note: a.coverage.resolved < a.coverage.films
+                              ? "\(a.coverage.resolved) of \(a.coverage.films)" : nil)
+
+            // Nothing left to look up, but some films never matched. Say so
+            // once rather than leaving the counts above unexplained.
+            if a.coverage.pending == 0, let unmatched = a.coverage.unmatched, unmatched > 0 {
+                Text("\(unmatched) \(unmatched == 1 ? "film" : "films") had no match in the film database, so they are missing from the sections below.")
+                    .font(.footnote).foregroundColor(.mkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if a.coverage.pending > 0 {
                 VStack(alignment: .leading, spacing: 10) {
@@ -613,6 +623,11 @@ struct AnalyticsView: View {
         defer { isResolving = false }
         var remaining = pending
         var rounds = 0
+        // A batch that leaves the backlog no shorter than it found it. Films the
+        // database has nothing for drop out of `pending` server-side, so a stall
+        // means the lookup could not get through — worth trying again later,
+        // unlike an unmatched film.
+        var stalled = false
 
         while remaining > 0 && rounds < 200 {
             rounds += 1
@@ -622,16 +637,26 @@ struct AnalyticsView: View {
                     "/analytics/resolve", body: ["limit": 60], token: app.token, timeout: 120
                 )
                 let next = response.pending ?? 0
-                if next >= remaining { remaining = next; break }
+                if next >= remaining {
+                    remaining = next
+                    stalled = true
+                    break
+                }
                 remaining = next
             } catch {
-                resolveStatus = "Stopped — \(remaining) still to look up."
+                resolveStatus = "Stopped — \(remaining) still to look up. Try again."
                 await load()
                 return
             }
         }
 
-        resolveStatus = remaining == 0 ? nil : "\(remaining) could not be matched."
+        if remaining == 0 {
+            resolveStatus = nil
+        } else if stalled {
+            resolveStatus = "Stopped — \(remaining) could not be looked up just now. Try again."
+        } else {
+            resolveStatus = "\(remaining) still to look up."
+        }
         await load()
     }
 }

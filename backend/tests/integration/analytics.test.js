@@ -21,6 +21,12 @@ const request = require('supertest');
 const { createTestDb, closeDb } = require('../testHelpers');
 const { createApp } = require('../../app');
 const { fetchTitleWithCredits, searchTitleOnTmdb } = require('../../movieService');
+const { ensureAnalyticsTables } = require('../../analytics');
+
+const exec = (sql) => new Promise((resolve, reject) => db.run(sql, (e) => (e ? reject(e) : resolve())));
+const countMarkers = () => new Promise((resolve, reject) =>
+  db.get("SELECT COUNT(*) AS n FROM letterboxd_entries WHERE item_id = ''", (e, row) =>
+    (e ? reject(e) : resolve(row.n))));
 
 const DIARY = [
   'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date',
@@ -410,5 +416,97 @@ describe('re-importing an export', () => {
     expect(imported.body.alreadyKnown).toBe(3);
     expect((await auth2(request(app).get('/analytics'))).body.coverage.pending).toBe(0);
     expect(searchTitleOnTmdb).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The lookup button's job is to fill in genres, directors and cast. It reported
+ * itself finished while every one of those was still empty, because two parts of
+ * the service disagreed about what "resolved" meant: the resolve endpoint counted
+ * a film done once it had a TMDB id, while the analytics page counted it done
+ * only once the details behind that id were cached.
+ */
+describe('the lookup finishes the job it advertises', () => {
+  const RATINGS_ONLY = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Alpha,2001,https://boxd.it/a,4',
+    '2026-01-01,Beta,2002,https://boxd.it/b,5',
+  ].join('\n');
+
+  beforeEach(() => {
+    let next = 200;
+    searchTitleOnTmdb.mockImplementation(async (name) => ({
+      itemId: `movie-${++next}`, mediaType: 'movie', title: name, posterUrl: null,
+    }));
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: `Film ${id}`, genres: [{ name: 'Noir' }], runtime: 100,
+      external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: [{ id: 7, name: 'Lead Player' }], crew: [{ job: 'Director', name: 'Some Director' }] },
+    }));
+  });
+
+  test('a history already in the lookup cache still gets its details fetched', async () => {
+    // The real starting position: these films were resolved long ago by a
+    // watched-list import, which caches TMDB ids but never fetches credits. The
+    // analytics import then adopts those ids for free.
+    await auth(request(app).post('/import/letterboxd')).send({
+      importType: 'watched',
+      items: [{ name: 'Alpha', year: 2001 }, { name: 'Beta', year: 2002 }],
+    });
+
+    const imported = await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+    expect(imported.body.alreadyKnown).toBe(2);
+
+    // Adopted ids are not analytics data. Both films still need their credits.
+    const before = await auth(request(app).get('/analytics'));
+    expect(before.body.coverage.pending).toBe(2);
+
+    const first = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect(first.body.pending).toBe(0);
+
+    const after = await auth(request(app).get('/analytics'));
+    expect(after.body.coverage.pending).toBe(0);
+    expect(after.body.coverage.resolved).toBe(2);
+    expect(after.body.people.directors.map((d) => d.name)).toContain('Some Director');
+    expect(after.body.people.genres.map((g) => g.name)).toContain('Noir');
+  });
+
+  test('write-off markers left by the old rule are cleared once, and only once', async () => {
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+    await exec("UPDATE letterboxd_entries SET item_id = ''");
+
+    // The repair ran when this app was created, so it leaves these alone —
+    // otherwise every restart would re-queue films TMDB really has nothing for.
+    await ensureAnalyticsTables(db);
+    expect(await countMarkers()).toBe(2);
+
+    // On a database that has not had it yet, they go back in the queue.
+    await exec('DELETE FROM analytics_repairs');
+    await ensureAnalyticsTables(db);
+    expect(await countMarkers()).toBe(0);
+    expect((await auth(request(app).get('/analytics'))).body.coverage.pending).toBe(2);
+  });
+
+  test('a film TMDB could not be reached for is retried, not written off', async () => {
+    searchTitleOnTmdb.mockRejectedValue(new Error('fetch failed'));
+
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: RATINGS_ONLY }] });
+
+    const failed = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect(failed.body.resolved).toBe(0);
+    // Still outstanding — an outage is not an answer about these films.
+    expect(failed.body.pending).toBe(2);
+
+    let next = 300;
+    searchTitleOnTmdb.mockImplementation(async (name) => ({
+      itemId: `movie-${++next}`, mediaType: 'movie', title: name, posterUrl: null,
+    }));
+
+    const retried = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect(retried.body.resolved).toBe(2);
+    expect(retried.body.pending).toBe(0);
   });
 });

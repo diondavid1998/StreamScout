@@ -137,9 +137,17 @@ function lookupKeyFor(name, year) {
  * slept 125ms between them, so a 50-title batch could not finish in under six
  * seconds no matter how fast TMDB answered.
  *
- * Resolved titles are cached forever; failures only for NEGATIVE_LOOKUP_TTL_MS,
- * so a transient TMDB outage cannot write a title off permanently.
+ * Resolved titles are cached forever; a definitive "no such film" only for
+ * NEGATIVE_LOOKUP_TTL_MS. A title TMDB could not be reached for is cached under
+ * neither rule — it comes back as LOOKUP_UNAVAILABLE so callers can leave it
+ * outstanding and ask again rather than recording an outage as an answer.
  */
+/**
+ * Stands in for a match when TMDB could not be reached, so a failed call is
+ * never mistaken for the film not existing.
+ */
+const LOOKUP_UNAVAILABLE = Symbol('lookup-unavailable');
+
 async function resolveImportBatch(db, batch) {
   const keys = batch.map(({ name, year }) => lookupKeyFor(name, year));
   const uniqueKeys = [...new Set(keys)];
@@ -179,7 +187,9 @@ async function resolveImportBatch(db, batch) {
       try {
         return await searchTitleOnTmdb(name, year);
       } catch {
-        return null;
+        // Any throw at all. A search that simply found nothing returns null, so
+        // an exception only ever means the answer never arrived.
+        return LOOKUP_UNAVAILABLE;
       }
     });
 
@@ -187,6 +197,11 @@ async function resolveImportBatch(db, batch) {
     await withTransaction(db, async () => {
       for (let i = 0; i < toSearch.length; i++) {
         const key = lookupKeyFor(toSearch[i].name, toSearch[i].year);
+        if (found[i] === LOOKUP_UNAVAILABLE) {
+          // Deliberately not written to the cache: there is nothing to record.
+          resolved.set(key, LOOKUP_UNAVAILABLE);
+          continue;
+        }
         const hit = found[i] || null;
         resolved.set(key, hit);
         await runSql(
@@ -889,6 +904,42 @@ function createApp(db, { disableRateLimit = false } = {}) {
   });
 
   /**
+   * A film is outstanding until its *details* are cached, not merely until it
+   * has a TMDB id.
+   *
+   * The distinction is the whole point of the lookup: genres, directors and
+   * cast live in `title_details_cache`, and an id on its own contributes
+   * nothing to the page. Ids arrive by two routes that skip the details — a
+   * watched-list import, which caches ids as a side effect, and adoption of
+   * another account's earlier work — so a history can be fully "resolved" by
+   * id while every section that needs TMDB is still empty.
+   *
+   * Excluded are the films the lookup has already answered on for good: the
+   * empty-string marker for a name TMDB has nothing under, and a `tv-` id,
+   * which the film details cache will never hold. Both would otherwise be
+   * retried on every batch forever.
+   */
+  const PENDING_FILM_FILTER = `
+       FROM letterboxd_entries e
+       LEFT JOIN title_details_cache d
+              ON d.media_type = 'movie'
+             AND ('movie-' || d.tmdb_id) = e.item_id
+      WHERE e.user_id = ?
+        AND d.tmdb_id IS NULL
+        AND (e.item_id IS NULL OR e.item_id LIKE 'movie-%')`;
+
+  async function countPendingFilms(userId) {
+    const [{ pending = 0 } = {}] = await getRows(
+      db,
+      `SELECT COUNT(*) AS pending FROM (
+         SELECT e.film_key ${PENDING_FILM_FILTER} GROUP BY e.film_key
+       )`,
+      [userId]
+    );
+    return pending;
+  }
+
+  /**
    * Fill in genre and people data for films the diary has never resolved.
    *
    * Deliberately batched and resumable rather than one long request: a large
@@ -904,55 +955,68 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
       const pendingRows = await getRows(
         db,
-        `SELECT film_key, name, year FROM letterboxd_entries
-          WHERE user_id = ? AND item_id IS NULL
-          GROUP BY film_key
+        `SELECT e.film_key, e.name, e.year, MAX(e.item_id) AS item_id
+           ${PENDING_FILM_FILTER}
+          GROUP BY e.film_key
           LIMIT ?`,
         [req.user.id, limit]
       );
       if (!pendingRows.length) {
-        const [{ pending = 0 } = {}] = await getRows(
-          db,
-          'SELECT COUNT(DISTINCT film_key) AS pending FROM letterboxd_entries WHERE user_id = ? AND item_id IS NULL',
-          [req.user.id]
-        );
-        return res.json({ resolved: 0, failed: 0, pending });
+        return res.json({ resolved: 0, failed: 0, pending: await countPendingFilms(req.user.id) });
       }
 
-      const matches = await resolveImportBatch(db, pendingRows.map(({ name, year }) => ({ name, year })));
+      // Rows that already carry an id skip the search and go straight to the
+      // details fetch — that is the half of the work they are missing.
+      const needsSearch = pendingRows.filter((row) => !row.item_id);
+      const matches = needsSearch.length
+        ? await resolveImportBatch(db, needsSearch.map(({ name, year }) => ({ name, year })))
+        : [];
 
-      let resolved = 0;
-      let failed = 0;
-      for (let i = 0; i < pendingRows.length; i++) {
+      for (let i = 0; i < needsSearch.length; i++) {
         const match = matches[i];
-        // A film TMDB cannot find is marked with the empty string rather than
-        // left NULL, so the next batch moves past it instead of retrying the
-        // same unresolvable rows forever.
-        const itemId = match?.itemId || '';
-        if (match?.itemId) resolved++; else failed++;
+        // An outage is not an answer. Leaving the id NULL keeps the film in the
+        // next batch instead of writing it off over a network blip.
+        if (match === LOOKUP_UNAVAILABLE) continue;
+        // A film TMDB genuinely has nothing for is marked with the empty string
+        // so later batches move past it rather than retrying it forever.
         await runSql(
           db,
           'UPDATE letterboxd_entries SET item_id = ? WHERE user_id = ? AND film_key = ?',
-          [itemId, req.user.id, pendingRows[i].film_key]
+          [match?.itemId || '', req.user.id, needsSearch[i].film_key]
         );
       }
 
-      // Now make sure the details behind each match are cached. Shared across
-      // every user, so a popular film is fetched once for the whole service.
-      const tmdbIds = matches
-        .filter((m) => m?.itemId && m.mediaType === 'movie')
-        .map((m) => parseInt(String(m.itemId).split('-')[1], 10))
-        .filter(Number.isInteger);
-      await mapWithConcurrency(tmdbIds, IMPORT_LOOKUP_CONCURRENCY, async (tmdbId) => {
+      // Now the details behind every id in this batch, freshly searched or
+      // adopted. Shared across every user, so a popular film is fetched once
+      // for the whole service.
+      const tmdbIds = new Set();
+      const collectId = (itemId) => {
+        const [type, id] = String(itemId || '').split('-');
+        if (type === 'movie' && Number.isInteger(parseInt(id, 10))) tmdbIds.add(parseInt(id, 10));
+      };
+      for (const match of matches) {
+        if (match && match !== LOOKUP_UNAVAILABLE && match.mediaType === 'movie') collectId(match.itemId);
+      }
+      for (const row of pendingRows) collectId(row.item_id);
+
+      await mapWithConcurrency([...tmdbIds], IMPORT_LOOKUP_CONCURRENCY, async (tmdbId) => {
         try { await ensureAnalyticsDetails(db, tmdbId); } catch { /* one miss must not stop the batch */ }
       });
 
-      const [{ pending = 0 } = {}] = await getRows(
+      // Counted from the database rather than from the calls, so `resolved`
+      // means what the page will actually be able to show.
+      const keys = pendingRows.map((row) => row.film_key);
+      const [{ done = 0 } = {}] = await getRows(
         db,
-        'SELECT COUNT(DISTINCT film_key) AS pending FROM letterboxd_entries WHERE user_id = ? AND item_id IS NULL',
-        [req.user.id]
+        `SELECT COUNT(DISTINCT e.film_key) AS done
+           FROM letterboxd_entries e
+           JOIN title_details_cache d
+             ON d.media_type = 'movie' AND ('movie-' || d.tmdb_id) = e.item_id
+          WHERE e.user_id = ? AND e.film_key IN (${keys.map(() => '?').join(',')})`,
+        [req.user.id, ...keys]
       );
-      res.json({ resolved, failed, pending });
+
+      res.json({ resolved: done, failed: keys.length - done, pending: await countPendingFilms(req.user.id) });
     } catch (e) {
       console.error('[analytics/resolve] failed:', e.message);
       res.status(500).json({ error: 'Could not resolve titles', details: e.message });
@@ -1500,7 +1564,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
       await withTransaction(db, async () => {
         const imported = [];
         for (const result of results) {
-          if (!result) { notFound++; continue; }
+          if (!result || result === LOOKUP_UNAVAILABLE) { notFound++; continue; }
           const { changes } = await runSql(
             db,
             `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol}) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
