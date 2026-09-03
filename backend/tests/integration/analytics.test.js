@@ -664,6 +664,26 @@ describe('lenses and filters', () => {
     ]);
   });
 
+  test('picking a language restricts the people, not just the numbers', async () => {
+    // The exact expectation: filter to English and the Cast list shows only
+    // actors who appear in English films — the Japanese-only actor is gone.
+    const en = await auth(request(app).get('/analytics?dimension=cast&language=en'));
+    const names = en.body.breakdown.entries.map((e) => e.name);
+    expect(names).toContain('Rooney Mara');
+    expect(names).not.toContain('Toshiro Mifune');
+
+    // The Cast filter options in the sheet are restricted the same way, so you
+    // can't pick an actor that would empty the screen.
+    const castFacet = en.body.filters.available.cast.map((o) => o.value);
+    expect(castFacet).toContain('Rooney Mara');
+    expect(castFacet).not.toContain('Toshiro Mifune');
+
+    // But the Language list still offers Japanese — a facet is counted against
+    // every filter except its own, so switching languages stays discoverable.
+    const langs = Object.fromEntries(en.body.filters.available.languages.map((o) => [o.value, o.films]));
+    expect(langs).toMatchObject({ en: 2, ja: 2 });
+  });
+
   test('filters compose, and numeric ones parse', async () => {
     const res = await auth(request(app).get('/analytics?language=en&ratingMin=3&dimension=cast'));
     expect(res.body.scope.films).toBe(1);          // Gamma at 3; Delta at 2 is out
