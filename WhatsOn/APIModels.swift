@@ -626,6 +626,14 @@ final class APIService {
     }
 
     private func perform<T: Decodable>(_ req: URLRequest) async throws -> T {
+        try await performRaw(req).value
+    }
+
+    /// Like `perform`, but also hands back the undecoded response bytes so a
+    /// caller can persist them for an offline snapshot. Re-decoding the raw
+    /// bytes on relaunch is safer than re-encoding a decoded model whose
+    /// `Decodable` is hand-written (the catalog's is).
+    private func performRaw<T: Decodable>(_ req: URLRequest) async throws -> (value: T, data: Data) {
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: req)
@@ -644,9 +652,59 @@ final class APIService {
             if http.statusCode >= 500 { throw APIError.serverError(http.statusCode) }
         }
         do {
-            return try JSONDecoder().decode(T.self, from: data)
+            return (try JSONDecoder().decode(T.self, from: data), data)
         } catch {
             throw APIError.decodingError
         }
+    }
+
+    /// A GET that also returns the raw bytes, for the one caller that caches
+    /// them (the Discover feed). Everything else uses the plain `get`.
+    func getWithData<T: Decodable>(_ path: String, params: [String: String] = [:], token: String? = nil) async throws -> (value: T, data: Data) {
+        guard var components = URLComponents(string: API.baseURL + path) else {
+            throw APIError.networkError(URLError(.badURL))
+        }
+        if !params.isEmpty {
+            components.queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        guard let url = components.url else { throw APIError.networkError(URLError(.badURL)) }
+        var req = URLRequest(url: url, timeoutInterval: 30)
+        req.httpMethod = "GET"
+        if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        return try await performRaw(req)
+    }
+}
+
+// MARK: - Offline feed snapshot
+
+/// The last successful default Discover response, kept on disk so the feed shows
+/// instantly on a cold launch and still reads on a plane. It is a cache, not a
+/// source of truth: a live fetch overwrites it, and it is only ever restored for
+/// the exact view it was captured under (same services, sort and media type),
+/// tracked by a signature stored alongside the bytes.
+enum FeedSnapshot {
+    private static var dir: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+    private static var dataURL: URL? { dir?.appendingPathComponent("whatson-feed.json") }
+    private static var sigURL: URL? { dir?.appendingPathComponent("whatson-feed.sig") }
+
+    static func save(_ data: Data, signature: String) {
+        guard let d = dataURL, let s = sigURL else { return }
+        try? data.write(to: d, options: .atomic)
+        try? Data(signature.utf8).write(to: s, options: .atomic)
+    }
+
+    /// The stored bytes, but only when they were captured under `signature`.
+    static func load(signature: String) -> Data? {
+        guard let d = dataURL, let s = sigURL,
+              let sig = try? Data(contentsOf: s),
+              String(decoding: sig, as: UTF8.self) == signature else { return nil }
+        return try? Data(contentsOf: d)
+    }
+
+    static func clear() {
+        if let d = dataURL { try? FileManager.default.removeItem(at: d) }
+        if let s = sigURL { try? FileManager.default.removeItem(at: s) }
     }
 }

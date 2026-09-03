@@ -198,6 +198,9 @@ final class AppState {
         defaults.removeObject(forKey: watchedKey)
         defaults.removeObject(forKey: watchlistKey)
         defaults.removeObject(forKey: currentKey)
+        // The cached feed is the previous account's; never seed a new session
+        // from it.
+        FeedSnapshot.clear()
         page = .auth
     }
 }
@@ -917,6 +920,9 @@ struct CatalogView: View {
             DetailSheet(movie: movie).environment(app)
         }
         .task {
+            // Show the last snapshot first so the feed is never a blank spinner
+            // on a cold launch, then refresh over the top.
+            seedFromSnapshot()
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
             if app.selectedPlatforms.isEmpty { showSettingsView = true; return }
             await fetch()
@@ -969,7 +975,10 @@ struct CatalogView: View {
         Group {
             if isSearchActive {
                 searchContent
-            } else if isLoading || (movies.isEmpty && meta?.refreshing == true) {
+            } else if movies.isEmpty && (isLoading || meta?.refreshing == true) {
+                // Spinner only when there is genuinely nothing to show. A seeded
+                // snapshot or a previous page stays on screen while a refresh
+                // runs — the toolbar's spinning refresh icon signals the reload.
                 VStack(spacing: 10) {
                     Spacer()
                     ProgressView().tint(.mkAccent)
@@ -1351,6 +1360,36 @@ struct CatalogView: View {
         } catch { }
     }
 
+    /// The plain first-page feed a cold launch lands on — no filters, no
+    /// watchlist scoping. Only this view is snapshotted for offline, because it
+    /// is the only one a relaunch starts from.
+    private var isDefaultFeedView: Bool {
+        page == 1 && genreFilters.isEmpty && languageFilters.isEmpty
+            && yearMin.isEmpty && yearMax.isEmpty
+            && !hideWatched && !watchlistOnly && !streamingWatchlistOnly
+    }
+
+    /// Which default view a snapshot belongs to. The feed is specific to the
+    /// user's services, sort and media type, so a snapshot captured under one
+    /// set must never seed another.
+    private var feedSignature: String {
+        let platforms = app.selectedPlatforms.sorted().joined(separator: ",")
+        return "\(platforms)|\(sortBy.isEmpty ? "popularity" : sortBy)|\(mediaType.isEmpty ? "all" : mediaType)"
+    }
+
+    /// Put the last snapshot on screen immediately, before the network answers
+    /// — and leave it there if the network never does. A live fetch overwrites
+    /// both the view and the snapshot moments later.
+    @MainActor func seedFromSnapshot() {
+        guard movies.isEmpty, isDefaultFeedView,
+              let data = FeedSnapshot.load(signature: feedSignature),
+              let cached = try? JSONDecoder().decode(CatalogResponse.self, from: data),
+              !cached.catalog.isEmpty else { return }
+        movies = cached.catalog
+        meta = cached.meta
+        totalPages = cached.meta?.totalPages ?? totalPages
+    }
+
     @MainActor func fetch() async {
         isLoading = true; errorMsg = nil
         var params: [String: String] = [
@@ -1369,13 +1408,22 @@ struct CatalogView: View {
             if streamingWatchlistOnly { params["streamingOnly"] = "true" }
         }
         do {
-            let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
+            let fetched: (value: CatalogResponse, data: Data) =
+                try await APIService.shared.getWithData("/movies", params: params, token: app.token)
+            let resp = fetched.value
+            let raw = fetched.data
             if let serverError = resp.error, resp.catalog.isEmpty {
                 errorMsg = serverError; isLoading = false; return
             }
             movies     = resp.catalog
             meta       = resp.meta
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
+            // Keep the offline snapshot fresh — only for the default view, and
+            // only when it actually returned titles, so a blank page never
+            // overwrites a good cache.
+            if isDefaultFeedView && !resp.catalog.isEmpty {
+                FeedSnapshot.save(raw, signature: feedSignature)
+            }
             if meta?.refreshing == true { startPollingIfNeeded() }
         } catch APIError.unauthorized {
             app.logout()
