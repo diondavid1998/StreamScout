@@ -10,6 +10,7 @@ import Observation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import UIKit
+import CryptoKit
 
 @main
 struct WhatsOnApp: App {
@@ -634,6 +635,40 @@ final class ImageCache {
 
     private init() {}
 
+    // Posters live on disk as well as in memory. NSCache is wiped the moment
+    // iOS suspends and kills the app, so without this every relaunch re-fetched
+    // every visible poster over the network. The store sits in Caches — the
+    // system may purge it under pressure, which is correct: it is all
+    // re-fetchable, and a purge just costs one more download.
+    // nonisolated: read by the nonisolated disk helpers below, which run inside
+    // the detached fetch task rather than on the main actor.
+    private nonisolated static let diskDir: URL? = {
+        guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let dir = base.appendingPathComponent("WhatsOnPosters", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    // A stable filename for a URL. `String.hashValue` is seeded per process and
+    // would miss across launches — exactly the case this cache exists for — so
+    // the key is a SHA-256 of the URL instead.
+    private nonisolated static func diskURL(for urlString: String) -> URL? {
+        guard let dir = diskDir else { return nil }
+        let digest = SHA256.hash(data: Data(urlString.utf8))
+        let name = digest.map { String(format: "%02x", $0) }.joined()
+        return dir.appendingPathComponent(name)
+    }
+
+    private nonisolated static func readDisk(_ urlString: String) -> Data? {
+        guard let url = diskURL(for: urlString) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    private nonisolated static func writeDisk(_ data: Data, for urlString: String) {
+        guard let url = diskURL(for: urlString) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
     func cachedImage(for urlString: String) -> UIImage? {
         imageCache.object(forKey: urlString as NSString)
     }
@@ -646,9 +681,13 @@ final class ImageCache {
 
         let task = Task<Data?, Never> {
             await Task.detached(priority: .utility) {
+                // Disk before network: a poster seen in a previous session is
+                // already here, so a cold launch paints without a round-trip.
+                if let disk = Self.readDisk(urlString) { return disk }
                 guard let (data, response) = try? await URLSession.shared.data(from: url),
                       let http = response as? HTTPURLResponse,
                       (200...299).contains(http.statusCode) else { return nil }
+                Self.writeDisk(data, for: urlString)
                 return data
             }.value
         }
