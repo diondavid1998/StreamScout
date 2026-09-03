@@ -732,8 +732,11 @@ async function computeAnalytics(db, userId, options = {}) {
 
   // The posters and the quadrant belong to the overview — the lens people land
   // on — and the quadrant is repeated on the genre lens it is built from.
+  // The mosaic rides on every lens, not just the overview: it is a couple of
+  // dozen small rows, and the share card is built from whatever lens the reader
+  // happens to be on — a card with no artwork would be a poor one.
+  payload.mosaic = buildMosaic(rows);
   if (dimension === 'overview') {
-    payload.mosaic = buildMosaic(rows);
     payload.watchlist = buildWatchlist(await readWatchlist(db, userId), allRows);
   }
   if (dimension === 'overview' || dimension === 'genres') {

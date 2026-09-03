@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 import UniformTypeIdentifiers
+import UIKit
 
 // MARK: - Reading an export off disk
 
@@ -100,6 +101,163 @@ enum LetterboxdExport {
     }
 }
 
+
+// MARK: - Shareable card
+
+/// One rendered image of the reader's history.
+///
+/// Deliberately not the scrolling page: a share card has one job, a fixed size,
+/// and no scrolling — so it is laid out from scratch at a fixed 400×540 rather
+/// than screenshotting a view built for a phone.
+///
+/// Two constraints come from `ImageRenderer`, which is synchronous and does not
+/// inherit the environment. Posters must therefore be handed in already decoded
+/// (anything still loading renders blank), and every colour is read from the
+/// static theme tokens rather than `@Environment`, which would come back as
+/// defaults.
+private struct ShareCardView: View {
+    let summary: AnalyticsSummary
+    let posters: [UIImage]
+    let topGenres: [String]
+    let topDirector: String?
+    let scopeNote: String?
+
+    private var hours: String {
+        let h = summary.runtimeMinutes / 60
+        return h >= 1000 ? "\(h / 1000),\(String(format: "%03d", h % 1000))" : "\(h)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("🎬 \(Brand.wordmark)".uppercased())
+                .font(.system(size: 12, weight: .bold)).tracking(1.6)
+                .foregroundColor(.mkAccent)
+
+            Text("\(summary.films)")
+                .font(.system(size: 76, weight: .bold, design: .rounded))
+                .foregroundColor(.mkText)
+                .minimumScaleFactor(0.5).lineLimit(1)
+                .padding(.top, 6)
+
+            Text("films — \(hours) hours in the dark")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(.mkMuted)
+
+            if !posters.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(posters.prefix(5).enumerated()), id: \.offset) { _, poster in
+                        Image(uiImage: poster)
+                            .resizable().scaledToFill()
+                            .frame(width: 66, height: 99)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                }
+                .padding(.top, 20)
+            }
+
+            HStack(spacing: 26) {
+                cardStat("Your mean", summary.meanRating.map { String(format: "%.2f", $0) } ?? "—")
+                cardStat("Rated", "\(summary.rated)")
+                if let offset = summary.tasteOffset {
+                    cardStat("vs crowd", String(format: "%+.2f", offset))
+                }
+            }
+            .padding(.top, 22)
+
+            if !topGenres.isEmpty {
+                Text(topGenres.prefix(4).joined(separator: " · "))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.mkText.opacity(0.75))
+                    .lineLimit(1)
+                    .padding(.top, 18)
+            }
+            if let director = topDirector {
+                Text("Most watched director — \(director)")
+                    .font(.system(size: 12))
+                    .foregroundColor(.mkMuted)
+                    .lineLimit(1)
+                    .padding(.top, 3)
+            }
+
+            Spacer(minLength: 0)
+
+            if let scopeNote {
+                Text(scopeNote)
+                    .font(.system(size: 11))
+                    .foregroundColor(.mkMuted.opacity(0.8))
+                    .lineLimit(1)
+            }
+        }
+        .padding(26)
+        .frame(width: 400, height: 540, alignment: .topLeading)
+        .background(Color.mkBackground)
+    }
+
+    private func cardStat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .bold)).tracking(0.7)
+                .foregroundColor(.mkMuted)
+            Text(value)
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+                .foregroundColor(.mkText)
+        }
+    }
+}
+
+/// A rendered card, held so the share sheet has something to hand over.
+private struct RenderedCard: Identifiable {
+    let id = UUID()
+    let image: Image
+}
+
+/// Shows the card that is about to be shared, then hands it to the system
+/// share sheet. Previewing first matters: the reader is about to post this.
+private struct ShareCardSheet: View {
+    let card: RenderedCard
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                VStack(spacing: 22) {
+                    card.image
+                        .resizable().scaledToFit()
+                        .frame(maxWidth: 340)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(Color.mkHairline, lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
+
+                    ShareLink(
+                        item: card.image,
+                        preview: SharePreview("My film diary", image: card.image)
+                    ) {
+                        Text("Share")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.mkText)
+                            .padding(.horizontal, 26).frame(height: 46)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.tint(Color.mkAccent).interactive(), in: Capsule())
+                }
+                .padding(24)
+            }
+            .navigationTitle("Share")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold).foregroundColor(.mkAccent)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Screen
 
 /// The Letterboxd analytics page.
@@ -134,6 +292,9 @@ struct AnalyticsView: View {
     @State private var isResolving = false
     @State private var resolveStatus: String?
 
+    @State private var renderedCard: RenderedCard?
+    @State private var isRenderingCard = false
+
     /// Above and below the reader's own average. Fixed mid-tones rather than
     /// `.green`/`.orange`, which sit outside every palette and read differently
     /// on a light ground than a dark one.
@@ -154,6 +315,20 @@ struct AnalyticsView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        Task { await renderShareCard() }
+                    } label: {
+                        if isRenderingCard {
+                            ProgressView().tint(.mkAccent)
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .foregroundColor(.mkAccent)
+                    .disabled(analytics == nil || isRenderingCard)
+                    .accessibilityLabel("Share your stats")
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
                         showImporter = true
                     } label: {
                         Image(systemName: "square.and.arrow.down")
@@ -163,6 +338,9 @@ struct AnalyticsView: View {
                     .accessibilityLabel("Import Letterboxd export")
                 }
             }
+        }
+        .sheet(item: $renderedCard) { card in
+            ShareCardSheet(card: card)
         }
         .sheet(isPresented: $showFilterSheet) {
             if let a = analytics {
@@ -892,6 +1070,46 @@ struct AnalyticsView: View {
     private func stars(_ rating: Double) -> String {
         let full = Int(rating)
         return String(repeating: "★", count: full) + (rating - Double(full) >= 0.5 ? "½" : "")
+    }
+
+    // MARK: Sharing
+
+    /// Build the card and hand it to the share sheet.
+    ///
+    /// The posters are awaited first on purpose: `ImageRenderer` draws in one
+    /// synchronous pass, so any artwork still in flight would be rendered as a
+    /// blank rectangle. They come from the same cache the feed uses, so after a
+    /// normal session they are already on disk and this costs nothing.
+    @MainActor private func renderShareCard() async {
+        guard let a = analytics else { return }
+        isRenderingCard = true
+        defer { isRenderingCard = false }
+
+        var posters: [UIImage] = []
+        for film in (a.mosaic ?? []).prefix(5) {
+            guard let urlString = film.posterUrl,
+                  let image = await ImageCache.shared.image(for: urlString) else { continue }
+            posters.append(image)
+        }
+
+        let genres = a.highlights?.first(where: { $0.id == "genres" })?.entries.map(\.label) ?? []
+        let director = a.highlights?.first(where: { $0.id == "directors" })?.entries.first?.label
+
+        let card = ShareCardView(
+            summary: a.summary,
+            posters: posters,
+            topGenres: genres,
+            topDirector: director,
+            scopeNote: a.scope.filtered
+                ? "\(a.scope.films) of \(a.scope.filmsTotal) films"
+                : nil
+        )
+
+        let renderer = ImageRenderer(content: card)
+        // Retina: the card is shared at 400pt wide and will be viewed at full size.
+        renderer.scale = 3
+        guard let ui = renderer.uiImage else { return }
+        renderedCard = RenderedCard(image: Image(uiImage: ui))
     }
 
     // MARK: Networking
