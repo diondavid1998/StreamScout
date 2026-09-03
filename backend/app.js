@@ -34,7 +34,7 @@ const {
   seriesTmdbId,
 } = require('./currentlyWatching');
 const { readExport, filmKey } = require('./letterboxd');
-const { computeAnalytics } = require('./analytics');
+const { computeAnalytics, parseFilters } = require('./analytics');
 const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -904,7 +904,14 @@ function createApp(db, { disableRateLimit = false } = {}) {
   // undated. A filter that silently keeps almost everything is worse than none.
   app.get('/analytics', authenticateToken, async (req, res) => {
     try {
-      res.json(await computeAnalytics(db, req.user.id));
+      // One endpoint, two knobs. `dimension` picks the lens; the rest of the
+      // query string narrows the history, and drilling into a director is just
+      // that filter being added — so there is no separate drill-down route to
+      // keep in step.
+      res.json(await computeAnalytics(db, req.user.id, {
+        dimension: req.query.dimension,
+        filters: parseFilters(req.query),
+      }));
     } catch (e) {
       console.error('[analytics] failed:', e.message);
       res.status(500).json({ error: 'Could not build your analytics', details: e.message });

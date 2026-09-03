@@ -117,7 +117,8 @@ test('a user who has never imported gets zeros, not a crash', async () => {
   expect(res.status).toBe(200);
   expect(res.body.summary.films).toBe(0);
   expect(res.body.summary.meanRating).toBeNull();
-  expect(res.body.collection.topTags).toEqual([]);
+  const tags = await auth(request(app).get('/analytics?dimension=tags'));
+  expect(tags.body.collection.topTags).toEqual([]);
   expect(res.body.coverage).toMatchObject({ films: 0, pending: 0 });
 });
 
@@ -152,7 +153,7 @@ describe('analytics from the CSVs alone', () => {
   });
 
   test('reads decades and the release-to-watch lag from the Year column', async () => {
-    const { body } = await auth(request(app).get('/analytics'));
+    const { body } = await auth(request(app).get('/analytics?dimension=decades'));
     const decades = Object.fromEntries(body.eras.decades.map((d) => [d.decade, d.films]));
     expect(decades['2020s']).toBe(1);
     expect(decades['1990s']).toBe(1);
@@ -161,7 +162,7 @@ describe('analytics from the CSVs alone', () => {
   });
 
   test('keeps tags, which need no watch date', async () => {
-    const { body } = await auth(request(app).get('/analytics'));
+    const { body } = await auth(request(app).get('/analytics?dimension=tags'));
     expect(body.collection.topTags.map((t) => t.tag).sort()).toEqual(['epic', 'imax']);
   });
 
@@ -191,8 +192,10 @@ describe('analytics from the CSVs alone', () => {
   test('says how much is unresolved instead of silently omitting it', async () => {
     const { body } = await auth(request(app).get('/analytics'));
     expect(body.coverage).toMatchObject({ films: 5, resolved: 0, pending: 5 });
-    expect(body.people.genres).toEqual([]);
-    expect(body.people.directors).toEqual([]);
+    const genres = await auth(request(app).get('/analytics?dimension=genres'));
+    expect(genres.body.breakdown.entries).toEqual([]);
+    const directors = await auth(request(app).get('/analytics?dimension=directors'));
+    expect(directors.body.breakdown.entries).toEqual([]);
   });
 
   test('a date range is ignored rather than half-applied', async () => {
@@ -232,14 +235,24 @@ describe('resolving genres and people', () => {
 
     const { body } = await auth(request(app).get('/analytics'));
     expect(body.coverage.resolved).toBe(5);
-    expect(body.people.genres[0]).toMatchObject({ name: 'Science Fiction', films: 5 });
-    expect(body.people.directors[0]).toMatchObject({ name: 'Denis Villeneuve', films: 5 });
     expect(body.summary.runtimeMinutes).toBe(720);
-    // Every list carries a mean and a distance from the reader's own average —
+    // The overview points at the other lenses rather than ranking any of them.
+    const dirs = body.highlights.find((h) => h.id === 'directors');
+    expect(dirs.entries[0]).toMatchObject({ name: 'Denis Villeneuve', films: 5 });
+
+    const genres = await auth(request(app).get('/analytics?dimension=genres'));
+    expect(genres.body.breakdown.entries[0]).toMatchObject({ name: 'Science Fiction', films: 5 });
+
+    const directors = await auth(request(app).get('/analytics?dimension=directors'));
+    const top = directors.body.breakdown.entries[0];
+    expect(top).toMatchObject({ name: 'Denis Villeneuve', films: 5 });
+    // Every entry carries a mean and a distance from the reader's own average —
     // the count alone answers the less interesting half of the question.
-    expect(body.people.directors[0].meanRating).not.toBeNull();
-    expect(body.people.directors[0].delta).not.toBeNull();
-    expect(body.people.cast[0]).toMatchObject({ name: 'An Actor', films: 5 });
+    expect(top.meanRating).not.toBeNull();
+    expect(top.delta).not.toBeNull();
+
+    const cast = await auth(request(app).get('/analytics?dimension=cast'));
+    expect(cast.body.breakdown.entries[0]).toMatchObject({ name: 'An Actor', films: 5 });
   });
 
   test('a film TMDB cannot find is not retried forever', async () => {
@@ -318,7 +331,7 @@ describe('an export with no diary.csv', () => {
     expect(res.body.dated).toBe(2);
     expect(res.body.hasDiary).toBe(true);
 
-    const { body } = await auth(request(app).get('/analytics'));
+    const { body } = await auth(request(app).get('/analytics?dimension=tags'));
     expect(body.collection.topTags).toEqual([{ tag: 'imax', films: 1 }]);
     // A review body spanning five lines with a blank line in the middle is one
     // record, not five broken ones.
@@ -465,11 +478,12 @@ describe('the lookup finishes the job it advertises', () => {
     const first = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
     expect(first.body.pending).toBe(0);
 
-    const after = await auth(request(app).get('/analytics'));
+    const after = await auth(request(app).get('/analytics?dimension=directors'));
     expect(after.body.coverage.pending).toBe(0);
     expect(after.body.coverage.resolved).toBe(2);
-    expect(after.body.people.directors.map((d) => d.name)).toContain('Some Director');
-    expect(after.body.people.genres.map((g) => g.name)).toContain('Noir');
+    expect(after.body.breakdown.entries.map((d) => d.name)).toContain('Some Director');
+    const genres = await auth(request(app).get('/analytics?dimension=genres'));
+    expect(genres.body.breakdown.entries.map((g) => g.name)).toContain('Noir');
   });
 
   test('a film the database has nothing for stops counting as pending', async () => {
@@ -559,4 +573,193 @@ describe('the lookup finishes the job it advertises', () => {
     expect(retried.body.resolved).toBe(2);
     expect(retried.body.pending).toBe(0);
   });
+});
+
+/**
+ * The page is a lens over a filtered slice, not one long scroll. Two things have
+ * to hold: a lens returns only its own sections, and a filter re-answers every
+ * question rather than hiding rows from a fixed answer.
+ */
+describe('lenses and filters', () => {
+  const RATINGS = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Alpha,1995,https://boxd.it/a,5',
+    '2026-01-01,Beta,2005,https://boxd.it/b,4',
+    '2026-01-01,Gamma,2015,https://boxd.it/c,3',
+    '2026-01-01,Delta,2015,https://boxd.it/d,2',
+  ].join('\n');
+
+  // Alpha + Beta are Kurosawa in Japanese; Gamma + Delta are Fincher in English.
+  const SHAPE = {
+    Alpha: { lang: 'ja', dir: 'Akira Kurosawa', genre: 'Drama',    actor: 'Toshiro Mifune' },
+    Beta:  { lang: 'ja', dir: 'Akira Kurosawa', genre: 'Drama',    actor: 'Toshiro Mifune' },
+    Gamma: { lang: 'en', dir: 'David Fincher',  genre: 'Thriller', actor: 'Rooney Mara' },
+    Delta: { lang: 'en', dir: 'David Fincher',  genre: 'Thriller', actor: 'Rooney Mara' },
+  };
+
+  beforeEach(async () => {
+    const byId = {};
+    let next = 700;
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      const id = ++next;
+      byId[id] = name;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => {
+      const shape = SHAPE[byId[id]] || SHAPE.Alpha;
+      return {
+        id, title: byId[id], runtime: 100, vote_average: 7,
+        original_language: shape.lang,
+        genres: [{ name: shape.genre }],
+        external_ids: { imdb_id: `tt${id}` },
+        credits: {
+          cast: [{ id: 1, name: shape.actor }],
+          crew: [{ job: 'Director', name: shape.dir }],
+        },
+      };
+    });
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+  });
+
+  test('a lens returns its own sections and not the others', async () => {
+    const dir = await auth(request(app).get('/analytics?dimension=directors'));
+    expect(dir.body.dimension).toBe('directors');
+    expect(dir.body.breakdown.id).toBe('directors');
+    expect(dir.body.eras).toBeNull();
+    expect(dir.body.rating).toBeNull();
+
+    const dec = await auth(request(app).get('/analytics?dimension=decades'));
+    expect(dec.body.eras).not.toBeNull();
+    expect(dec.body.breakdown.entries.map((e) => e.name).sort())
+      .toEqual(['1990s', '2000s', '2010s']);
+
+    // The overview leads with ratings and points at the rest.
+    const over = await auth(request(app).get('/analytics'));
+    expect(over.body.dimension).toBe('overview');
+    expect(over.body.rating).not.toBeNull();
+    expect(over.body.highlights.map((h) => h.id))
+      .toEqual(['directors', 'genres', 'cast', 'languages', 'decades']);
+  });
+
+  test('an unknown lens falls back rather than erroring', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=astrology'));
+    expect(res.status).toBe(200);
+    expect(res.body.dimension).toBe('overview');
+  });
+
+  test('a language filter re-answers every question, not just the list', async () => {
+    const all = await auth(request(app).get('/analytics?dimension=directors'));
+    expect(all.body.scope).toMatchObject({ films: 4, filmsTotal: 4, filtered: false });
+    expect(all.body.summary.meanRating).toBe(3.5);
+
+    const ja = await auth(request(app).get('/analytics?dimension=directors&language=ja'));
+    expect(ja.body.scope).toMatchObject({ films: 2, filmsTotal: 4, filtered: true });
+    // Kurosawa's two films only — and the mean is theirs, not the library's.
+    expect(ja.body.breakdown.entries.map((e) => e.name)).toEqual(['Akira Kurosawa']);
+    expect(ja.body.summary.meanRating).toBe(4.5);
+    // Applied filters arrive as labelled chips, ready to render and remove.
+    expect(ja.body.filters.applied).toEqual([
+      { key: 'language', value: 'ja', label: 'Japanese' },
+    ]);
+  });
+
+  test('picking a language restricts the people, not just the numbers', async () => {
+    // The exact expectation: filter to English and the Cast list shows only
+    // actors who appear in English films — the Japanese-only actor is gone.
+    const en = await auth(request(app).get('/analytics?dimension=cast&language=en'));
+    const names = en.body.breakdown.entries.map((e) => e.name);
+    expect(names).toContain('Rooney Mara');
+    expect(names).not.toContain('Toshiro Mifune');
+
+    // The Cast filter options in the sheet are restricted the same way, so you
+    // can't pick an actor that would empty the screen.
+    const castFacet = en.body.filters.available.cast.map((o) => o.value);
+    expect(castFacet).toContain('Rooney Mara');
+    expect(castFacet).not.toContain('Toshiro Mifune');
+
+    // But the Language list still offers Japanese — a facet is counted against
+    // every filter except its own, so switching languages stays discoverable.
+    const langs = Object.fromEntries(en.body.filters.available.languages.map((o) => [o.value, o.films]));
+    expect(langs).toMatchObject({ en: 2, ja: 2 });
+  });
+
+  test('filters compose, and numeric ones parse', async () => {
+    const res = await auth(request(app).get('/analytics?language=en&ratingMin=3&dimension=cast'));
+    expect(res.body.scope.films).toBe(1);          // Gamma at 3; Delta at 2 is out
+    expect(res.body.breakdown.entries.map((e) => e.name)).toEqual(['Rooney Mara']);
+
+    const decade = await auth(request(app).get('/analytics?decade=2010s&dimension=genres'));
+    expect(decade.body.scope.films).toBe(2);
+    expect(decade.body.breakdown.entries.map((e) => e.name)).toEqual(['Thriller']);
+  });
+
+  test('a nonsense filter value narrows to nothing without crashing', async () => {
+    const res = await auth(request(app).get('/analytics?language=zz&dimension=directors'));
+    expect(res.status).toBe(200);
+    expect(res.body.scope.films).toBe(0);
+    expect(res.body.summary.meanRating).toBeNull();
+    expect(res.body.breakdown.entries).toEqual([]);
+  });
+
+  test('an unparseable number is dropped, not treated as zero', async () => {
+    const res = await auth(request(app).get('/analytics?ratingMin=abc'));
+    expect(res.body.filters.applied).toEqual([]);
+    expect(res.body.scope.films).toBe(4);
+  });
+
+  test('each facet is counted against the other filters but not its own', async () => {
+    const res = await auth(request(app).get('/analytics?language=ja'));
+    const { languages, genres } = res.body.filters.available;
+
+    // Its own filter is left out, so switching language is still an option.
+    expect(languages.map((l) => l.value).sort()).toEqual(['en', 'ja']);
+    expect(languages.find((l) => l.value === 'ja')).toMatchObject({ label: 'Japanese', films: 2 });
+    // Everything else narrows: Japanese films are the two Dramas.
+    expect(genres.map((g) => g.value)).toEqual(['Drama']);
+  });
+
+  test('a picked value stays listed even once the others count it to zero', async () => {
+    // Japanese films are never Thrillers, so this pair matches nothing — but
+    // both chips have to stay removable.
+    const res = await auth(request(app).get('/analytics?language=ja&genre=Thriller'));
+    expect(res.body.scope.films).toBe(0);
+    expect(res.body.filters.available.genres.find((g) => g.value === 'Thriller'))
+      .toMatchObject({ films: 0 });
+  });
+
+  test('drilling in is just another filter', async () => {
+    // The breakdown names the filter key, so tapping an entry needs no map on
+    // the client side.
+    const dir = await auth(request(app).get('/analytics?dimension=directors'));
+    expect(dir.body.breakdown.filterKey).toBe('director');
+
+    const drilled = await auth(request(app).get('/analytics?dimension=genres&director=David%20Fincher'));
+    expect(drilled.body.scope.films).toBe(2);
+    expect(drilled.body.breakdown.entries.map((e) => e.name)).toEqual(['Thriller']);
+    expect(drilled.body.summary.meanRating).toBe(2.5);
+  });
+
+  test('languages are named, not left as codes', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=languages'));
+    const labels = res.body.breakdown.entries.map((e) => e.label).sort();
+    expect(labels).toEqual(['English', 'Japanese']);
+  });
+});
+
+test('a numeric filter reads as a chip, not a raw value', async () => {
+  const RATINGS = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Alpha,1995,https://boxd.it/a,5',
+    '2026-01-01,Beta,2005,https://boxd.it/b,2',
+  ].join('\n');
+  await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
+
+  const res = await auth(request(app).get('/analytics?ratingMin=3&rated=yes&yearMax=2000'));
+  expect(res.body.filters.applied).toEqual([
+    { key: 'yearMax', value: '2000', label: '2000 and earlier' },
+    { key: 'ratingMin', value: '3', label: '3★ and up' },
+    { key: 'rated', value: 'yes', label: 'Rated only' },
+  ]);
+  expect(res.body.scope.films).toBe(1);
 });

@@ -324,62 +324,257 @@ function buildCollection(rows) {
   };
 }
 
-/**
- * The heart of the page: who and what a history is made of, and how it was
- * rated.
- *
- * Every list here carries a mean alongside its count, because the count on its
- * own answers the less interesting half of the question — seeing forty thrillers
- * says something, but rating them half a star below your own average says more.
- *
- * `delta` is that comparison made explicit: the group's mean against the
- * overall mean, so a reader does not have to hold their own average in their
- * head while scanning a list.
- */
-function buildPeopleAndGenres(rows, overallMean) {
-  const resolved = rows.filter((r) => r.resolved);
 
-  const withDelta = (list) => list.map((entry) => ({
+/**
+ * Human names for the language codes TMDB returns. Only the ones a film history
+ * actually turns up; anything else falls back to the uppercased code, which is
+ * still a usable label.
+ */
+const LANGUAGE_NAMES = {
+  en: 'English', fr: 'French', es: 'Spanish', de: 'German', it: 'Italian',
+  ja: 'Japanese', ko: 'Korean', zh: 'Chinese', cn: 'Chinese', hi: 'Hindi',
+  ru: 'Russian', pt: 'Portuguese', sv: 'Swedish', da: 'Danish', no: 'Norwegian',
+  nn: 'Norwegian', fi: 'Finnish', nl: 'Dutch', pl: 'Polish', cs: 'Czech',
+  hu: 'Hungarian', el: 'Greek', tr: 'Turkish', fa: 'Persian', ar: 'Arabic',
+  he: 'Hebrew', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian', ta: 'Tamil',
+  te: 'Telugu', ml: 'Malayalam', bn: 'Bengali', mr: 'Marathi', pa: 'Punjabi',
+  ro: 'Romanian', uk: 'Ukrainian', sr: 'Serbian', hr: 'Croatian', bg: 'Bulgarian',
+  is: 'Icelandic', et: 'Estonian', lv: 'Latvian', lt: 'Lithuanian', ka: 'Georgian',
+  eu: 'Basque', ca: 'Catalan', gl: 'Galician', af: 'Afrikaans', sw: 'Swahili',
+  tl: 'Tagalog', ms: 'Malay', ur: 'Urdu', xx: 'No dialogue',
+};
+
+const languageName = (code) => LANGUAGE_NAMES[String(code).toLowerCase()] || String(code).toUpperCase();
+
+const decadeOf = (year) => (year ? `${Math.floor(year / 10) * 10}s` : null);
+
+/**
+ * The lenses the page can be pointed at.
+ *
+ * The old page was one long scroll of every section at once, which meant the
+ * reader did the filtering by thumb. A dimension names one question — who
+ * directed these, what language were they in — and the payload answers only
+ * that, so each view is short enough to read.
+ *
+ * `keysOf` is what makes a dimension rankable: a film belongs to several genres
+ * and many cast members, so the same grouping machinery serves all of them.
+ */
+const DIMENSIONS = {
+  overview:  { title: 'Overview' },
+  ratings:   { title: 'Ratings' },
+  directors: {
+    title: 'Directors', unit: 'director', filterKey: 'director',
+    keysOf: (r) => r.directors, needsResolved: true,
+  },
+  cast: {
+    title: 'Cast', unit: 'actor', filterKey: 'actor',
+    keysOf: (r) => r.cast, needsResolved: true,
+  },
+  genres: {
+    title: 'Genres', unit: 'genre', filterKey: 'genre',
+    keysOf: (r) => r.genres, needsResolved: true,
+  },
+  languages: {
+    title: 'Languages', unit: 'language', filterKey: 'language',
+    keysOf: (r) => [r.language], label: languageName, needsResolved: true,
+  },
+  decades: {
+    title: 'Decades', unit: 'decade', filterKey: 'decade',
+    keysOf: (r) => [decadeOf(r.year)],
+  },
+  tags: {
+    title: 'Tags', unit: 'tag', filterKey: 'tag',
+    keysOf: (r) => r.tags,
+  },
+};
+
+const DEFAULT_DIMENSION = 'overview';
+
+/** How deep a focused dimension goes. Far longer than the old top-12 teaser. */
+const DIMENSION_DEPTH = 60;
+
+/** The filters, and how each one tests a single diary row. */
+const FILTERS = {
+  language: (row, value) => row.language === value,
+  genre:    (row, value) => row.genres.includes(value),
+  director: (row, value) => row.directors.includes(value),
+  actor:    (row, value) => row.cast.includes(value),
+  tag:      (row, value) => row.tags.includes(value),
+  decade:   (row, value) => decadeOf(row.year) === value,
+  yearMin:  (row, value) => row.year !== null && row.year >= value,
+  yearMax:  (row, value) => row.year !== null && row.year <= value,
+  ratingMin:(row, value) => row.rating !== null && row.rating >= value,
+  ratingMax:(row, value) => row.rating !== null && row.rating <= value,
+  // "Only the ones I scored" and its complement, which is a genuinely different
+  // question on an export where a third of the history is unrated.
+  rated:    (row, value) => (value === 'no' ? row.rating === null : row.rating !== null),
+};
+
+const NUMERIC_FILTERS = new Set(['yearMin', 'yearMax', 'ratingMin', 'ratingMax']);
+
+/**
+ * Read filters out of a query string, keeping only the ones that were actually
+ * given. An unknown key or an unparseable number is dropped rather than
+ * rejected: a stale bookmark should still return a page.
+ */
+function parseFilters(query = {}) {
+  const applied = {};
+  for (const key of Object.keys(FILTERS)) {
+    const raw = query[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    if (NUMERIC_FILTERS.has(key)) {
+      const num = Number(raw);
+      if (Number.isFinite(num)) applied[key] = num;
+    } else if (key === 'rated') {
+      const v = String(raw).toLowerCase();
+      if (v === 'yes' || v === 'no') applied[key] = v;
+    } else {
+      applied[key] = String(raw);
+    }
+  }
+  return applied;
+}
+
+/**
+ * A filter, described the way a removable chip should read it.
+ *
+ * The client gets a label rather than the raw value, because `ja` and `3` are
+ * not chip text — and the mapping from code to name already lives here.
+ */
+function describeFilter(key, value) {
+  switch (key) {
+    case 'language': return languageName(value);
+    case 'ratingMin': return `${value}\u2605 and up`;
+    case 'ratingMax': return `up to ${value}\u2605`;
+    case 'yearMin': return `${value} and later`;
+    case 'yearMax': return `${value} and earlier`;
+    case 'rated': return value === 'no' ? 'Unrated only' : 'Rated only';
+    default: return String(value);
+  }
+}
+
+/** Applied filters as an ordered, labelled list the client can render directly. */
+function describeApplied(applied) {
+  return Object.keys(FILTERS)
+    .filter((key) => applied[key] !== undefined)
+    .map((key) => ({
+      key,
+      value: String(applied[key]),
+      label: describeFilter(key, applied[key]),
+    }));
+}
+
+/** Rows matching every applied filter. `skip` leaves one filter out. */
+function applyFilters(rows, applied, skip = null) {
+  const keys = Object.keys(applied).filter((k) => k !== skip);
+  if (!keys.length) return rows;
+  return rows.filter((row) => keys.every((key) => FILTERS[key](row, applied[key])));
+}
+
+function countFilms(rows) {
+  return new Set(rows.map((r) => r.filmKey)).size;
+}
+
+/**
+ * The option lists behind the filter controls.
+ *
+ * Each facet is counted against every filter *except its own*, which is what
+ * makes a multi-select feel right: having picked English, the language list
+ * still shows what switching to Japanese would give you, while the genre list
+ * narrows to what English films offer.
+ */
+function buildFacets(rows, applied) {
+  const facet = (key, keysOf, label) => {
+    const scoped = applyFilters(rows, applied, key);
+    const counts = new Map();
+    for (const row of scoped) {
+      for (const value of keysOf(row)) {
+        if (!value) continue;
+        let entry = counts.get(value);
+        if (!entry) { entry = new Set(); counts.set(value, entry); }
+        entry.add(row.filmKey);
+      }
+    }
+    const list = [...counts.entries()]
+      .map(([value, films]) => ({ value, label: label ? label(value) : value, films: films.size }))
+      .sort((a, b) => b.films - a.films || a.label.localeCompare(b.label));
+    // A value the user has already picked stays listed even when the other
+    // filters have counted it down to nothing, or it could never be cleared.
+    if (applied[key] !== undefined && !list.some((o) => o.value === applied[key])) {
+      list.unshift({ value: applied[key], label: label ? label(applied[key]) : applied[key], films: 0 });
+    }
+    return list;
+  };
+
+  return {
+    languages: facet('language', (r) => [r.language], languageName),
+    genres:    facet('genre',    (r) => r.genres),
+    decades:   facet('decade',   (r) => [decadeOf(r.year)]).sort((a, b) => a.value.localeCompare(b.value)),
+    directors: facet('director', (r) => r.directors).slice(0, DIMENSION_DEPTH),
+    cast:      facet('actor',    (r) => r.cast).slice(0, DIMENSION_DEPTH),
+    tags:      facet('tag',      (r) => r.tags).slice(0, DIMENSION_DEPTH),
+  };
+}
+
+/**
+ * One dimension, ranked — the list the focused view is built around.
+ *
+ * Every entry carries both halves of the question: how much of the history it
+ * accounts for, and how it was rated against the reader's own average. `best`
+ * and `worst` come off the same ranking so the two ends are measured alike.
+ */
+function buildBreakdown(dimension, rows, overallMean) {
+  const spec = DIMENSIONS[dimension];
+  if (!spec || !spec.keysOf) return null;
+
+  const pool = spec.needsResolved ? rows.filter((r) => r.resolved) : rows;
+  const ranked = rankBy(groupBy(pool, spec.keysOf)).map((entry) => ({
     ...entry,
+    label: spec.label ? spec.label(entry.name) : entry.name,
     delta: entry.meanRating !== null && overallMean !== null
       ? round(entry.meanRating - overallMean)
       : null,
   }));
 
-  const genres = withDelta(rankBy(groupBy(resolved, (r) => r.genres)));
-  const directors = withDelta(rankBy(groupBy(resolved, (r) => r.directors)));
-  const cast = withDelta(rankBy(groupBy(resolved, (r) => r.cast)));
-
-  // A single film is an anecdote, not a preference — so the "you love this
-  // person" list needs a floor, where the most-watched lists do not.
-  const ranked = (list) => list
-    .filter((d) => d.films >= MIN_FILMS_FOR_AFFINITY && d.delta !== null)
+  const byDelta = ranked
+    .filter((e) => e.delta !== null && e.films >= MIN_FILMS_FOR_AFFINITY)
     .sort((a, b) => b.delta - a.delta);
 
-  const directorAffinity = ranked(directors);
-  const castAffinity = ranked(cast);
-  const genreRanked = genres.filter((g) => g.delta !== null).sort((a, b) => b.delta - a.delta);
-
   return {
-    genres: genres.slice(0, TOP_N),
-    directors: directors.slice(0, TOP_N),
-    cast: cast.slice(0, TOP_N),
-    // Best and worst treated, from the same ranking, so the two ends are
-    // guaranteed to be measured the same way.
-    affinity: directorAffinity.slice(0, TOP_N),
-    leastFavouriteDirectors: directorAffinity.slice(-TOP_N).reverse(),
-    castAffinity: castAffinity.slice(0, TOP_N),
-    bestRatedGenres: genreRanked.slice(0, TOP_N),
-    worstRatedGenres: genreRanked.slice(-TOP_N).reverse(),
+    id: dimension,
+    title: spec.title,
+    unit: spec.unit,
+    // The filter key tapping an entry should set, so the client needs no map
+    // of its own and drill-down is just "add a filter".
+    filterKey: spec.filterKey || null,
+    total: ranked.length,
+    entries: ranked.slice(0, DIMENSION_DEPTH),
+    best: byDelta.slice(0, TOP_N),
+    worst: byDelta.slice(-TOP_N).reverse(),
+    // Only meaningful where the dimension needs TMDB — say so rather than
+    // showing an empty list and letting the reader guess why.
+    needsLookup: Boolean(spec.needsResolved),
   };
 }
 
 /**
- * The whole payload. `coverage` comes first because the page has to be able to
- * say what it has not resolved yet rather than quietly under-reporting.
+ * The payload for one lens over one filtered slice of the history.
+ *
+ * Two things changed here. Sections are now conditional on the dimension, so a
+ * reader who asked about directors is not handed genre charts to scroll past;
+ * and everything is computed over the filtered rows, so narrowing to Japanese
+ * films re-answers every question rather than just hiding rows.
+ *
+ * `coverage` still comes first, because the page has to be able to say what it
+ * has not resolved yet rather than quietly under-reporting.
  */
-async function computeAnalytics(db, userId) {
-  const rows = await readDiary(db, userId);
+async function computeAnalytics(db, userId, options = {}) {
+  const dimension = DIMENSIONS[options.dimension] ? options.dimension : DEFAULT_DIMENSION;
+  const applied = options.filters || {};
+
+  const allRows = await readDiary(db, userId);
+  const rows = applyFilters(allRows, applied);
+
   const films = new Set(rows.map((r) => r.filmKey));
   const resolvedFilms = new Set(rows.filter((r) => r.resolved).map((r) => r.filmKey));
   // Films the lookup has already given its final answer on: TMDB had nothing
@@ -393,10 +588,29 @@ async function computeAnalytics(db, userId) {
       .map((r) => r.filmKey)
   );
   for (const key of resolvedFilms) unmatchedFilms.delete(key);
+
   const summary = buildSummary(rows);
   const overallMean = summary.meanRating;
 
-  return {
+  const payload = {
+    dimension,
+    // Every lens the client may offer, named by the server so the two cannot
+    // drift out of step.
+    dimensions: Object.entries(DIMENSIONS).map(([id, spec]) => ({
+      id, title: spec.title, needsLookup: Boolean(spec.needsResolved),
+    })),
+    filters: {
+      applied: describeApplied(applied),
+      // Counted against the whole history, minus each facet's own filter.
+      available: buildFacets(allRows, applied),
+    },
+    // What the filters did, so the page can say "412 of 1,782 films" rather
+    // than looking like the library shrank.
+    scope: {
+      films: films.size,
+      filmsTotal: countFilms(allRows),
+      filtered: Object.keys(applied).length > 0,
+    },
     coverage: {
       films: films.size,
       resolved: resolvedFilms.size,
@@ -405,15 +619,46 @@ async function computeAnalytics(db, userId) {
       // The sections below that need TMDB; everything else works regardless.
       needsResolution: ['genres', 'directors', 'cast', 'affinity', 'runtime'],
     },
+    // The headline numbers stay on every lens: they are the context the rest
+    // of the view is read against, and they cost nothing to compute.
     summary,
-    rating: buildRating(rows),
-    eras: buildEras(rows),
-    collection: buildCollection(rows),
-    people: buildPeopleAndGenres(rows, overallMean),
+    breakdown: buildBreakdown(dimension, rows, overallMean),
+    rating: null,
+    eras: null,
+    collection: null,
+    highlights: null,
   };
+
+  // Ratings, and the overview that leads with them.
+  if (dimension === 'overview' || dimension === 'ratings') {
+    payload.rating = buildRating(rows);
+  }
+  // The decade lens is the one place the release-year spread and the gap
+  // between release and viewing belong.
+  if (dimension === 'decades') {
+    payload.eras = buildEras(rows);
+  }
+  if (dimension === 'tags') {
+    payload.collection = buildCollection(rows);
+  }
+  // The overview's job is to point at the other lenses, so it carries the top
+  // of each rather than a full ranking of any.
+  if (dimension === 'overview') {
+    const top = (id) => {
+      const b = buildBreakdown(id, rows, overallMean);
+      return b ? { id, title: b.title, entries: b.entries.slice(0, 3) } : null;
+    };
+    payload.highlights = ['directors', 'genres', 'cast', 'languages', 'decades']
+      .map(top)
+      .filter(Boolean);
+  }
+
+  return payload;
 }
 
 module.exports = {
+  parseFilters,
+  DIMENSIONS,
   ensureAnalyticsTables,
   computeAnalytics,
   readDiary,
@@ -421,6 +666,5 @@ module.exports = {
   buildRating,
   buildEras,
   buildCollection,
-  buildPeopleAndGenres,
   MIN_FILMS_FOR_AFFINITY,
 };
