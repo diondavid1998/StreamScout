@@ -591,10 +591,10 @@ describe('lenses and filters', () => {
 
   // Alpha + Beta are Kurosawa in Japanese; Gamma + Delta are Fincher in English.
   const SHAPE = {
-    Alpha: { lang: 'ja', dir: 'Akira Kurosawa', genre: 'Drama',    actor: 'Toshiro Mifune' },
-    Beta:  { lang: 'ja', dir: 'Akira Kurosawa', genre: 'Drama',    actor: 'Toshiro Mifune' },
-    Gamma: { lang: 'en', dir: 'David Fincher',  genre: 'Thriller', actor: 'Rooney Mara' },
-    Delta: { lang: 'en', dir: 'David Fincher',  genre: 'Thriller', actor: 'Rooney Mara' },
+    Alpha: { lang: 'ja', dir: 'Akira Kurosawa', genre: 'Drama',    actor: 'Toshiro Mifune', country: 'Japan' },
+    Beta:  { lang: 'ja', dir: 'Akira Kurosawa', genre: 'Drama',    actor: 'Toshiro Mifune', country: 'Japan' },
+    Gamma: { lang: 'en', dir: 'David Fincher',  genre: 'Thriller', actor: 'Rooney Mara',    country: 'United States of America' },
+    Delta: { lang: 'en', dir: 'David Fincher',  genre: 'Thriller', actor: 'Rooney Mara',    country: 'United States of America' },
   };
 
   beforeEach(async () => {
@@ -610,6 +610,8 @@ describe('lenses and filters', () => {
       return {
         id, title: byId[id], runtime: 100, vote_average: 7,
         original_language: shape.lang,
+        production_countries: [{ name: shape.country }],
+        poster_path: `/p${id}.jpg`,
         genres: [{ name: shape.genre }],
         external_ids: { imdb_id: `tt${id}` },
         credits: {
@@ -620,6 +622,57 @@ describe('lenses and filters', () => {
     });
     await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
     await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+  });
+
+  test('the watchlist is stored, and stays out of the watched history', async () => {
+    // watchlist.csv used to be parsed and dropped. Now it is kept — but it is
+    // intent, not history, so none of it may reach the diary numbers.
+    const WL = [
+      'Date,Name,Year,Letterboxd URI',
+      '2026-02-01,Stalker,1979,https://boxd.it/w1',
+      '2026-02-01,Alpha,1995,https://boxd.it/w2',
+    ].join('\n');
+    const re = await auth(request(app).post('/letterboxd/diary')).send({ files: [
+      { name: 'ratings.csv', text: RATINGS }, { name: 'watchlist.csv', text: WL },
+    ] });
+    expect(re.body.watchlist).toBe(2);
+
+    const res = await auth(request(app).get('/analytics'));
+    // Four watched films, not six: Stalker and the saved copy of Alpha are not
+    // things the user has seen.
+    expect(res.body.summary.films).toBe(4);
+    expect(res.body.scope.filmsTotal).toBe(4);
+
+    // Alpha was saved and has since been watched; Stalker is still queued.
+    expect(res.body.watchlist).toMatchObject({ saved: 2, watched: 1, waiting: 1 });
+    expect(res.body.watchlist.stillWaiting.map((f) => f.name)).toEqual(['Stalker']);
+  });
+
+  test('a stored watchlist does not enlarge the lookup queue', async () => {
+    const WL = ['Date,Name,Year,Letterboxd URI',
+      '2026-02-01,Never Seen One,1970,https://boxd.it/w1',
+      '2026-02-01,Never Seen Two,1971,https://boxd.it/w2'].join('\n');
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [
+      { name: 'ratings.csv', text: RATINGS }, { name: 'watchlist.csv', text: WL },
+    ] });
+    // Everything watched is already resolved by the outer beforeEach, so the
+    // only way pending could be non-zero is the watchlist leaking in.
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    const again = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+    expect(again.body.pending).toBe(0);
+  });
+
+  test('countries, the quadrant and the mosaic come through', async () => {
+    const countries = await auth(request(app).get('/analytics?dimension=countries'));
+    expect(countries.body.breakdown.id).toBe('countries');
+    expect(countries.body.breakdown.entries.map((e) => e.name)).toContain('Japan');
+
+    const over = await auth(request(app).get('/analytics'));
+    // Posters ride along with the top-rated films.
+    expect(over.body.mosaic.length).toBeGreaterThan(0);
+    expect(over.body.mosaic[0]).toHaveProperty('posterUrl');
+    // Highest-rated first.
+    expect(over.body.mosaic[0].rating).toBe(5);
   });
 
   test('a lens returns its own sections and not the others', async () => {

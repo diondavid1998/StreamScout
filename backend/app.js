@@ -787,7 +787,8 @@ function createApp(db, { disableRateLimit = false } = {}) {
     const unresolved = await getRows(
       db,
       `SELECT DISTINCT film_key, name, year FROM letterboxd_entries
-        WHERE user_id = ? AND item_id IS NULL`,
+        WHERE user_id = ? AND item_id IS NULL
+          AND (source IS NULL OR source <> 'watchlist')`,
       [userId]
     );
     if (!unresolved.length) return 0;
@@ -878,6 +879,19 @@ function createApp(db, { disableRateLimit = false } = {}) {
             ]
           );
         }
+        // watchlist.csv used to be parsed, counted in the response, and then
+        // dropped on the floor. It is the only file that says what the user
+        // *means* to watch, so it is stored too — under its own source, which
+        // every watched-history query excludes.
+        for (const entry of parsed.watchlist) {
+          await runSql(
+            db,
+            `INSERT INTO letterboxd_entries
+               (user_id, name, year, film_key, uri, source)
+             VALUES (?, ?, ?, ?, ?, 'watchlist')`,
+            [req.user.id, entry.name, entry.year, filmKey(entry.name, entry.year), entry.uri]
+          );
+        }
       });
     } catch (e) {
       console.error('[letterboxd] diary import failed:', e.message);
@@ -941,7 +955,11 @@ function createApp(db, { disableRateLimit = false } = {}) {
              AND ('movie-' || d.tmdb_id) = e.item_id
       WHERE e.user_id = ?
         AND d.tmdb_id IS NULL
-        AND (e.item_id IS NULL OR e.item_id LIKE 'movie-%')`;
+        AND (e.item_id IS NULL OR e.item_id LIKE 'movie-%')
+        -- Watchlist rows share this table but are not watched history. Counting
+        -- them here would make the lookup offer to resolve a queue the page
+        -- never reports on, on top of the films it does.
+        AND (e.source IS NULL OR e.source <> 'watchlist')`;
 
   async function countPendingFilms(userId) {
     const [{ pending = 0 } = {}] = await getRows(

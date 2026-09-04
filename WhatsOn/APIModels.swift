@@ -487,6 +487,48 @@ struct AnalyticsResponse: Decodable {
     let eras: AnalyticsEras?
     let collection: AnalyticsCollection?
     let highlights: [AnalyticsHighlight]?
+    /// Genres on two axes — watch count against mean rating — with the medians
+    /// that split the plot into four quadrants.
+    let quadrant: AnalyticsQuadrant?
+    /// Best-rated films with their artwork.
+    let mosaic: [MosaicFilm]?
+    /// The saved-for-later list against what has actually been watched.
+    let watchlist: AnalyticsWatchlist?
+}
+
+struct AnalyticsQuadrant: Decodable {
+    let points: [QuadrantPoint]
+    let filmsMedian: Double
+    let ratingMedian: Double
+}
+
+struct QuadrantPoint: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let films: Int
+    let meanRating: Double
+}
+
+struct MosaicFilm: Decodable, Identifiable {
+    var id: String { "\(name)|\(year ?? 0)" }
+    let name: String
+    let year: Int?
+    let rating: Double
+    let posterUrl: String?
+}
+
+struct AnalyticsWatchlist: Decodable {
+    let saved: Int
+    let watched: Int
+    let waiting: Int
+    let conversion: Double?
+    let stillWaiting: [WatchlistFilm]
+}
+
+struct WatchlistFilm: Decodable, Identifiable {
+    var id: String { "\(name)|\(year ?? 0)" }
+    let name: String
+    let year: Int?
 }
 
 struct ResolveResponse: Decodable {

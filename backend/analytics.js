@@ -23,6 +23,8 @@
 /** Below this, a mean is an anecdote rather than a preference. */
 const MIN_FILMS_FOR_AFFINITY = 3;
 const TOP_N = 12;
+// Posters shown in the mosaic — a full screen of artwork without paging.
+const MOSAIC_SIZE = 24;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -141,6 +143,46 @@ async function ensureAnalyticsTables(db) {
   }
 }
 
+/**
+ * The films saved for later. Kept in the same table under `source='watchlist'`
+ * and deliberately never mixed into the watched history — the interesting thing
+ * about them is precisely that they are the other list.
+ */
+async function readWatchlist(db, userId) {
+  const rows = await all(
+    db,
+    `SELECT name, year, film_key FROM letterboxd_entries
+      WHERE user_id = ? AND source = 'watchlist'`,
+    [userId]
+  );
+  return rows.map((row) => ({ name: row.name, year: row.year, filmKey: row.film_key }));
+}
+
+/**
+ * Intent against history: how much of the watchlist you have since watched, and
+ * how much is still queued. Both sides are matched on `film_key`, so this needs
+ * no TMDB lookup at all — it is a set comparison over names and years.
+ */
+function buildWatchlist(watchlistRows, watchedRows) {
+  const saved = new Map();
+  for (const row of watchlistRows) if (!saved.has(row.filmKey)) saved.set(row.filmKey, row);
+  if (!saved.size) return null;
+
+  const watched = new Set(watchedRows.map((r) => r.filmKey));
+  const seen = [...saved.keys()].filter((key) => watched.has(key));
+  const waiting = [...saved.values()].filter((row) => !watched.has(row.filmKey));
+
+  return {
+    saved: saved.size,
+    watched: seen.length,
+    waiting: waiting.length,
+    // The share of everything you meant to watch that you actually did.
+    conversion: saved.size ? round((seen.length / saved.size) * 100) : null,
+    // A few of the oldest still-unwatched entries, as a nudge.
+    stillWaiting: waiting.slice(0, TOP_N).map((row) => ({ name: row.name, year: row.year })),
+  };
+}
+
 /** A /5 crowd score from whichever source has one, or null. */
 function pickCrowdRating(imdbRating, details) {
   const imdb = imdbRating === null || imdbRating === undefined ? null : Number(imdbRating);
@@ -158,6 +200,13 @@ function pickCrowdRating(imdbRating, details) {
  * has a rating and a date, and must still count in every section that does not
  * need TMDB.
  */
+/**
+ * Rows that are films you have *seen*. Watchlist rows share the table but are a
+ * record of intent, not history — counting them here would inflate every total
+ * on the page, so they are excluded everywhere except `readWatchlist`.
+ */
+const WATCHED_ONLY = `(e.source IS NULL OR e.source <> 'watchlist')`;
+
 async function readDiary(db, userId) {
   const rows = await all(
     db,
@@ -170,7 +219,7 @@ async function readDiary(db, userId) {
               ON d.media_type = 'movie'
              AND ('movie-' || d.tmdb_id) = e.item_id
        LEFT JOIN title_ratings tr ON tr.imdb_id = d.imdb_id
-      WHERE e.user_id = ?`,
+      WHERE e.user_id = ? AND ${WATCHED_ONLY}`,
     [userId]
   );
 
@@ -197,6 +246,9 @@ async function readDiary(db, userId) {
       cast: (details?.cast || []).map((c) => c.name),
       runtime: details?.runtime || null,
       language: row.original_language || null,
+      // Stored for every resolved film and, until now, read by nothing.
+      countries: details?.productionCountries || [],
+      posterUrl: details?.posterUrl || null,
       // The audience score, rebased from /10 to the same 5-star scale the user's
       // own ratings use, so "you versus the crowd" subtracts like for like.
       // IMDb's is preferred where the catalog happens to have fetched it;
@@ -378,6 +430,10 @@ const DIMENSIONS = {
     title: 'Languages', unit: 'language', filterKey: 'language',
     keysOf: (r) => [r.language], label: languageName, needsResolved: true,
   },
+  countries: {
+    title: 'Countries', unit: 'country', filterKey: 'country',
+    keysOf: (r) => r.countries, needsResolved: true,
+  },
   decades: {
     title: 'Decades', unit: 'decade', filterKey: 'decade',
     keysOf: (r) => [decadeOf(r.year)],
@@ -397,6 +453,7 @@ const DIMENSION_DEPTH = 60;
 const FILTERS = {
   language: (row, value) => row.language === value,
   genre:    (row, value) => row.genres.includes(value),
+  country:  (row, value) => row.countries.includes(value),
   director: (row, value) => row.directors.includes(value),
   actor:    (row, value) => row.cast.includes(value),
   tag:      (row, value) => row.tags.includes(value),
@@ -509,6 +566,7 @@ function buildFacets(rows, applied) {
   return {
     languages: facet('language', (r) => [r.language], languageName),
     genres:    facet('genre',    (r) => r.genres),
+    countries: facet('country',  (r) => r.countries).slice(0, DIMENSION_DEPTH),
     decades:   facet('decade',   (r) => [decadeOf(r.year)]).sort((a, b) => a.value.localeCompare(b.value)),
     directors: facet('director', (r) => r.directors).slice(0, DIMENSION_DEPTH),
     cast:      facet('actor',    (r) => r.cast).slice(0, DIMENSION_DEPTH),
@@ -555,6 +613,46 @@ function buildBreakdown(dimension, rows, overallMean) {
     // showing an empty list and letting the reader guess why.
     needsLookup: Boolean(spec.needsResolved),
   };
+}
+
+/**
+ * Genres placed on two axes: how often you watch one against how highly you
+ * rate it. The medians travel with the points so the client can draw the
+ * crosshair — the four corners are the whole idea, and they only mean anything
+ * relative to the rest of *this* history, never an absolute scale.
+ */
+function buildQuadrant(rows) {
+  const resolved = rows.filter((r) => r.resolved);
+  const points = rankBy(groupBy(resolved, (r) => r.genres))
+    .filter((entry) => entry.meanRating !== null && entry.films >= MIN_FILMS_FOR_AFFINITY)
+    .map((entry) => ({ name: entry.name, films: entry.films, meanRating: entry.meanRating }));
+  if (points.length < 3) return null;
+
+  return {
+    points,
+    filmsMedian: round(median(points.map((p) => p.films))),
+    ratingMedian: round(median(points.map((p) => p.meanRating))),
+  };
+}
+
+/**
+ * Your best-rated films, with the artwork. Analytics is the only screen in a
+ * film app with no film on it; these are the posters that fix that.
+ */
+function buildMosaic(rows) {
+  const byFilm = new Map();
+  for (const row of rows) {
+    if (!row.posterUrl || row.rating === null) continue;
+    const existing = byFilm.get(row.filmKey);
+    if (!existing || row.rating > existing.rating) {
+      byFilm.set(row.filmKey, {
+        name: row.name, year: row.year, rating: row.rating, posterUrl: row.posterUrl,
+      });
+    }
+  }
+  return [...byFilm.values()]
+    .sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name))
+    .slice(0, MOSAIC_SIZE);
 }
 
 /**
@@ -627,7 +725,23 @@ async function computeAnalytics(db, userId, options = {}) {
     eras: null,
     collection: null,
     highlights: null,
+    quadrant: null,
+    mosaic: null,
+    watchlist: null,
   };
+
+  // The posters and the quadrant belong to the overview — the lens people land
+  // on — and the quadrant is repeated on the genre lens it is built from.
+  // The mosaic rides on every lens, not just the overview: it is a couple of
+  // dozen small rows, and the share card is built from whatever lens the reader
+  // happens to be on — a card with no artwork would be a poor one.
+  payload.mosaic = buildMosaic(rows);
+  if (dimension === 'overview') {
+    payload.watchlist = buildWatchlist(await readWatchlist(db, userId), allRows);
+  }
+  if (dimension === 'overview' || dimension === 'genres') {
+    payload.quadrant = buildQuadrant(rows);
+  }
 
   // Ratings, and the overview that leads with them.
   if (dimension === 'overview' || dimension === 'ratings') {
