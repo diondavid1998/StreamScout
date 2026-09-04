@@ -85,6 +85,9 @@ struct DetailSheet: View {
                                 }
                             } else if let d = details {
                                 extrasSection(d)
+                                if let extras = d.watchmode, extras.hasContent {
+                                    watchmodeSection(extras)
+                                }
                             } else if let err = detailsError {
                                 Text(err).font(.caption).foregroundColor(.mkMuted).frame(maxWidth: .infinity)
                             }
@@ -427,9 +430,11 @@ struct DetailSheet: View {
                 )
                 app.setCurrentlyWatching(movie.id, on: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Updating Currently Watching")
+        }
         isTogglingCurrent = false
     }
 
@@ -441,6 +446,101 @@ struct DetailSheet: View {
                 .font(.footnote.weight(.semibold)).foregroundColor(.mkAccent)
             content()
         }
+    }
+
+    /// Fixed mid-tones, matching the pair the analytics page uses for above and
+    /// below average. `.green` and `.red` sit outside every palette here and
+    /// read differently on a light ground than a dark one.
+    private static let prosTint = Color(hex: "#2E9E6B")
+    private static let consTint = Color(hex: "#C4562F")
+
+    /// Watchmode's contribution: a one-line verdict, the pros and cons, and what
+    /// it costs to rent.
+    ///
+    /// Kept visibly separate from the rest of the sheet, and labelled, because
+    /// it is editorial where everything above it is factual — a runtime is a
+    /// runtime, but "not for you if…" is somebody's opinion and should not read
+    /// as the app's own. Absent entirely when Watchmode has nothing, which for a
+    /// small quota is a normal outcome rather than an error worth reporting.
+    @ViewBuilder
+    func watchmodeSection(_ extras: WatchmodeExtras) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.quote").font(.caption).foregroundColor(.mkAccent)
+                Text("What people say").font(.footnote.weight(.semibold)).foregroundColor(.mkAccent)
+                Spacer()
+                Text("Watchmode").font(.caption2).foregroundColor(.mkMuted)
+            }
+
+            if let verdict = extras.verdict {
+                Text(verdict)
+                    .font(.footnote).foregroundColor(.mkText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let pros = extras.pros {
+                prosConsRow(icon: "hand.thumbsup.fill", text: pros, tint: Self.prosTint)
+            }
+            if let cons = extras.cons {
+                prosConsRow(icon: "hand.thumbsdown.fill", text: cons, tint: Self.consTint)
+            }
+
+            if let certificate = extras.certificate {
+                HStack(spacing: 6) {
+                    Text(certificate)
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.mkText)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .stroke(Color.mkBorder, lineWidth: 1)
+                        )
+                    Text("rating").font(.caption2).foregroundColor(.mkMuted)
+                }
+            }
+
+            if extras.rent != nil || extras.buy != nil {
+                HStack(spacing: 14) {
+                    if let rent = extras.rent {
+                        priceChip(label: "Rent", price: rent)
+                    }
+                    if let buy = extras.buy {
+                        priceChip(label: "Buy", price: buy)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.top, 4)
+    }
+
+    private func prosConsRow(icon: String, text: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).font(.caption2).foregroundColor(tint)
+                .padding(.top, 2)
+            Text(text)
+                .font(.caption).foregroundColor(.mkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The cheapest price in the region, with whoever is charging it — a number
+    /// with no storefront beside it is not something anyone can act on.
+    private func priceChip(label: String, price: WatchmodePrice) -> some View {
+        HStack(spacing: 5) {
+            Text(label.uppercased())
+                .font(.caption2.weight(.bold)).tracking(0.5).foregroundColor(.mkMuted)
+            Text(price.label)
+                .font(.footnote.weight(.semibold)).foregroundColor(.mkText).monospacedDigit()
+            Text(price.service)
+                .font(.caption2).foregroundColor(.mkMuted).lineLimit(1)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color.mkAccent.opacity(0.12), in: Capsule())
+        .accessibilityLabel("\(label) from \(price.service) for \(price.label)")
     }
 
     @ViewBuilder
@@ -497,9 +597,11 @@ struct DetailSheet: View {
                 )
                 app.setWatchlisted(movie.id, on: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Updating your watchlist")
+        }
         isTogglingWatchlist = false
     }
 
@@ -521,7 +623,11 @@ struct DetailSheet: View {
         do {
             let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
             for item in resp.items ?? [] { app.setWatched(item.itemId, watched: true) }
-        } catch { }
+        } catch {
+            // Quiet on purpose: this tops up a list the device already holds,
+            // and it only runs when that list is empty. A banner here would
+            // interrupt someone who has not asked for anything.
+        }
     }
 
     @MainActor func toggleWatched() async {
@@ -541,9 +647,11 @@ struct DetailSheet: View {
                 )
                 app.setWatched(movie.id, watched: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Marking watched")
+        }
         isTogglingWatched = false
     }
 

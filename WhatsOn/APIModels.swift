@@ -185,6 +185,34 @@ struct CastMember: Decodable, Identifiable {
     let profileUrl: String?
 }
 
+/// Watchmode's addition to the title sheet: the pros-and-cons line, who the
+/// film is for, and what it costs to rent. Optional throughout — the sheet must
+/// open whether or not Watchmode has anything, and its quota is small enough
+/// that "nothing" is a normal answer.
+struct WatchmodeExtras: Decodable {
+    let pros: String?
+    let cons: String?
+    let verdict: String?
+    let rent: WatchmodePrice?
+    let buy: WatchmodePrice?
+    let streamingOn: [String]?
+    /// The US certificate, kept because it fills a gap: a film with no rating in
+    /// TMDB's release_dates often has one here.
+    let certificate: String?
+
+    /// Whether there is anything worth drawing a section for.
+    var hasContent: Bool {
+        pros != nil || cons != nil || verdict != nil || rent != nil || buy != nil || certificate != nil
+    }
+}
+
+struct WatchmodePrice: Decodable {
+    let price: Double
+    let service: String
+
+    var label: String { String(format: "$%.2f", price) }
+}
+
 struct TitleDetails: Decodable {
     let tmdbId: Int?
     let title: String?
@@ -198,6 +226,7 @@ struct TitleDetails: Decodable {
     let genres: [String]?
     let directors: [String]?
     let cast: [CastMember]?
+    let watchmode: WatchmodeExtras?
 }
 
 // MARK: - Watched List
@@ -442,6 +471,16 @@ struct AvailableFilters: Decodable {
     let directors: [FilterOption]
     let cast: [FilterOption]
     let tags: [FilterOption]
+    // The server has sent countries since the country lens shipped, and nothing
+    // here decoded them — so the filter existed but could only be reached by
+    // drilling into the lens, never from the filter sheet.
+    let countries: [FilterOption]?
+    let writers: [FilterOption]?
+    let cinematographers: [FilterOption]?
+    let composers: [FilterOption]?
+    let studios: [FilterOption]?
+    let keywords: [FilterOption]?
+    let certifications: [FilterOption]?
 
     func options(for key: String) -> [FilterOption] {
         switch key {
@@ -451,6 +490,13 @@ struct AvailableFilters: Decodable {
         case "director": return directors
         case "actor":    return cast
         case "tag":      return tags
+        case "country":  return countries ?? []
+        case "writer":   return writers ?? []
+        case "cinematographer": return cinematographers ?? []
+        case "composer": return composers ?? []
+        case "studio":   return studios ?? []
+        case "keyword":  return keywords ?? []
+        case "certification": return certifications ?? []
         default:         return []
         }
     }
@@ -490,10 +536,54 @@ struct AnalyticsResponse: Decodable {
     /// Genres on two axes — watch count against mean rating — with the medians
     /// that split the plot into four quadrants.
     let quadrant: AnalyticsQuadrant?
-    /// Best-rated films with their artwork.
+    /// Best-rated films with their artwork. No longer drawn on the page — it
+    /// feeds the share card, which is where artwork earns its place.
     let mosaic: [MosaicFilm]?
     /// The saved-for-later list against what has actually been watched.
     let watchlist: AnalyticsWatchlist?
+    /// Reach, budget, certificate, franchise share and engagement.
+    let profile: AnalyticsProfile?
+}
+
+/// What the film database can say about a history that the export cannot.
+///
+/// Each block is optional all the way down: a history whose films are not
+/// looked up yet has nothing to put in most of them, and a page with fewer
+/// sections reads better than one full of zeroes.
+struct AnalyticsProfile: Decodable {
+    let reach: ProfileDistribution?
+    let scale: ProfileDistribution?
+    let certifications: [ProfileBucket]?
+    let franchise: ProfileFranchise?
+    let engagement: ProfileEngagement?
+}
+
+struct ProfileDistribution: Decodable {
+    /// Films that had a value at all — the rest of the history had nothing to
+    /// place, which the page says rather than implying full coverage.
+    let covered: Int
+    let buckets: [ProfileBucket]
+}
+
+struct ProfileBucket: Decodable, Identifiable {
+    var id: String { label }
+    let label: String
+    let films: Int
+    let meanRating: Double?
+}
+
+struct ProfileFranchise: Decodable {
+    let films: Int
+    let resolved: Int
+    let share: Double
+}
+
+struct ProfileEngagement: Decodable {
+    let films: Int
+    let liked: Int
+    let reviewed: Int
+    /// Liked without a score — its own kind of yes.
+    let likedUnrated: Int
 }
 
 struct AnalyticsQuadrant: Decodable {

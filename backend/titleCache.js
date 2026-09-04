@@ -100,6 +100,24 @@ function normalizeDetails(data, mediaType) {
       ? (data.credits?.crew || []).filter((m) => m.job === 'Director').map((m) => m.name)
       : (data.created_by || []).map((m) => m.name);
 
+  // The crew list arrives whole and only the director was ever read from it.
+  // A film's writer, cinematographer and composer are as much a reason to have
+  // watched it, and they cost nothing extra — the request already carries them.
+  const crewNames = (job) => {
+    const names = (data.credits?.crew || [])
+      .filter((m) => job.includes(m.job))
+      .map((m) => m.name);
+    return [...new Set(names)];
+  };
+
+  // US certification, from the release_dates append. A film is released many
+  // times over; the certificate is whichever US release carries one.
+  const certification = (() => {
+    const us = (data.release_dates?.results || []).find((r) => r.iso_3166_1 === 'US');
+    const rated = (us?.release_dates || []).map((r) => r.certification).filter(Boolean);
+    return rated[0] || null;
+  })();
+
   return {
     id: data.id,
     mediaType,
@@ -123,6 +141,28 @@ function normalizeDetails(data, mediaType) {
     voteAverage: typeof data.vote_average === 'number' ? data.vote_average : null,
     originalLanguage: data.original_language || null,
     productionCountries: (data.production_countries || []).map((c) => c.name),
+
+    // ── Everything below arrives in the same responses and used to be dropped ──
+
+    writers: crewNames(['Writer', 'Screenplay', 'Story']),
+    cinematographers: crewNames(['Director of Photography']),
+    composers: crewNames(['Original Music Composer', 'Music']),
+    // How many people have scored it on TMDB. Not a measure of quality but of
+    // reach, which is what makes it interesting here: it is the only field that
+    // can say whether someone watches what everyone watches.
+    voteCount: typeof data.vote_count === 'number' ? data.vote_count : null,
+    // Zero means "not recorded" far more often than it means a film cost
+    // nothing, so it is stored as absent rather than as a number that would
+    // drag every average it lands in down.
+    budget: data.budget > 0 ? data.budget : null,
+    revenue: data.revenue > 0 ? data.revenue : null,
+    // The franchise a film belongs to, if any.
+    collection: data.belongs_to_collection?.name || null,
+    studios: (data.production_companies || []).slice(0, 4).map((c) => c.name),
+    // Thematic tags — 'time loop', 'based on novel'. The richest description of
+    // what a film is *about* that TMDB has, and the one thing genres cannot say.
+    keywords: (data.keywords?.keywords || data.keywords?.results || []).map((k) => k.name),
+    certification,
   };
 }
 
@@ -192,10 +232,35 @@ async function getTitleDetails(db, mediaType, tmdbId, { forceRefresh = false } =
   return { ...payload, cached: false };
 }
 
-/** Whether a stored payload predates the audience score being kept. */
-function payloadHasVoteAverage(payloadJson) {
+/**
+ * Fields a payload must carry to be current.
+ *
+ * Each was added after the cache shipped, so an older row is complete for the
+ * detail page but short of what the analytics page needs. Testing for the keys
+ * rather than for values is the point: an unrated film legitimately has a null
+ * score, and a film with no franchise legitimately has a null collection — it
+ * is the *absence of the key* that means "written before this was kept".
+ */
+const REQUIRED_PAYLOAD_KEYS = ['voteAverage', 'keywords', 'writers', 'voteCount'];
+
+/**
+ * The one key the resolve queue tests for in SQL.
+ *
+ * `payloadIsCurrent` parses the blob, which the queue cannot do per row, so the
+ * queue matches on this key's presence in the stored text instead. It must stay
+ * one of `REQUIRED_PAYLOAD_KEYS` and must be the newest of them — a payload
+ * carrying it is one written after every field above was added. The key is
+ * always written even when the value is an empty array, which is what makes
+ * presence a safe test.
+ */
+const PAYLOAD_SENTINEL_KEY = 'keywords';
+
+function payloadIsCurrent(payloadJson) {
   if (!payloadJson) return false;
-  try { return 'voteAverage' in JSON.parse(payloadJson); } catch { return false; }
+  try {
+    const payload = JSON.parse(payloadJson);
+    return REQUIRED_PAYLOAD_KEYS.every((key) => key in payload);
+  } catch { return false; }
 }
 
 /**
@@ -216,7 +281,7 @@ async function ensureAnalyticsDetails(db, tmdbId) {
   // page needs but cannot answer "versus the crowd". Treating it as a miss
   // refills it on the next lookup rather than stranding it. The test is for the
   // key, not a value: an unrated film legitimately scores null.
-  if (row && row.imdb_id && payloadHasVoteAverage(row.payload_json)) return false;
+  if (row && row.imdb_id && payloadIsCurrent(row.payload_json)) return false;
   const data = await fetchTitleWithCredits('movie', tmdbId);
   if (!data?.id) return false;
   await storeDetails(db, 'movie', tmdbId, data);
@@ -255,5 +320,6 @@ module.exports = {
   storeDetails,
   getTitleDetails,
   ensureAnalyticsDetails,
+  PAYLOAD_SENTINEL_KEY,
   readSeriesStatuses,
 };

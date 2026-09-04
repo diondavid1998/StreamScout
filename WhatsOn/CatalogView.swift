@@ -596,7 +596,12 @@ struct CatalogView: View {
         do {
             let resp: PlatformResponse = try await APIService.shared.get("/platforms", token: app.token)
             app.savePlatforms(resp.platforms)
-        } catch { }
+        } catch {
+            // Deliberately quiet, and one of the few that should be: this
+            // refreshes a selection the device already has on disk, so failing
+            // costs nothing the reader can see or act on. Reporting it would
+            // put a banner over a screen that is working fine.
+        }
     }
 
     /// The plain first-page feed a cold launch lands on — no filters, no
@@ -682,7 +687,12 @@ struct CatalogView: View {
             searchResults = resp.catalog
         } catch APIError.unauthorized {
             app.logout()
-        } catch { }
+        } catch {
+            // Only for the query still on screen — an aborted request for text
+            // the reader has already typed past is not a failure they care about.
+            guard query == searchText else { return }
+            app.report(error: error, whileTrying: "Search")
+        }
         isSearchLoading = false
     }
 

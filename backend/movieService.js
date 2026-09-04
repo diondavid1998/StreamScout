@@ -47,40 +47,36 @@ function tripOmdbRateLimit() {
 }
 function isOmdbRateLimited() { return omdbRateLimited; }
 
+/**
+ * The services the app covers.
+ *
+ * Fifteen, deliberately. The list ran to thirty-one, and the tail of it —
+ * regional channels, live-TV bundles, single-genre niches — was a long scroll
+ * of things almost nobody was picking, in front of everybody, every time they
+ * set the app up. Each one also widens the TMDB discover query, so the cost of
+ * carrying them was not only visual.
+ *
+ * Removing a key is safe by construction: `buildProviderSelection` drops any it
+ * does not recognise, so a stored selection naming a retired service still
+ * works, minus that service.
+ */
 const PLATFORM_CONFIG = {
   netflix:    { id: 8,    name: 'Netflix' },
   hulu:       { id: 15,   name: 'Hulu' },
   prime:      { id: 9,    name: 'Prime Video' },
   disney:     { id: 337,  name: 'Disney+' },
   paramount:  { ids: [2303, 2616], name: 'Paramount+' },  // Premium + Essential
-  apple:      { id: 350,  name: 'Apple TV+' },            // was 2 (Apple TV Store = rentals)
+  apple:      { id: 350,  name: 'Apple TV+' },            // not 2 (Apple TV Store = rentals)
   peacock:    { id: 386,  name: 'Peacock' },
-  max:        { id: 1899, name: 'Max' },                  // was 384 (nonexistent)
-  crunchyroll:{ id: 283,  name: 'Crunchyroll' },          // was 105 (nonexistent)
-  starz:      { id: 43,   name: 'Starz' },                // was 318 (Adult Swim)
+  max:        { id: 1899, name: 'Max' },
+  crunchyroll:{ id: 283,  name: 'Crunchyroll' },
+  starz:      { id: 43,   name: 'Starz' },
   showtime:   { id: 37,   name: 'Showtime' },
-  amc:        { id: 526,  name: 'AMC+' },                 // was 174 (nonexistent)
-  tubi:       { id: 73,   name: 'Tubi' },                 // was 219 (nonexistent)
+  amc:        { id: 526,  name: 'AMC+' },
+  tubi:       { id: 73,   name: 'Tubi' },
   pluto:      { id: 300,  name: 'Pluto TV' },
-  roku:       { id: 207,  name: 'The Roku Channel' },     // was 432 (Flix Premiere)
-  youtube:    { id: 188,  name: 'YouTube Premium' },      // was 192 (plain YouTube)
   mubi:       { id: 11,   name: 'MUBI' },
-  britbox:    { id: 151,  name: 'BritBox' },              // was 370 (nonexistent)
-  hayu:       { id: 223,  name: 'Hayu' },
-  shudder:    { id: 99,   name: 'Shudder' },              // was 67 (nonexistent)
-  acorn:      { id: 87,   name: 'Acorn TV' },             // was 1 (nonexistent)
-  curiosity:  { id: 190,  name: 'Curiosity Stream' },     // was 179 (nonexistent)
-  sling:      { id: 299,  name: 'Sling TV' },             // was 405 (nonexistent)
-  philo:      { id: 2383, name: 'Philo' },                // was 342 (nonexistent)
-  fubo:       { id: 257,  name: 'fuboTV' },               // was 283 (= Crunchyroll!)
-  viu:        { id: 270,  name: 'Viu' },
-  kanopy:     { id: 191,  name: 'Kanopy' },               // was 221 (nonexistent)
-  crave:      { id: 230,  name: 'Crave' },
-  ifc:        { id: 338,  name: 'IFC Films Unlimited' },
-  criterion:  { id: 258,  name: 'Criterion Channel' },    // was 31 (nonexistent)
-  hidive:     { id: 430,  name: 'HiDive' },
 };
-
 const tmdbCache = new Map();
 const omdbCache = new Map();
 
@@ -169,6 +165,79 @@ class TmdbUnreachableError extends Error {
   }
 }
 
+/**
+ * Stop asking TMDB for a minute after it makes clear it does not want to be
+ * asked.
+ *
+ * Without this every call in a batch fails on its own terms, because nothing
+ * tells the second request that the first was just refused. A single resolve
+ * batch is up to 120 requests eight at a time, so an unreachable TMDB costs
+ * nearly four minutes of timeouts to learn one thing — and a rate-limited one
+ * gets 120 more requests from us after telling us to stop, which is how a short
+ * limit becomes a long one.
+ *
+ * A minute, not until midnight. OMDB's breaker waits for the daily quota it is
+ * built around to roll over; TMDB's limit is short and per-second, so holding
+ * for hours would lock someone out of their own lookup over a blip.
+ *
+ * What trips it is deliberately narrow. A 429 or a 5xx or a dead socket is TMDB
+ * declining to answer. A 404 is an answer — the title does not exist — and a
+ * 401 is a misconfigured key that no amount of waiting fixes and that an
+ * operator needs to see rather than have muffled.
+ */
+const TMDB_BREAKER_COOLDOWN_MS = 60 * 1000;
+/**
+ * How many refusals in a row open it.
+ *
+ * Not one. A single failed request is the normal cost of a flaky network, and
+ * `searchTitleOnTmdb` is built around exactly that: when `/search/multi` fails
+ * it falls back to year-scoped searches, which routinely succeed. Opening on
+ * the first failure would block the fallback that exists to recover from it and
+ * turn a recoverable blip into a minute of nothing. Three consecutive refusals
+ * is a service that is actually down; one is Tuesday.
+ */
+const TMDB_BREAKER_THRESHOLD = 3;
+let tmdbBreakerUntil = 0;
+let tmdbConsecutiveRefusals = 0;
+
+class TmdbUnavailableError extends Error {
+  constructor(message = 'TMDB is not answering right now') {
+    super(message);
+    this.name = 'TmdbUnavailableError';
+    this.status = 503;
+  }
+}
+
+function isTmdbUnavailable() { return Date.now() < tmdbBreakerUntil; }
+
+function noteTmdbRefusal(reason) {
+  tmdbConsecutiveRefusals += 1;
+  if (tmdbConsecutiveRefusals < TMDB_BREAKER_THRESHOLD) return;
+  const wasOpen = isTmdbUnavailable();
+  tmdbBreakerUntil = Date.now() + TMDB_BREAKER_COOLDOWN_MS;
+  // Logged once per opening rather than once per refused call, so an outage
+  // leaves a line in the log instead of a wall.
+  if (!wasOpen) console.warn(`[tmdb] pausing requests for 60s after ${tmdbConsecutiveRefusals} refusals: ${reason}`);
+}
+
+/** Any answer at all means the service is back; the count starts over. */
+function noteTmdbSuccess() { tmdbConsecutiveRefusals = 0; }
+
+/** Test seam, and the way back in once a key or a network is fixed. */
+function resetTmdbBreaker() {
+  tmdbBreakerUntil = 0;
+  tmdbConsecutiveRefusals = 0;
+}
+
+/** Whether a failure means "TMDB declined" rather than "no such title". */
+function isTmdbRefusal(error) {
+  const status = error?.status;
+  if (status === 404 || status === 401 || status === 403) return false;
+  // No status at all means the request never completed — DNS, socket, abort.
+  if (status === undefined) return true;
+  return status === 429 || status >= 500;
+}
+
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -192,7 +261,13 @@ async function fetchJson(url, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(data.status_message || data.Error || data.message || `Request failed with status ${response.status}`);
+    const error = new Error(
+      data.status_message || data.Error || data.message || `Request failed with status ${response.status}`
+    );
+    // Carried so callers can tell "no such title" from "not right now". Without
+    // it every failure looks the same and a 404 gets treated like an outage.
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -218,9 +293,24 @@ async function fetchTmdb(path, params = {}) {
     return cached;
   }
 
-  const data = await fetchJson(url.toString(), {
-    headers: buildTmdbHeaders(),
-  });
+  // Checked after the cache, not before: a cached answer is free and correct
+  // whether or not TMDB is currently reachable, and refusing to serve it would
+  // make an outage look worse than it is.
+  if (isTmdbUnavailable()) {
+    throw new TmdbUnavailableError();
+  }
+
+  let data;
+  try {
+    data = await fetchJson(url.toString(), { headers: buildTmdbHeaders() });
+    noteTmdbSuccess();
+  } catch (error) {
+    // A 404 is TMDB answering, so it clears the count too — the service is
+    // plainly up, this title just does not exist.
+    if (isTmdbRefusal(error)) noteTmdbRefusal(error.message);
+    else noteTmdbSuccess();
+    throw error;
+  }
 
   setCacheEntry(tmdbCache, cacheKey, data);
   return data;
@@ -347,7 +437,12 @@ async function fetchTitleWithCredits(mediaType, tmdbId) {
     // carries the IMDb id, which is how a title reaches the shared ratings
     // table — without it the analytics page cannot compare a rating to the
     // crowd's.
-    append_to_response: 'credits,external_ids',
+    // All four ride along on the one request and cost nothing extra. `credits`
+    // carries the whole crew, not just the director; `external_ids` the IMDb id
+    // that reaches the shared ratings table; `keywords` what a film is about
+    // where genres only say what shelf it sits on; `release_dates` the US
+    // certificate.
+    append_to_response: 'credits,external_ids,keywords,release_dates',
     language: 'en-US',
   });
 }
@@ -826,6 +921,10 @@ module.exports = {
   isOmdbRateLimited,
   searchTitleOnTmdb,
   TmdbUnreachableError,
+  TmdbUnavailableError,
+  isTmdbUnavailable,
+  resetTmdbBreaker,
+  isTmdbRefusal,
   includedProviders,
   searchCatalog,
   fetchTitlesByPerson,

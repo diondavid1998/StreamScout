@@ -56,6 +56,26 @@ enum KeychainStore {
     }
 }
 
+/// One thing to tell the reader, shown as a banner over whatever they are
+/// looking at.
+///
+/// Errors were being swallowed in more than a dozen places — a tap on Watched
+/// that failed left the button looking untouched and said nothing, so the only
+/// way to find out was to notice later that the film was not in the list. A
+/// banner is the smallest thing that makes a failure visible without taking
+/// over the screen or interrupting what someone is doing.
+struct AppNotice: Identifiable, Equatable {
+    enum Kind: Equatable { case failure, success, progress }
+
+    let id = UUID()
+    let kind: Kind
+    let message: String
+    /// Progress notices stay until something replaces or clears them; the rest
+    /// dismiss themselves, because a message about a finished thing that has to
+    /// be tapped away is an interruption.
+    var autoDismissAfter: TimeInterval? { kind == .progress ? nil : (kind == .failure ? 6 : 3) }
+}
+
 @Observable
 @MainActor
 final class AppState {
@@ -72,6 +92,124 @@ final class AppState {
     /// server moves a show out of the watchlist when it lands here.
     var currentlyWatchingIds: Set<String> = []
     var selectedThemeId: String = AppTheme.defaultTheme.id
+
+    /// The banner currently on screen, if any. One at a time: a stack of them
+    /// over a phone screen is worse than the silence it replaced.
+    var notice: AppNotice?
+    /// Cancels the pending auto-dismiss when a new notice replaces an old one,
+    /// so the newcomer gets its full time rather than the remainder of its
+    /// predecessor's.
+    private var noticeDismissTask: Task<Void, Never>?
+
+    /// Say something went wrong. The only way a failure should ever be handled
+    /// silently is if the user caused it deliberately, like cancelling a picker.
+    func report(failure message: String) { show(AppNotice(kind: .failure, message: message)) }
+    func report(success message: String) { show(AppNotice(kind: .success, message: message)) }
+    /// A long job that is still running. Stays put until it is replaced.
+    func report(progress message: String) { show(AppNotice(kind: .progress, message: message)) }
+
+    /// Turn whatever a call threw into something worth reading.
+    ///
+    /// `APIError` already carries the server's own message where there is one,
+    /// which is nearly always more useful than a generic failure line.
+    func report(error: Error, whileTrying action: String) {
+        if let api = error as? APIError {
+            if case .unauthorized = api { logout(); return }
+            report(failure: "\(action) failed — \(api.errorDescription ?? "please try again").")
+        } else {
+            report(failure: "\(action) failed — \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: Letterboxd import
+
+    /// Whether an import is in flight, and a counter that changes when one
+    /// finishes.
+    ///
+    /// Both live here rather than on the screen that starts the import, and
+    /// that is the whole point: the upload is a large body over a slow link,
+    /// and someone who kicks it off and goes back to browsing used to lose
+    /// every trace of it. The request itself always survived — it was started
+    /// on an unstructured Task — but the progress line, the result and the
+    /// error all belonged to a view that no longer existed, so a finished
+    /// import looked identical to one that never happened.
+    ///
+    /// `diaryImportGeneration` is what an analytics screen watches: it changes
+    /// once per completed import, so a screen that was open reloads, and one
+    /// opened later reads fresh data anyway.
+    private(set) var isImportingDiary = false
+    private(set) var diaryImportGeneration = 0
+    private var importTask: Task<Void, Never>?
+
+    /// Start an import that outlives whatever screen asked for it.
+    ///
+    /// Refuses to start a second while one is running rather than queueing:
+    /// the server replaces the whole diary on each import, so two in flight
+    /// would race to decide the history.
+    func importDiary(files: [LetterboxdExport.File]) {
+        guard !isImportingDiary else {
+            report(failure: "An import is already running. Let it finish first.")
+            return
+        }
+        isImportingDiary = true
+        report(progress: "Importing \(files.count) file\(files.count == 1 ? "" : "s")…")
+
+        // Asked here, not at launch: this is the first moment the permission is
+        // about to be worth something, so the prompt explains itself. The import
+        // does not wait on the answer — a refusal only costs the system
+        // notification, and the in-app banner still reports either way.
+        Task { await LocalNotifier.requestPermissionIfNeeded() }
+
+        importTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.isImportingDiary = false }
+
+            // The extra runtime is what makes the notification possible at all.
+            // Backgrounded without it, the app is suspended within seconds and
+            // the upload simply stops — so there would be nothing to announce.
+            await withBackgroundTime(named: "letterboxd-import") {
+                do {
+                    let payload = files.map { ["name": $0.name, "text": $0.text] }
+                    let response: DiaryImportResponse = try await APIService.shared.post(
+                        "/letterboxd/diary", body: ["files": payload], token: self.token, timeout: 120
+                    )
+                    let films = response.films ?? 0
+                    let viewings = response.viewings ?? 0
+                    self.diaryImportGeneration &+= 1
+                    self.report(success: "Imported \(films) films across \(viewings) viewings.")
+                    await LocalNotifier.postIfBackgrounded(
+                        title: "Import finished",
+                        body: "\(films) films across \(viewings) viewings are ready."
+                    )
+                } catch {
+                    self.report(error: error, whileTrying: "Importing your diary")
+                    await LocalNotifier.postIfBackgrounded(
+                        title: "Import failed",
+                        body: "Your Letterboxd import could not be saved. Open the app to try again."
+                    )
+                }
+            }
+        }
+    }
+
+    func dismissNotice() {
+        noticeDismissTask?.cancel()
+        noticeDismissTask = nil
+        notice = nil
+    }
+
+    private func show(_ next: AppNotice) {
+        noticeDismissTask?.cancel()
+        notice = next
+        guard let after = next.autoDismissAfter else { noticeDismissTask = nil; return }
+        noticeDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(after))
+            guard !Task.isCancelled else { return }
+            // Only clear the notice this task was started for; a newer one owns
+            // the screen by the time a stale timer fires.
+            if self?.notice?.id == next.id { self?.notice = nil }
+        }
+    }
 
     private let tokenKey      = "mk_token"
     private let usernameKey   = "mk_username"
@@ -95,7 +233,13 @@ final class AppState {
 
         token = KeychainStore.read()?.trimmingCharacters(in: .whitespaces) ?? ""
         username = defaults.string(forKey: usernameKey) ?? ""
-        selectedPlatforms = defaults.stringArray(forKey: platformsKey) ?? []
+        // Filtered against the current list rather than restored verbatim: the
+        // catalogue of services has shrunk, and a selection naming one that is
+        // gone would sit in the array invisibly — absent from the settings
+        // screen, still sent on every request. The server ignores keys it does
+        // not know, so this is about the app agreeing with what it shows.
+        selectedPlatforms = (defaults.stringArray(forKey: platformsKey) ?? [])
+            .filter { knownPlatformKeys.contains($0) }
         selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
         watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])
         watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])

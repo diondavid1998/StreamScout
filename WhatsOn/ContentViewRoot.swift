@@ -25,7 +25,86 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Above every screen rather than inside each one, so a failure raised
+        // anywhere reaches the reader wherever they have navigated to since —
+        // which is the point of moving long jobs off the view that started them.
+        .overlay(alignment: .top) {
+            if let notice = app.notice {
+                NoticeBanner(notice: notice) { app.dismissNotice() }
+                    .padding(.horizontal, 14)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: app.notice)
         .environment(app)
+    }
+}
+
+/// One line of what just happened, over whatever is on screen.
+///
+/// Deliberately not an alert: an alert stops everything and demands a tap, and
+/// most of what this carries — a toggle that did not save, an import that
+/// finished — is worth knowing without being worth interrupting for. Failures
+/// linger longer than successes and can be dismissed early; a job still running
+/// shows a spinner and stays until it is done.
+struct NoticeBanner: View {
+    let notice: AppNotice
+    let onDismiss: () -> Void
+
+    private var tint: Color {
+        switch notice.kind {
+        case .failure:  Color(hex: "#C4562F")
+        case .success:  Color(hex: "#2E9E6B")
+        case .progress: .mkAccent
+        }
+    }
+
+    private var icon: String {
+        switch notice.kind {
+        case .failure:  "exclamationmark.triangle.fill"
+        case .success:  "checkmark.circle.fill"
+        case .progress: "arrow.triangle.2.circlepath"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if notice.kind == .progress {
+                ProgressView().scaleEffect(0.7).tint(tint)
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: icon).font(.footnote.weight(.bold)).foregroundColor(tint)
+            }
+
+            Text(notice.message)
+                .font(.footnote)
+                .foregroundColor(.mkText)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // A job in flight has nothing to dismiss — it will clear itself when
+            // it finishes, and letting it be swiped away would lose the only
+            // sign that it is still going.
+            if notice.kind != .progress {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold)).foregroundColor(.mkMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tint.opacity(0.45), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        // Read out as soon as it appears, since the whole point is that someone
+        // looking at another part of the screen still finds out.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isStaticText)
     }
 }
 

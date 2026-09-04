@@ -568,7 +568,11 @@ struct ProfileTabView: View {
                let img = UIImage(data: data) {
                 avatarUIImage = img
             }
-        } catch { }
+        } catch {
+            // Worth saying: without it the profile tab shows empty fields and
+            // looks like an account with nothing in it.
+            app.report(error: error, whileTrying: "Loading your profile")
+        }
         isLoadingAccount = false
     }
 
@@ -614,15 +618,21 @@ struct ProfileTabView: View {
         isSaving = false
     }
 
+    /// Kick off a catalog rebuild.
+    ///
+    /// Reported through the app-wide banner rather than this screen's own
+    /// message line. The job outlives the screen — it runs on the server for
+    /// minutes — so someone who starts it and goes back to browsing would
+    /// otherwise never learn whether it even began.
     @MainActor func refreshCatalog() async {
         isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let _: SimpleResponse = try await APIService.shared.post("/catalog/refresh", body: [:], token: app.token)
-            message = "Catalog refresh started. It may take a few minutes."; messageIsError = false
+            app.report(success: "Catalog refresh started. It may take a few minutes.")
         } catch {
-            message = (error as? APIError)?.errorDescription ?? "Refresh failed"; messageIsError = true
+            app.report(error: error, whileTrying: "Catalog refresh")
         }
-        isRefreshing = false
     }
 }
 

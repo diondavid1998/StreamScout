@@ -933,3 +933,198 @@ test('a series row does not inherit the film its digits collide with', async () 
   expect(res.body.coverage.pending).toBe(0);
   expect(res.body.breakdown.entries).toEqual([]);
 });
+
+/**
+ * Everything below comes out of responses the app was already making, or files
+ * the import already read, and used to be discarded on the way in. These tests
+ * are the ones that would notice it being dropped again.
+ */
+describe('the data that used to be thrown away', () => {
+  const RATINGS = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Alpha,1995,https://boxd.it/a,5',
+    '2026-01-01,Beta,2005,https://boxd.it/b,3',
+  ].join('\n');
+
+  beforeEach(async () => {
+    let next = 1200;
+    const byId = {};
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      const id = ++next;
+      byId[id] = name;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id,
+      title: byId[id],
+      runtime: 100,
+      vote_average: 7,
+      // Base-response fields TMDB always sent and the cache used to drop.
+      vote_count: byId[id] === 'Alpha' ? 50 : 25000,
+      budget: byId[id] === 'Alpha' ? 500000 : 200000000,
+      revenue: 900000,
+      belongs_to_collection: byId[id] === 'Beta' ? { name: 'Beta Saga' } : null,
+      production_companies: [{ name: 'A24' }],
+      original_language: 'en',
+      production_countries: [{ name: 'France' }],
+      poster_path: `/p${id}.jpg`,
+      genres: [{ name: 'Drama' }],
+      external_ids: { imdb_id: `tt${id}` },
+      // The two appended sub-resources.
+      keywords: { keywords: [{ name: 'time loop' }] },
+      release_dates: {
+        results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'R' }] }],
+      },
+      credits: {
+        cast: [{ id: 1, name: 'Someone' }],
+        crew: [
+          { job: 'Director', name: 'A Director' },
+          { job: 'Screenplay', name: 'A Writer' },
+          { job: 'Director of Photography', name: 'A Cinematographer' },
+          { job: 'Original Music Composer', name: 'A Composer' },
+        ],
+      },
+    }));
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+  });
+
+  test('crew beyond the director becomes a lens of its own', async () => {
+    for (const [dimension, expected] of [
+      ['writers', 'A Writer'],
+      ['cinematographers', 'A Cinematographer'],
+      ['composers', 'A Composer'],
+      ['studios', 'A24'],
+      ['keywords', 'time loop'],
+    ]) {
+      const res = await auth(request(app).get(`/analytics?dimension=${dimension}`));
+      expect(res.body.breakdown.entries.map((e) => e.name)).toEqual([expected]);
+    }
+  });
+
+  test('each new lens filters the history like any other', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=genres&writer=A%20Writer'));
+    expect(res.body.scope.films).toBe(2);
+    const none = await auth(request(app).get('/analytics?dimension=genres&writer=Nobody'));
+    expect(none.body.scope.films).toBe(0);
+  });
+
+  test('reach separates the barely-seen from what everyone has seen', async () => {
+    const res = await auth(request(app).get('/analytics'));
+    const reach = res.body.profile.reach;
+    expect(reach.covered).toBe(2);
+    expect(reach.buckets.map((b) => [b.label, b.films])).toEqual([
+      ['Barely seen', 1],
+      ['Everyone has seen it', 1],
+    ]);
+  });
+
+  test('budget separates a festival film from a franchise one', async () => {
+    const res = await auth(request(app).get('/analytics'));
+    expect(res.body.profile.scale.buckets.map((b) => [b.label, b.films])).toEqual([
+      ['Under $1M', 1],
+      ['Over $100M', 1],
+    ]);
+  });
+
+  test('certificates and franchise share come through', async () => {
+    const res = await auth(request(app).get('/analytics'));
+    expect(res.body.profile.certifications).toEqual([
+      { label: 'R', films: 2, meanRating: 4 },
+    ]);
+    // One of the two films belongs to a collection.
+    expect(res.body.profile.franchise).toEqual({ films: 1, resolved: 2, share: 50 });
+  });
+
+  test('likes and reviews are read from the export rather than dropped', async () => {
+    const LIKES = ['Date,Name,Year,Letterboxd URI', '2026-01-01,Alpha,1995,https://boxd.it/a'].join('\n');
+    const REVIEWS = [
+      'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date,Review',
+      '2026-01-02,Beta,2005,https://boxd.it/b,3,,,2026-01-02,A thought about it',
+    ].join('\n');
+    await auth(request(app).post('/letterboxd/diary')).send({
+      files: [
+        { name: 'ratings.csv', text: RATINGS },
+        { name: 'likes.csv', text: LIKES },
+        { name: 'reviews.csv', text: REVIEWS },
+      ],
+    });
+
+    const res = await auth(request(app).get('/analytics'));
+    expect(res.body.profile.engagement.liked).toBe(1);
+    expect(res.body.profile.engagement.reviewed).toBe(1);
+
+    // And both are filters, so a reader can cut the history down to them.
+    const likedOnly = await auth(request(app).get('/analytics?liked=yes'));
+    expect(likedOnly.body.scope.films).toBe(1);
+    const reviewedOnly = await auth(request(app).get('/analytics?reviewed=yes'));
+    expect(reviewedOnly.body.scope.films).toBe(1);
+  });
+});
+
+/**
+ * A payload written before these fields existed is complete for the detail page
+ * but blank for half the analytics page. Nothing sweeps the cache, so the only
+ * thing that refills those rows is the lookup treating them as a miss — which
+ * is what makes the new sections appear for a library resolved before today.
+ */
+test('a payload written before the new fields is refetched, not left stranded', async () => {
+  const RATINGS = ['Date,Name,Year,Letterboxd URI,Rating', '2026-01-01,Alpha,1995,https://boxd.it/a,5'].join('\n');
+  await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
+
+  // An old row: resolved, with an IMDb id, but predating keywords and crew.
+  await new Promise((resolve, reject) => db.run(
+    `INSERT INTO title_details_cache (media_type, tmdb_id, imdb_id, original_language, payload_json, fetched_at)
+     VALUES ('movie', 1500, 'tt1500', 'en', ?, CURRENT_TIMESTAMP)`,
+    [JSON.stringify({ genres: ['Drama'], directors: ['A Director'], cast: [], voteAverage: 7 })],
+    (e) => (e ? reject(e) : resolve())
+  ));
+  await new Promise((resolve, reject) => db.run(
+    "UPDATE letterboxd_entries SET item_id = 'movie-1500' WHERE user_id = 1",
+    (e) => (e ? reject(e) : resolve())
+  ));
+
+  fetchTitleWithCredits.mockResolvedValue({
+    id: 1500, title: 'Alpha', runtime: 100, vote_average: 7, vote_count: 4000,
+    budget: 20000000, original_language: 'en', production_countries: [{ name: 'France' }],
+    genres: [{ name: 'Drama' }], external_ids: { imdb_id: 'tt1500' },
+    keywords: { keywords: [{ name: 'heist' }] },
+    release_dates: { results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'PG-13' }] }] },
+    credits: { cast: [], crew: [{ job: 'Screenplay', name: 'A Writer' }] },
+  });
+
+  await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+
+  // The stale row was treated as a miss and refetched, so the lenses that need
+  // the new fields now have something to show.
+  expect(fetchTitleWithCredits).toHaveBeenCalled();
+  const themes = await auth(request(app).get('/analytics?dimension=keywords'));
+  expect(themes.body.breakdown.entries.map((e) => e.name)).toEqual(['heist']);
+  const overview = await auth(request(app).get('/analytics'));
+  expect(overview.body.profile.certifications).toEqual([{ label: 'PG-13', films: 1, meanRating: 5 }]);
+});
+
+/**
+ * The page's idea of what is outstanding and the lookup's have to be the same
+ * number, or the page reports a fully-resolved history while the lenses that
+ * need the newer fields sit empty and the button that would fill them is gone.
+ */
+test('a history cached before the new fields reports as outstanding, not done', async () => {
+  const RATINGS = ['Date,Name,Year,Letterboxd URI,Rating', '2026-01-01,Alpha,1995,https://boxd.it/a,5'].join('\n');
+  await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
+
+  await new Promise((resolve, reject) => db.run(
+    `INSERT INTO title_details_cache (media_type, tmdb_id, imdb_id, original_language, payload_json, fetched_at)
+     VALUES ('movie', 1600, 'tt1600', 'en', ?, CURRENT_TIMESTAMP)`,
+    [JSON.stringify({ genres: ['Drama'], directors: ['A Director'], cast: [], voteAverage: 7 })],
+    (e) => (e ? reject(e) : resolve())
+  ));
+  await new Promise((resolve, reject) => db.run(
+    "UPDATE letterboxd_entries SET item_id = 'movie-1600' WHERE user_id = 1",
+    (e) => (e ? reject(e) : resolve())
+  ));
+
+  const res = await auth(request(app).get('/analytics'));
+  expect(res.body.coverage.resolved).toBe(0);
+  expect(res.body.coverage.pending).toBe(1);
+});

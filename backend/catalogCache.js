@@ -9,6 +9,7 @@ const {
 const { ensureTitleCacheTables } = require('./titleCache');
 const { ensureCurrentlyWatchingTables } = require('./currentlyWatching');
 const { ensureAnalyticsTables } = require('./analytics');
+const { ensureWatchmodeTables } = require('./watchmode');
 
 // Nothing in this app refreshes on a clock.
 //
@@ -39,7 +40,7 @@ const DEFAULT_REGION = 'US';
 // Increment this whenever PLATFORM_CONFIG provider IDs change so stale caches are invalidated
 // Bumped when availability semantics change so stale snapshots are dropped:
 // v3 added free and ad-supported tiers alongside flatrate.
-const PROVIDER_CONFIG_VERSION = 3;
+const PROVIDER_CONFIG_VERSION = 4;
 const syncLocks = new Map();
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
@@ -359,6 +360,7 @@ async function ensureCatalogTables(db) {
   await ensureTitleCacheTables(db);
   await ensureCurrentlyWatchingTables(db);
   await ensureAnalyticsTables(db);
+  await ensureWatchmodeTables(db);
 
   // Invalidate catalog cache if provider IDs have changed since last deploy
   const versionRow = await get(db, `SELECT value FROM app_settings WHERE key = 'provider_config_version'`);

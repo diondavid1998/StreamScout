@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 import Observation
 import CoreImage
 import CoreImage.CIFilterBuiltins
@@ -602,24 +603,130 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "showtime",    key: "showtime",    name: "Showtime",            logoAsset: nil,             accentColor: Color(red: 0.800, green: 0.000, blue: 0.000)),
     .init(id: "amc",         key: "amc",         name: "AMC+",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.800)),
     .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
-    .init(id: "roku",        key: "roku",        name: "The Roku Channel",    logoAsset: nil,             accentColor: Color(red: 0.431, green: 0.196, blue: 0.639)),
-    .init(id: "youtube",     key: "youtube",     name: "YouTube Premium",     logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.000, blue: 0.000)),
-    .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.000, blue: 0.000)),
-    .init(id: "britbox",     key: "britbox",     name: "BritBox",             logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.180, blue: 0.400)),
-    .init(id: "hayu",        key: "hayu",        name: "Hayu",                logoAsset: nil,             accentColor: Color(red: 0.851, green: 0.000, blue: 0.502)),
-    .init(id: "shudder",     key: "shudder",     name: "Shudder",             logoAsset: nil,             accentColor: Color(red: 0.400, green: 0.000, blue: 0.000)),
-    .init(id: "acorn",       key: "acorn",       name: "Acorn TV",            logoAsset: nil,             accentColor: Color(red: 0.200, green: 0.400, blue: 0.200)),
-    .init(id: "curiosity",   key: "curiosity",   name: "Curiosity Stream",    logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.478, blue: 0.800)),
-    .init(id: "sling",       key: "sling",       name: "Sling TV",            logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.400)),
-    .init(id: "philo",       key: "philo",       name: "Philo",               logoAsset: nil,             accentColor: Color(red: 0.980, green: 0.310, blue: 0.310)),
-    .init(id: "fubo",        key: "fubo",        name: "fuboTV",              logoAsset: nil,             accentColor: Color(red: 0.910, green: 0.298, blue: 0.153)),
-    .init(id: "viu",         key: "viu",         name: "Viu",                 logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.827, blue: 0.000)),
-    .init(id: "kanopy",      key: "kanopy",      name: "Kanopy",              logoAsset: nil,             accentColor: Color(red: 0.851, green: 0.310, blue: 0.204)),
-    .init(id: "crave",       key: "crave",       name: "Crave",               logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.400, blue: 0.800)),
-    .init(id: "ifc",         key: "ifc",         name: "IFC Films Unlimited", logoAsset: nil,             accentColor: Color(red: 0.400, green: 0.400, blue: 0.400)),
-    .init(id: "criterion",   key: "criterion",   name: "Criterion Channel",   logoAsset: nil,             accentColor: Color(red: 0.086, green: 0.180, blue: 0.325)),
-    .init(id: "hidive",      key: "hidive",      name: "HiDive",              logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.702, blue: 0.898)),
+    .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.055, green: 0.063, blue: 0.129)),
 ]
+
+/// The keys `allPlatforms` covers, for pruning a stored selection.
+let knownPlatformKeys: Set<String> = Set(allPlatforms.map(\.key))
+
+// MARK: - Local Notifications
+
+/// A system notification for work that finished while the app was not on screen.
+///
+/// The in-app banner covers the case where someone is still in the app — it
+/// follows them between screens, which is what most of this is for. What it
+/// cannot do is reach someone who switched to another app or locked the phone,
+/// and a Letterboxd import is exactly the job someone starts and walks away
+/// from. That is the gap this fills, and the only gap: if the app is on screen
+/// when the work finishes, nothing is posted, because the banner has already
+/// said it and two notices for one event is noise.
+///
+/// Permission is asked for at the first import rather than at launch. A prompt
+/// on first run, before anyone has seen what the app does, is the one most
+/// likely to be refused — and a refusal is permanent unless the reader goes to
+/// Settings. Asked at the moment it is about to be useful, the request explains
+/// itself.
+@MainActor
+enum LocalNotifier {
+    /// Whether we have already asked this install. Not a record of the answer —
+    /// the system owns that — only of whether the prompt has been shown, so a
+    /// reader who said no is not asked again on every import.
+    private static let askedKey = "mk_notifications_requested"
+
+    /// Ask, if this install has never been asked.
+    ///
+    /// Returns whether notifications can actually be posted, so a caller can
+    /// decide not to bother with the rest of the work.
+    /// True when running under XCTest.
+    ///
+    /// The unit tests are hosted in the app, so anything that reaches
+    /// `UNUserNotificationCenter` from a test reaches the real one — and a test
+    /// that exercises the import would put a system permission alert on the
+    /// simulator, where it sits unanswered and takes the rest of the run with
+    /// it. Nothing about the prompt is worth testing; that it is *not* shown
+    /// during a test very much is.
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    @discardableResult
+    static func requestPermissionIfNeeded(
+        defaults: UserDefaults = .standard
+    ) async -> Bool {
+        guard !isRunningTests else { return false }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .denied:
+            // Answered already, and the answer was no. Asking again does
+            // nothing — iOS will not show the prompt a second time.
+            return false
+        default:
+            guard !defaults.bool(forKey: askedKey) else { return false }
+            defaults.set(true, forKey: askedKey)
+            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        }
+    }
+
+    /// Post a notification, but only if the app is not on screen.
+    ///
+    /// The foreground check is the point: it is what stops this doubling up on
+    /// the banner. `.active` means the reader is looking at us and has already
+    /// been told.
+    static func postIfBackgrounded(title: String, body: String) async {
+        guard !isRunningTests else { return }
+        guard UIApplication.shared.applicationState != .active else { return }
+        guard await requestPermissionIfNeeded() else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        // nil trigger delivers immediately.
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString, content: content, trigger: nil
+        )
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+}
+
+// MARK: - Background Task
+
+/// Keep the app running a little longer after it leaves the screen.
+///
+/// Without this a backgrounded app is suspended within seconds and an upload in
+/// flight simply stops — so the notification this pairs with would never fire,
+/// because the work never finished. iOS grants a bounded amount of extra time,
+/// not an unlimited amount: enough for a Letterboxd export, which is a few
+/// hundred kilobytes of JSON, and not enough for something genuinely long. A
+/// job that must survive being suspended outright needs a background
+/// `URLSession`, which is a different and much larger mechanism.
+///
+/// The expiry handler is not optional. iOS kills the app outright if the task
+/// is still open when the time runs out, so it has to be ended from there too.
+@MainActor
+func withBackgroundTime<T>(
+    named name: String,
+    _ work: () async -> T
+) async -> T {
+    var identifier: UIBackgroundTaskIdentifier = .invalid
+    identifier = UIApplication.shared.beginBackgroundTask(withName: name) {
+        if identifier != .invalid {
+            UIApplication.shared.endBackgroundTask(identifier)
+            identifier = .invalid
+        }
+    }
+    let result = await work()
+    if identifier != .invalid {
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+    return result
+}
 
 // MARK: - Image Cache
 

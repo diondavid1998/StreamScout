@@ -1,5 +1,7 @@
 'use strict';
 
+const { PAYLOAD_SENTINEL_KEY } = require('./titleCache');
+
 /**
  * Turning an imported Letterboxd diary into the analytics page.
  *
@@ -25,6 +27,9 @@ const MIN_FILMS_FOR_AFFINITY = 3;
 const TOP_N = 12;
 // Posters shown in the mosaic — a full screen of artwork without paging.
 const MOSAIC_SIZE = 24;
+// Genres plotted on the taste map. Beyond about this many the points crowd each
+// other on a phone no matter how they are labelled.
+const QUADRANT_POINTS = 10;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -115,6 +120,18 @@ async function ensureAnalyticsTables(db) {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`
   );
+  // Added after the table shipped. Both come out of files the import already
+  // read and then dropped on the floor: whether the viewing carried a review,
+  // and whether the film is in likes.csv.
+  for (const [name, ddl] of [
+    ['has_review', 'has_review INTEGER NOT NULL DEFAULT 0'],
+    ['is_liked', 'is_liked INTEGER NOT NULL DEFAULT 0'],
+  ]) {
+    const columns = await all(db, 'PRAGMA table_info(letterboxd_entries)');
+    if (columns.some((c) => c.name === name)) continue;
+    await run(db, `ALTER TABLE letterboxd_entries ADD COLUMN ${ddl}`);
+  }
+
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_user ON letterboxd_entries(user_id)');
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_film ON letterboxd_entries(user_id, film_key)');
 
@@ -281,12 +298,21 @@ function mapDiaryRows(rows) {
       rating: row.rating === null || row.rating === undefined ? null : Number(row.rating),
       watchedOn: row.watched_on,
       isRewatch: Boolean(row.is_rewatch),
+      // Both from the export, both previously dropped on import.
+      hasReview: Boolean(row.has_review),
+      isLiked: Boolean(row.is_liked),
       tags,
       // Not `|| null`: the empty string is the marker for a film the database
       // has nothing for, and coalescing it away would hide those films back
       // into the pending count the lookup has already finished with.
       itemId: row.item_id === null || row.item_id === undefined ? null : String(row.item_id),
-      resolved: Boolean(details),
+      // Resolved means "carries what this page reads", not merely "has a cached
+      // row". A payload written before the crew and keyword fields existed
+      // would otherwise report the history as fully looked up while half the
+      // lenses sat empty and the button that would fill them was hidden. The
+      // resolve queue tests for the same key, so the two agree on what is left
+      // to do.
+      resolved: Boolean(details) && PAYLOAD_SENTINEL_KEY in details,
       genres: details?.genres || [],
       directors: details?.directors || [],
       cast: details?.castNames || [],
@@ -295,6 +321,19 @@ function mapDiaryRows(rows) {
       // Stored for every resolved film and, until now, read by nothing.
       countries: details?.productionCountries || [],
       posterUrl: details?.posterUrl || null,
+      // All of these ride in on responses the app was already making and used
+      // to be thrown away with the rest of the payload.
+      writers: details?.writers || [],
+      cinematographers: details?.cinematographers || [],
+      composers: details?.composers || [],
+      studios: details?.studios || [],
+      keywords: details?.keywords || [],
+      certification: details?.certification || null,
+      collection: details?.collection || null,
+      voteCount: typeof details?.voteCount === 'number' ? details.voteCount : null,
+      budget: typeof details?.budget === 'number' ? details.budget : null,
+      revenue: typeof details?.revenue === 'number' ? details.revenue : null,
+      releaseDate: details?.releaseDate || null,
       // The audience score, rebased from /10 to the same 5-star scale the user's
       // own ratings use, so "you versus the crowd" subtracts like for like.
       // IMDb's is preferred where the catalog happens to have fetched it;
@@ -322,7 +361,7 @@ async function readDiary(db, userId) {
   const rows = mapDiaryRows(await all(
     db,
     `SELECT e.name, e.year, e.film_key, e.rating, e.watched_on, e.is_rewatch,
-            e.tags_json, e.item_id,
+            e.tags_json, e.item_id, e.has_review, e.is_liked,
             d.payload_json, d.original_language,
             tr.rating_imdb_num AS crowd_rating
        FROM letterboxd_entries e
@@ -531,6 +570,30 @@ const DIMENSIONS = {
     title: 'Tags', unit: 'tag', filterKey: 'tag',
     keysOf: (r) => r.tags,
   },
+
+  // ── Lenses on crew and description the app was already fetching ───────────
+
+  writers: {
+    title: 'Writers', unit: 'writer', filterKey: 'writer',
+    keysOf: (r) => r.writers, needsResolved: true,
+  },
+  cinematographers: {
+    title: 'Cinematography', unit: 'cinematographer', filterKey: 'cinematographer',
+    keysOf: (r) => r.cinematographers, needsResolved: true,
+  },
+  composers: {
+    title: 'Composers', unit: 'composer', filterKey: 'composer',
+    keysOf: (r) => r.composers, needsResolved: true,
+  },
+  studios: {
+    title: 'Studios', unit: 'studio', filterKey: 'studio',
+    keysOf: (r) => r.studios, needsResolved: true,
+  },
+  // What the films are *about*, where genre only says what shelf they sit on.
+  keywords: {
+    title: 'Themes', unit: 'theme', filterKey: 'keyword',
+    keysOf: (r) => r.keywords, needsResolved: true,
+  },
 };
 
 const DEFAULT_DIMENSION = 'overview';
@@ -554,6 +617,15 @@ const FILTERS = {
   // "Only the ones I scored" and its complement, which is a genuinely different
   // question on an export where a third of the history is unrated.
   rated:    (row, value) => (value === 'no' ? row.rating === null : row.rating !== null),
+  writer:   (row, value) => row.writers.includes(value),
+  cinematographer: (row, value) => row.cinematographers.includes(value),
+  composer: (row, value) => row.composers.includes(value),
+  studio:   (row, value) => row.studios.includes(value),
+  keyword:  (row, value) => row.keywords.includes(value),
+  certification: (row, value) => row.certification === value,
+  // The two flags the export carries and nothing used to read.
+  liked:    (row, value) => (value === 'no' ? !row.isLiked : row.isLiked),
+  reviewed: (row, value) => (value === 'no' ? !row.hasReview : row.hasReview),
 };
 
 const NUMERIC_FILTERS = new Set(['yearMin', 'yearMax', 'ratingMin', 'ratingMax']);
@@ -595,6 +667,9 @@ function describeFilter(key, value) {
     case 'yearMin': return `${value} and later`;
     case 'yearMax': return `${value} and earlier`;
     case 'rated': return value === 'no' ? 'Unrated only' : 'Rated only';
+    case 'liked': return value === 'no' ? 'Not liked' : 'Liked only';
+    case 'reviewed': return value === 'no' ? 'Not reviewed' : 'Reviewed only';
+    case 'certification': return `Rated ${value}`;
     default: return String(value);
   }
 }
@@ -660,6 +735,12 @@ function buildFacets(rows, applied) {
     directors: facet('director', (r) => r.directors).slice(0, DIMENSION_DEPTH),
     cast:      facet('actor',    (r) => r.cast).slice(0, DIMENSION_DEPTH),
     tags:      facet('tag',      (r) => r.tags).slice(0, DIMENSION_DEPTH),
+    writers:   facet('writer',   (r) => r.writers).slice(0, DIMENSION_DEPTH),
+    cinematographers: facet('cinematographer', (r) => r.cinematographers).slice(0, DIMENSION_DEPTH),
+    composers: facet('composer', (r) => r.composers).slice(0, DIMENSION_DEPTH),
+    studios:   facet('studio',   (r) => r.studios).slice(0, DIMENSION_DEPTH),
+    keywords:  facet('keyword',  (r) => r.keywords).slice(0, DIMENSION_DEPTH),
+    certifications: facet('certification', (r) => [r.certification]),
   };
 }
 
@@ -714,7 +795,14 @@ function buildQuadrant(rows) {
   const resolved = rows.filter((r) => r.resolved);
   const points = rankBy(groupBy(resolved, (r) => r.genres))
     .filter((entry) => entry.meanRating !== null && entry.films >= MIN_FILMS_FOR_AFFINITY)
-    .map((entry) => ({ name: entry.name, films: entry.films, meanRating: entry.meanRating }));
+    .map((entry) => ({ name: entry.name, films: entry.films, meanRating: entry.meanRating }))
+    // Capped. TMDB carries nineteen film genres and a broad history qualifies
+    // under most of them, which put nineteen points and nineteen labels into a
+    // chart a couple of hundred points tall — unreadable, and the tail of it
+    // was the genres the reader has seen three films of. `rankBy` has already
+    // sorted by how much of the history each accounts for, so this keeps the
+    // ones the map is actually about.
+    .slice(0, QUADRANT_POINTS);
   if (points.length < 3) return null;
 
   return {
@@ -742,6 +830,124 @@ function buildMosaic(rows) {
   return [...byFilm.values()]
     .sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name))
     .slice(0, MOSAIC_SIZE);
+}
+
+/**
+ * The things a diary can say about you once the film database is joined to it,
+ * none of which the export contains on its own.
+ *
+ * This is what took the poster wall's place on the overview. A grid of the
+ * artwork you rated highest looked well but answered nothing — it was a list of
+ * favourites, which the diary already knew, arranged prettily. Each block below
+ * is a distribution instead, and each one comes from a field that was already
+ * being fetched and thrown away.
+ *
+ * Every block returns null rather than an empty shell when the history has
+ * nothing to say on it, so a page with an unresolved library shows fewer
+ * sections rather than a screenful of zeroes.
+ */
+function buildProfile(rows) {
+  // One row per film. A rewatch should not count its budget twice.
+  const films = new Map();
+  for (const row of rows) if (!films.has(row.filmKey)) films.set(row.filmKey, row);
+  const unique = [...films.values()];
+  if (!unique.length) return null;
+
+  /** Films per bucket, with the mean rating of each, dropping empty buckets. */
+  const distribution = (values, buckets, valueOf) => {
+    const counted = buckets.map((bucket) => ({ ...bucket, films: 0, ratings: [] }));
+    let placed = 0;
+    for (const row of values) {
+      const value = valueOf(row);
+      if (value === null || value === undefined) continue;
+      const bucket = counted.find((b) => value >= b.min && (b.max === null || value < b.max));
+      if (!bucket) continue;
+      bucket.films += 1;
+      if (row.rating !== null) bucket.ratings.push(row.rating);
+      placed += 1;
+    }
+    if (!placed) return null;
+    return {
+      covered: placed,
+      buckets: counted
+        .filter((b) => b.films > 0)
+        .map((b) => ({ label: b.label, films: b.films, meanRating: round(mean(b.ratings)) })),
+    };
+  };
+
+  // How widely seen the films are, by the number of people who have scored them
+  // on TMDB. Not a measure of quality — of reach. It is the only thing here
+  // that can say whether someone watches what everyone watches, and for a
+  // Letterboxd user that is usually the more interesting question.
+  const reach = distribution(unique, [
+    { label: 'Barely seen',  min: 0,     max: 250 },
+    { label: 'Under the radar', min: 250, max: 2000 },
+    { label: 'Well known',   min: 2000,  max: 10000 },
+    { label: 'Everyone has seen it', min: 10000, max: null },
+  ], (r) => r.voteCount);
+
+  // What a film cost to make, which separates a festival film from a franchise
+  // one far more cleanly than genre does.
+  const scale = distribution(unique, [
+    { label: 'Under $1M',  min: 0,          max: 1e6 },
+    { label: '$1-10M',     min: 1e6,        max: 1e7 },
+    { label: '$10-50M',    min: 1e7,        max: 5e7 },
+    { label: '$50-100M',   min: 5e7,        max: 1e8 },
+    { label: 'Over $100M', min: 1e8,        max: null },
+  ], (r) => r.budget);
+
+  // The US certificate, in the order a cinema would list them rather than
+  // alphabetically.
+  const CERT_ORDER = ['G', 'PG', 'PG-13', 'R', 'NC-17', 'NR'];
+  const certCounts = new Map();
+  const certRatings = new Map();
+  for (const row of unique) {
+    if (!row.certification) continue;
+    certCounts.set(row.certification, (certCounts.get(row.certification) || 0) + 1);
+    if (row.rating !== null) {
+      certRatings.set(row.certification, [...(certRatings.get(row.certification) || []), row.rating]);
+    }
+  }
+  const certifications = certCounts.size
+    ? [...certCounts.entries()]
+        .map(([label, filmCount]) => ({
+          label, films: filmCount, meanRating: round(mean(certRatings.get(label) || [])),
+        }))
+        .sort((a, b) => {
+          const ai = CERT_ORDER.indexOf(a.label);
+          const bi = CERT_ORDER.indexOf(b.label);
+          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        })
+    : null;
+
+  // How much of the history is franchise films — anything TMDB files under a
+  // collection.
+  const inCollection = unique.filter((r) => r.collection).length;
+  const resolvedFilms = unique.filter((r) => r.resolved).length;
+  const franchise = resolvedFilms
+    ? {
+        films: inCollection,
+        resolved: resolvedFilms,
+        share: round((inCollection / resolvedFilms) * 100),
+      }
+    : null;
+
+  // The two columns the export carries that nothing used to read. Free of any
+  // lookup: these come straight out of the CSVs.
+  const liked = unique.filter((r) => r.isLiked).length;
+  const reviewed = unique.filter((r) => r.hasReview).length;
+  const engagement = liked || reviewed
+    ? {
+        films: unique.length,
+        liked,
+        reviewed,
+        // A film can be liked without being scored, which is its own signal.
+        likedUnrated: unique.filter((r) => r.isLiked && r.rating === null).length,
+      }
+    : null;
+
+  if (!reach && !scale && !certifications && !franchise && !engagement) return null;
+  return { reach, scale, certifications, franchise, engagement };
 }
 
 /**
@@ -817,6 +1023,7 @@ async function computeAnalytics(db, userId, options = {}) {
     quadrant: null,
     mosaic: null,
     watchlist: null,
+    profile: null,
   };
 
   // The posters and the quadrant belong to the overview — the lens people land
@@ -824,8 +1031,13 @@ async function computeAnalytics(db, userId, options = {}) {
   // The mosaic rides on every lens, not just the overview: it is a couple of
   // dozen small rows, and the share card is built from whatever lens the reader
   // happens to be on — a card with no artwork would be a poor one.
+  // Still computed on every lens, but no longer rendered on the page: the share
+  // card is built from whichever lens the reader is on, and a card with no
+  // artwork on it would be a poor one. The page itself now shows `profile`,
+  // which answers something a wall of favourites could not.
   payload.mosaic = buildMosaic(rows);
   if (dimension === 'overview') {
+    payload.profile = buildProfile(rows);
     payload.watchlist = buildWatchlist(await readWatchlist(db, userId), allRows);
   }
   if (dimension === 'overview' || dimension === 'genres') {
@@ -870,5 +1082,6 @@ module.exports = {
   buildRating,
   buildEras,
   buildCollection,
+  buildProfile,
   MIN_FILMS_FOR_AFFINITY,
 };

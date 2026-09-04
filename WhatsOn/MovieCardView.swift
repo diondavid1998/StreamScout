@@ -271,9 +271,11 @@ struct MovieCardView: View {
                 )
                 app.setWatched(movie.id, watched: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Marking watched")
+        }
         isTogglingWatched = false
     }
 
@@ -316,9 +318,11 @@ struct MovieCardView: View {
                 )
                 app.setCurrentlyWatching(movie.id, on: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Updating Currently Watching")
+        }
         isTogglingCurrent = false
     }
 
@@ -362,9 +366,11 @@ struct MovieCardView: View {
                 )
                 app.setWatchlisted(movie.id, on: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Updating your watchlist")
+        }
         isTogglingWatchlist = false
     }
 
