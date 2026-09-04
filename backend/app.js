@@ -300,7 +300,7 @@ async function sendResetEmail(toEmail, username, code) {
   });
 }
 
-function createApp(db, { disableRateLimit = false } = {}) {
+function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   const app = express();
 
   app.set('trust proxy', 1);
@@ -361,6 +361,24 @@ function createApp(db, { disableRateLimit = false } = {}) {
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: 'Too many catalog requests. Please try again later.' },
+      });
+  // Its own budget rather than a share of the catalog's, because the two
+  // protect different things and would otherwise starve each other: a full
+  // lookup run is a couple of hundred POSTs to /analytics/resolve, and if those
+  // drew down the same counter, finishing a lookup would leave the reader
+  // rate-limited out of the very page it was for.
+  const analyticsLimiter = disableRateLimit
+    ? (_req, _res, next) => next()
+    : rateLimit({
+        windowMs: 60 * 1000,
+        // Overridable so a test can reach the ceiling in a handful of requests.
+        // One that had to send a hundred and thirty would be slow enough to
+        // change the timing of every suite running beside it, which is how a
+        // test starts failing for reasons that have nothing to do with the code.
+        max: rateLimitMax ?? 120,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many analytics requests. Please try again later.' },
       });
 
   // ── Health check ──────────────────────────────────────────────────────────
@@ -934,7 +952,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
   // the page is the most expensive thing this server does, and the work is
   // synchronous, so an unthrottled caller does not just slow itself down — it
   // holds the event loop and every other request behind it.
-  app.get('/analytics', catalogLimiter, authenticateToken, async (req, res) => {
+  app.get('/analytics', analyticsLimiter, authenticateToken, async (req, res) => {
     try {
       // One endpoint, two knobs. `dimension` picks the lens; the rest of the
       // query string narrows the history, and drilling into a director is just
