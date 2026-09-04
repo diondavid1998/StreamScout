@@ -130,17 +130,17 @@ private struct ShareCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("🎬 \(Brand.wordmark)".uppercased())
-                .font(.system(size: 12, weight: .bold)).tracking(1.6)
+                .font(.caption.weight(.bold)).tracking(1.6)
                 .foregroundColor(.mkAccent)
 
             Text("\(summary.films)")
-                .font(.system(size: 76, weight: .bold, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
                 .foregroundColor(.mkText)
                 .minimumScaleFactor(0.5).lineLimit(1)
                 .padding(.top, 6)
 
             Text("films — \(hours) hours in the dark")
-                .font(.system(size: 15, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundColor(.mkMuted)
 
             if !posters.isEmpty {
@@ -166,14 +166,14 @@ private struct ShareCardView: View {
 
             if !topGenres.isEmpty {
                 Text(topGenres.prefix(4).joined(separator: " · "))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundColor(.mkText.opacity(0.75))
                     .lineLimit(1)
                     .padding(.top, 18)
             }
             if let director = topDirector {
                 Text("Most watched director — \(director)")
-                    .font(.system(size: 12))
+                    .font(.caption)
                     .foregroundColor(.mkMuted)
                     .lineLimit(1)
                     .padding(.top, 3)
@@ -183,23 +183,28 @@ private struct ShareCardView: View {
 
             if let scopeNote {
                 Text(scopeNote)
-                    .font(.system(size: 11))
+                    .font(.caption2)
                     .foregroundColor(.mkMuted.opacity(0.8))
                     .lineLimit(1)
             }
         }
         .padding(26)
         .frame(width: 400, height: 540, alignment: .topLeading)
+        // A shared image is the same image for everyone who sees it, so it is
+        // laid out at the standard text size rather than the sender's. Without
+        // this the card is 400x540 whatever the setting, and a reader using
+        // Larger Text would export one with its own text clipped.
+        .dynamicTypeSize(.large)
         .background(Color.mkBackground)
     }
 
     private func cardStat(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .bold)).tracking(0.7)
+                .font(.caption2.weight(.bold)).tracking(0.7)
                 .foregroundColor(.mkMuted)
             Text(value)
-                .font(.system(size: 21, weight: .bold, design: .rounded))
+                .font(.system(.title2, design: .rounded).weight(.bold))
                 .foregroundColor(.mkText)
         }
     }
@@ -237,7 +242,7 @@ private struct ShareCardSheet: View {
                         preview: SharePreview("My film diary", image: card.image)
                     ) {
                         Text("Share")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundColor(.mkText)
                             .padding(.horizontal, 26).frame(height: 46)
                     }
@@ -276,6 +281,24 @@ struct AnalyticsView: View {
     @State private var analytics: AnalyticsResponse?
     @State private var isLoading = true
     @State private var loadError: String?
+
+    /// Which request the screen is currently waiting for.
+    ///
+    /// Every lens and filter tap starts a page request, and they do not come
+    /// back in the order they were sent — the server does real work per request,
+    /// so a heavier earlier one can land after a lighter later one. Without a
+    /// guard the last response to arrive wins, which is not the same as the
+    /// last one asked for: tapping Genres then Directors could leave Directors
+    /// highlighted above genre data, and it stayed that way until the next tap,
+    /// because `dimension` updates on tap while the content updates on arrival.
+    ///
+    /// A response is written only if its generation is still the current one.
+    /// `inFlight` is the matching courtesy — cancelling the superseded request
+    /// so the server stops working on an answer nobody will read — but the
+    /// generation is what makes it correct, since a cancelled request may
+    /// already be on its way back.
+    @State private var loadGeneration = 0
+    @State private var inFlight: Task<Void, Never>?
 
     /// The lens, and the filters narrowing the history under it. Both go
     /// straight into the query string, so the server stays the only place that
@@ -346,7 +369,7 @@ struct AnalyticsView: View {
             if let a = analytics {
                 FilterSheet(available: a.filters.available, applied: filters) { next in
                     filters = next
-                    Task { await load() }
+                    reload()
                 }
             }
         }
@@ -362,7 +385,10 @@ struct AnalyticsView: View {
             case .failure(let error): importError = error.localizedDescription
             }
         }
-        .task { await load() }
+        .task {
+            seedFromSnapshot()
+            await load()
+        }
     }
 
     @ViewBuilder
@@ -429,11 +455,11 @@ struct AnalyticsView: View {
                         ForEach(a.filters.applied) { chip in
                             Button {
                                 filters.removeValue(forKey: chip.key)
-                                Task { await load() }
+                                reload()
                             } label: {
                                 HStack(spacing: 4) {
                                     Text(chip.label)
-                                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                                    Image(systemName: "xmark").font(.caption2.weight(.bold))
                                 }
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.mkAccent)
@@ -445,7 +471,7 @@ struct AnalyticsView: View {
                         }
                         Button("Clear all") {
                             filters = [:]
-                            Task { await load() }
+                            reload()
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.mkMuted)
@@ -461,7 +487,7 @@ struct AnalyticsView: View {
                         Button {
                             guard dimension != lens.id else { return }
                             dimension = lens.id
-                            Task { await load() }
+                            reload()
                         } label: {
                             Text(lens.title)
                                 .font(.subheadline.weight(dimension == lens.id ? .bold : .medium))
@@ -705,7 +731,7 @@ struct AnalyticsView: View {
         Button {
             guard let key = filterKey else { return }
             filters[key] = entry.name
-            Task { await load() }
+            reload()
         } label: {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -731,7 +757,7 @@ struct AnalyticsView: View {
                     }
                     if filterKey != nil {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundColor(.mkMuted.opacity(0.6))
                     }
                 }
@@ -869,7 +895,7 @@ struct AnalyticsView: View {
                     .symbolSize(120)
                     .annotation(position: .top, spacing: 2) {
                         Text(point.name)
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundColor(.mkMuted)
                     }
                 }
@@ -928,7 +954,7 @@ struct AnalyticsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Button {
                             dimension = group.id
-                            Task { await load() }
+                            reload()
                         } label: {
                             HStack {
                                 Text(group.title)
@@ -937,7 +963,7 @@ struct AnalyticsView: View {
                                 Text("See all")
                                     .font(.caption.weight(.semibold)).foregroundColor(.mkAccent)
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .bold)).foregroundColor(.mkAccent)
+                                    .font(.caption2.weight(.bold)).foregroundColor(.mkAccent)
                             }
                         }
                         .buttonStyle(.plain)
@@ -997,6 +1023,9 @@ struct AnalyticsView: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             Spacer()
+            // A decorative glyph standing in for a missing screenful, not copy — the
+            // sentence beside it is what carries the meaning and scales. Sized to hold
+            // the empty state together rather than to be read.
             Image(systemName: "chart.bar.xaxis").font(.system(size: 46)).foregroundColor(.mkMuted)
             Text("No diary yet").font(.title3).bold().foregroundColor(.mkText)
             Text("Download your export from letterboxd.com/settings/data. In Files, tap and hold the zip and choose Uncompress — then pick the folder here.")
@@ -1114,21 +1143,78 @@ struct AnalyticsView: View {
 
     // MARK: Networking
 
+    /// The signature the current view's snapshot is filed under.
+    private static func signature(dimension: String, filters: [String: String]) -> String {
+        AnalyticsSnapshot.signature(dimension: dimension, filters: filters)
+    }
+
+    /// Put last session's numbers on screen before the request goes out.
+    ///
+    /// Only for the view actually being opened — the signature covers the lens
+    /// and every filter — and only when there is nothing on screen already, so
+    /// this can never overwrite a fresher answer. A failed decode is ignored
+    /// rather than surfaced: the live request is moments behind it, and a
+    /// stale-cache error is not something a reader can act on.
+    @MainActor private func seedFromSnapshot() {
+        guard analytics == nil,
+              let data = AnalyticsSnapshot.load(
+                  signature: Self.signature(dimension: dimension, filters: filters)
+              ),
+              let cached = try? JSONDecoder().decode(AnalyticsResponse.self, from: data)
+        else { return }
+        analytics = cached
+        // The page has content now, so the next request refreshes in place
+        // rather than replacing it with a spinner.
+        isLoading = false
+    }
+
+    /// Start a page request, replacing whatever was already running.
+    ///
+    /// Every lens tap, filter change and drill goes through here rather than
+    /// starting a bare `Task`, so that there is exactly one request the screen
+    /// is waiting for at any moment.
+    @MainActor private func reload() {
+        inFlight?.cancel()
+        inFlight = Task { await load() }
+    }
+
     @MainActor private func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         isLoading = analytics == nil
+
+        let result: Result<AnalyticsResponse, Error>
         do {
             var params = filters
             params["dimension"] = dimension
-            let response: AnalyticsResponse = try await APIService.shared.get(
-                "/analytics", params: params, token: app.token
+            let fetched: (value: AnalyticsResponse, data: Data) =
+                try await APIService.shared.getWithData("/analytics", params: params, token: app.token)
+            AnalyticsSnapshot.save(
+                fetched.data,
+                signature: Self.signature(dimension: dimension, filters: filters)
             )
+            result = .success(fetched.value)
+        } catch {
+            result = .failure(error)
+        }
+
+        // Someone has asked a newer question. That request owns the screen now,
+        // spinner included, so this one leaves without touching anything —
+        // including on failure, where reporting a cancelled request's error
+        // would put a stale message over a load that is still going fine.
+        guard generation == loadGeneration else { return }
+
+        switch result {
+        case .success(let response):
             analytics = response
             loadError = nil
-        } catch let error as APIError {
-            if case .unauthorized = error { app.logout() }
-            loadError = error.errorDescription
-        } catch {
-            loadError = error.localizedDescription
+        case .failure(let error):
+            if let api = error as? APIError {
+                if case .unauthorized = api { app.logout() }
+                loadError = api.errorDescription
+            } else {
+                loadError = error.localizedDescription
+            }
         }
         isLoading = false
     }

@@ -36,14 +36,21 @@ function run(db, sql, params = []) {
 }
 
 /**
- * The add endpoint kicks off the first fetch without awaiting it, so the row is
- * in the list before TMDB answers. Polling the mock is deterministic where a
- * fixed number of ticks is not: the fetch is behind a database read, so how
- * many turns of the loop it takes is an implementation detail.
+ * Wait for the background detail fetch the add kicked off.
+ *
+ * The add endpoint starts that fetch without awaiting it, so the row is in the
+ * list before TMDB answers. The wait is on a deadline rather than a fixed
+ * number of event-loop turns, because ticks are not time: `setImmediate`
+ * returns as fast as the loop can drain, so a hundred of them can pass in under
+ * a millisecond while the SQLite read this is really waiting behind is still on
+ * the thread pool. Counting ticks made the helper fail whenever the machine was
+ * busy — it spent its budget and gave up on work that was queued, not missing —
+ * which is a property of the test run rather than of the code under test.
  */
-async function flushBackgroundFetch(expected = 1) {
-  for (let i = 0; i < 100 && fetchTitleWithCredits.mock.calls.length < expected; i++) {
-    await new Promise((resolve) => setImmediate(resolve));
+async function flushBackgroundFetch(expected = 1, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (fetchTitleWithCredits.mock.calls.length < expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
 

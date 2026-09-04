@@ -717,36 +717,69 @@ final class APIService {
     }
 }
 
-// MARK: - Offline feed snapshot
+// MARK: - Offline snapshots
 
-/// The last successful default Discover response, kept on disk so the feed shows
-/// instantly on a cold launch and still reads on a plane. It is a cache, not a
-/// source of truth: a live fetch overwrites it, and it is only ever restored for
-/// the exact view it was captured under (same services, sort and media type),
-/// tracked by a signature stored alongside the bytes.
-enum FeedSnapshot {
-    private static var dir: URL? {
+/// The last successful response for one screen, kept on disk so it shows
+/// instantly on a cold launch and still reads on a plane.
+///
+/// It is a cache, not a source of truth: a live fetch overwrites it, and it is
+/// only ever restored for the exact view it was captured under, tracked by a
+/// signature stored alongside the bytes. `Caches` is the right home — every byte
+/// here is re-fetchable, so the system is welcome to reclaim it under pressure.
+struct JSONSnapshot {
+    /// Distinguishes one screen's files from another's.
+    let name: String
+
+    private var dir: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
     }
-    private static var dataURL: URL? { dir?.appendingPathComponent("whatson-feed.json") }
-    private static var sigURL: URL? { dir?.appendingPathComponent("whatson-feed.sig") }
+    private var dataURL: URL? { dir?.appendingPathComponent("whatson-\(name).json") }
+    private var sigURL: URL? { dir?.appendingPathComponent("whatson-\(name).sig") }
 
-    static func save(_ data: Data, signature: String) {
+    func save(_ data: Data, signature: String) {
         guard let d = dataURL, let s = sigURL else { return }
         try? data.write(to: d, options: .atomic)
         try? Data(signature.utf8).write(to: s, options: .atomic)
     }
 
     /// The stored bytes, but only when they were captured under `signature`.
-    static func load(signature: String) -> Data? {
+    func load(signature: String) -> Data? {
         guard let d = dataURL, let s = sigURL,
               let sig = try? Data(contentsOf: s),
               String(decoding: sig, as: UTF8.self) == signature else { return nil }
         return try? Data(contentsOf: d)
     }
 
-    static func clear() {
+    func clear() {
         if let d = dataURL { try? FileManager.default.removeItem(at: d) }
         if let s = sigURL { try? FileManager.default.removeItem(at: s) }
     }
+}
+
+/// The default Discover response — same services, sort and media type.
+enum FeedSnapshot {
+    private static let store = JSONSnapshot(name: "feed")
+    static func save(_ data: Data, signature: String) { store.save(data, signature: signature) }
+    static func load(signature: String) -> Data? { store.load(signature: signature) }
+    static func clear() { store.clear() }
+}
+
+/// The analytics page, keyed by the lens and filters it was captured under.
+///
+/// Worth caching more than the feed is: an imported history changes only when
+/// the user imports again, yet the page was re-fetched from scratch on every
+/// cold launch. Restoring it means the numbers are on screen before the request
+/// is sent, and are still there when it cannot be.
+enum AnalyticsSnapshot {
+    private static let store = JSONSnapshot(name: "analytics")
+
+    /// The lens and its filters, ordered so the same view always signs the same.
+    static func signature(dimension: String, filters: [String: String]) -> String {
+        let parts = filters.keys.sorted().map { "\($0)=\(filters[$0] ?? "")" }
+        return ([dimension] + parts).joined(separator: "&")
+    }
+
+    static func save(_ data: Data, signature: String) { store.save(data, signature: signature) }
+    static func load(signature: String) -> Data? { store.load(signature: signature) }
+    static func clear() { store.clear() }
 }

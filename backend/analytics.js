@@ -207,25 +207,71 @@ function pickCrowdRating(imdbRating, details) {
  */
 const WATCHED_ONLY = `(e.source IS NULL OR e.source <> 'watchlist')`;
 
-async function readDiary(db, userId) {
-  const rows = await all(
-    db,
-    `SELECT e.name, e.year, e.film_key, e.rating, e.watched_on, e.is_rewatch,
-            e.tags_json, e.item_id,
-            d.payload_json, d.original_language,
-            tr.rating_imdb_num AS crowd_rating
-       FROM letterboxd_entries e
-       LEFT JOIN title_details_cache d
-              ON d.media_type = 'movie'
-             AND ('movie-' || d.tmdb_id) = e.item_id
-       LEFT JOIN title_ratings tr ON tr.imdb_id = d.imdb_id
-      WHERE e.user_id = ? AND ${WATCHED_ONLY}`,
-    [userId]
-  );
+/**
+ * The parsed diary, kept between requests.
+ *
+ * Reading and parsing the diary is ~95% of what an analytics request costs: the
+ * scan itself is cheap, but `JSON.parse` over every film's stored payload is
+ * not, and it was repeated in full on every lens switch and every filter toggle
+ * even though nothing about the history had changed. The aggregation on top of
+ * it is a couple of dozen milliseconds, so this is the difference between a tap
+ * costing hundreds of milliseconds and costing almost nothing — and because the
+ * parse is synchronous, it is also the difference between one large history
+ * blocking the event loop for every other user and not.
+ *
+ * Correctness rests on invalidation, never on expiry. An entry is dropped the
+ * moment the rows behind it change, so a stale answer is not something a caller
+ * can wait out — see `invalidateDiary`.
+ *
+ * Keyed by database first so that each connection has its own cache. Tests open
+ * a fresh in-memory database per case and reuse low user ids; a cache keyed on
+ * the id alone would serve one test's history to the next.
+ */
+const diaryCaches = new WeakMap();
+/** Enough for the readers a small deployment has at once, bounded so a busy one cannot grow without limit. */
+const DIARY_CACHE_LIMIT = 8;
+
+function diaryCacheFor(db) {
+  let cache = diaryCaches.get(db);
+  if (!cache) { cache = new Map(); diaryCaches.set(db, cache); }
+  return cache;
+}
+
+/**
+ * Drop cached diaries whose underlying rows have just changed.
+ *
+ * With a user id, only that user's entry goes. Without one, the whole database's
+ * cache is cleared — which is what a write to `title_details_cache` needs, since
+ * those rows are shared and a film resolved for one user changes the answer for
+ * everyone who has watched it.
+ */
+function invalidateDiary(db, userId = null) {
+  const cache = diaryCaches.get(db);
+  if (!cache) return;
+  if (userId === null || userId === undefined) cache.clear();
+  else cache.delete(Number(userId));
+}
+
+function mapDiaryRows(rows) {
+  // Every viewing of a film carries the same payload, so parse it once and let
+  // the rewatches share the result. This saves the repeated parse and, because
+  // the arrays inside are shared rather than copied, most of the memory the
+  // cache above would otherwise hold.
+  const detailsByItem = new Map();
+  const parseDetails = (itemId, json) => {
+    if (!json) return null;
+    if (detailsByItem.has(itemId)) return detailsByItem.get(itemId);
+    let parsed = null;
+    try { parsed = JSON.parse(json); } catch { /* ignore */ }
+    // Derived once per film for the same reason: `cast` is the largest array in
+    // the payload and every section that reads it wants only the names.
+    if (parsed) parsed.castNames = (parsed.cast || []).map((c) => c.name);
+    detailsByItem.set(itemId, parsed);
+    return parsed;
+  };
 
   return rows.map((row) => {
-    let details = null;
-    if (row.payload_json) { try { details = JSON.parse(row.payload_json); } catch { /* ignore */ } }
+    const details = parseDetails(row.item_id, row.payload_json);
     let tags = [];
     try { tags = JSON.parse(row.tags_json || '[]'); } catch { /* ignore */ }
     return {
@@ -243,7 +289,7 @@ async function readDiary(db, userId) {
       resolved: Boolean(details),
       genres: details?.genres || [],
       directors: details?.directors || [],
-      cast: (details?.cast || []).map((c) => c.name),
+      cast: details?.castNames || [],
       runtime: details?.runtime || null,
       language: row.original_language || null,
       // Stored for every resolved film and, until now, read by nothing.
@@ -261,6 +307,49 @@ async function readDiary(db, userId) {
   });
 }
 
+async function readDiary(db, userId) {
+  const cache = diaryCacheFor(db);
+  const key = Number(userId);
+  if (cache.has(key)) {
+    const rows = cache.get(key);
+    // Re-inserting moves the entry to the end, so the eviction below drops the
+    // reader who has been away longest rather than an active one.
+    cache.delete(key);
+    cache.set(key, rows);
+    return rows;
+  }
+
+  const rows = mapDiaryRows(await all(
+    db,
+    `SELECT e.name, e.year, e.film_key, e.rating, e.watched_on, e.is_rewatch,
+            e.tags_json, e.item_id,
+            d.payload_json, d.original_language,
+            tr.rating_imdb_num AS crowd_rating
+       FROM letterboxd_entries e
+       -- Matched on the id column rather than on a string built from it. The
+       -- concatenated form ('movie-' || d.tmdb_id) is not something an index
+       -- can answer, so SQLite could only narrow to media_type and then scan
+       -- every cached film for each diary row in turn — the join was quadratic
+       -- in the size of the history, which is why a large one fell off a cliff
+       -- rather than simply taking proportionally longer. Comparing the integer
+       -- lets it seek straight down the primary key. The LIKE guard carries the
+       -- other half of the old condition: without it a 'tv-3' row would take
+       -- the substring '3' and match the film with tmdb_id 3.
+       LEFT JOIN title_details_cache d
+              ON d.media_type = 'movie'
+             AND e.item_id LIKE 'movie-%'
+             AND d.tmdb_id = CAST(SUBSTR(e.item_id, 7) AS INTEGER)
+       LEFT JOIN title_ratings tr ON tr.imdb_id = d.imdb_id
+      WHERE e.user_id = ? AND ${WATCHED_ONLY}`,
+    [userId]
+  ));
+
+  cache.set(key, rows);
+  while (cache.size > DIARY_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+  // Callers only ever read these rows, and every sort in this module runs on a
+  // derived array, so one parse can be handed to every reader of it.
+  return rows;
+}
 function buildSummary(rows) {
   const films = new Set(rows.map((r) => r.filmKey));
   const rated = rows.filter((r) => r.rating !== null);
@@ -776,6 +865,7 @@ module.exports = {
   ensureAnalyticsTables,
   computeAnalytics,
   readDiary,
+  invalidateDiary,
   buildSummary,
   buildRating,
   buildEras,

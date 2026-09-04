@@ -10,6 +10,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const {
@@ -34,7 +35,7 @@ const {
   seriesTmdbId,
 } = require('./currentlyWatching');
 const { readExport, filmKey } = require('./letterboxd');
-const { computeAnalytics, parseFilters } = require('./analytics');
+const { computeAnalytics, parseFilters, invalidateDiary } = require('./analytics');
 const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -299,10 +300,19 @@ async function sendResetEmail(toEmail, username, code) {
   });
 }
 
-function createApp(db, { disableRateLimit = false } = {}) {
+function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   const app = express();
 
   app.set('trust proxy', 1);
+
+  // Modest value here, and worth being honest about why: this server answers
+  // JSON to a native client and renders no HTML, so the headers that matter
+  // most in helmet's set — CSP, and the framing and XSS protections — have no
+  // page to protect. What it does buy is the rest: no `X-Powered-By` banner
+  // advertising the stack, HSTS on the TLS the app is served over, and
+  // `nosniff` on every response. `contentSecurityPolicy` is left off rather
+  // than shipped as a default nothing here is written against.
+  app.use(helmet({ contentSecurityPolicy: false }));
 
   const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
     .split(',')
@@ -351,6 +361,24 @@ function createApp(db, { disableRateLimit = false } = {}) {
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: 'Too many catalog requests. Please try again later.' },
+      });
+  // Its own budget rather than a share of the catalog's, because the two
+  // protect different things and would otherwise starve each other: a full
+  // lookup run is a couple of hundred POSTs to /analytics/resolve, and if those
+  // drew down the same counter, finishing a lookup would leave the reader
+  // rate-limited out of the very page it was for.
+  const analyticsLimiter = disableRateLimit
+    ? (_req, _res, next) => next()
+    : rateLimit({
+        windowMs: 60 * 1000,
+        // Overridable so a test can reach the ceiling in a handful of requests.
+        // One that had to send a hundred and thirty would be slow enough to
+        // change the timing of every suite running beside it, which is how a
+        // test starts failing for reasons that have nothing to do with the code.
+        max: rateLimitMax ?? 120,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many analytics requests. Please try again later.' },
       });
 
   // ── Health check ──────────────────────────────────────────────────────────
@@ -829,6 +857,8 @@ function createApp(db, { disableRateLimit = false } = {}) {
         );
       }
     });
+    // Those UPDATEs changed the rows a cached diary was built from.
+    invalidateDiary(db, userId);
     // Only real matches count as "already known" — a remembered miss is not
     // work the user gets to skip, and reporting it as such overstates the import.
     return known.filter((row) => row.item_id).length;
@@ -893,6 +923,8 @@ function createApp(db, { disableRateLimit = false } = {}) {
           );
         }
       });
+      // The history this user's cached diary was built from no longer exists.
+      invalidateDiary(db, req.user.id);
     } catch (e) {
       console.error('[letterboxd] diary import failed:', e.message);
       return res.status(500).json({ error: 'Could not save your diary' });
@@ -916,7 +948,11 @@ function createApp(db, { disableRateLimit = false } = {}) {
   // "2024 in review" would have answered with every undated film in the history
   // alongside the 2024 ones — and on a real export all but a few dozen films are
   // undated. A filter that silently keeps almost everything is worse than none.
-  app.get('/analytics', authenticateToken, async (req, res) => {
+  // Rate limited like the catalog routes, and for a stronger reason: building
+  // the page is the most expensive thing this server does, and the work is
+  // synchronous, so an unthrottled caller does not just slow itself down — it
+  // holds the event loop and every other request behind it.
+  app.get('/analytics', analyticsLimiter, authenticateToken, async (req, res) => {
     try {
       // One endpoint, two knobs. `dimension` picks the lens; the rest of the
       // query string narrows the history, and drilling into a director is just
@@ -950,9 +986,13 @@ function createApp(db, { disableRateLimit = false } = {}) {
    */
   const PENDING_FILM_FILTER = `
        FROM letterboxd_entries e
+       -- Joined on the integer id rather than a string built from it, so this
+       -- can seek the primary key instead of scanning the whole details cache
+       -- once per diary row. See the note in analytics.js readDiary.
        LEFT JOIN title_details_cache d
               ON d.media_type = 'movie'
-             AND ('movie-' || d.tmdb_id) = e.item_id
+             AND e.item_id LIKE 'movie-%'
+             AND d.tmdb_id = CAST(SUBSTR(e.item_id, 7) AS INTEGER)
       WHERE e.user_id = ?
         AND d.tmdb_id IS NULL
         AND (e.item_id IS NULL OR e.item_id LIKE 'movie-%')
@@ -1005,19 +1045,24 @@ function createApp(db, { disableRateLimit = false } = {}) {
         ? await resolveImportBatch(db, needsSearch.map(({ name, year }) => ({ name, year })))
         : [];
 
-      for (let i = 0; i < needsSearch.length; i++) {
-        const match = matches[i];
-        // An outage is not an answer. Leaving the id NULL keeps the film in the
-        // next batch instead of writing it off over a network blip.
-        if (match === LOOKUP_UNAVAILABLE) continue;
-        // A film TMDB genuinely has nothing for is marked with the empty string
-        // so later batches move past it rather than retrying it forever.
-        await runSql(
-          db,
-          'UPDATE letterboxd_entries SET item_id = ? WHERE user_id = ? AND film_key = ?',
-          [match?.itemId || '', req.user.id, needsSearch[i].film_key]
-        );
-      }
+      // One transaction for the batch. Standalone UPDATEs each committed on
+      // their own, so a full batch paid up to two hundred separate commits to
+      // record what is logically a single step of the lookup.
+      await withTransaction(db, async () => {
+        for (let i = 0; i < needsSearch.length; i++) {
+          const match = matches[i];
+          // An outage is not an answer. Leaving the id NULL keeps the film in
+          // the next batch instead of writing it off over a network blip.
+          if (match === LOOKUP_UNAVAILABLE) continue;
+          // A film TMDB genuinely has nothing for is marked with the empty
+          // string so later batches move past it rather than retrying forever.
+          await runSql(
+            db,
+            'UPDATE letterboxd_entries SET item_id = ? WHERE user_id = ? AND film_key = ?',
+            [match?.itemId || '', req.user.id, needsSearch[i].film_key]
+          );
+        }
+      });
 
       // Now the details behind every id in this batch, freshly searched or
       // adopted. Shared across every user, so a popular film is fetched once
@@ -1036,6 +1081,12 @@ function createApp(db, { disableRateLimit = false } = {}) {
         try { await ensureAnalyticsDetails(db, tmdbId); } catch { /* one miss must not stop the batch */ }
       });
 
+      // Both halves of this batch changed what a diary reads: the ids above,
+      // and these details. The details are shared between users, so every
+      // cached diary in this database is dropped rather than just this user's —
+      // a film resolved here is a film resolved for everyone who has seen it.
+      invalidateDiary(db);
+
       // Counted from the database rather than from the calls, so `resolved`
       // means what the page will actually be able to show.
       const keys = pendingRows.map((row) => row.film_key);
@@ -1044,7 +1095,9 @@ function createApp(db, { disableRateLimit = false } = {}) {
         `SELECT COUNT(DISTINCT e.film_key) AS done
            FROM letterboxd_entries e
            JOIN title_details_cache d
-             ON d.media_type = 'movie' AND ('movie-' || d.tmdb_id) = e.item_id
+             ON d.media_type = 'movie'
+            AND e.item_id LIKE 'movie-%'
+            AND d.tmdb_id = CAST(SUBSTR(e.item_id, 7) AS INTEGER)
           WHERE e.user_id = ? AND e.film_key IN (${keys.map(() => '?').join(',')})`,
         [req.user.id, ...keys]
       );

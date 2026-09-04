@@ -238,3 +238,36 @@ describe('hide watched scales past the SQL variable limit', () => {
     expect(result.items).toHaveLength(2);
   }, 60000);
 });
+
+/**
+ * The analytics page is the most expensive thing this server builds, and the
+ * work is synchronous — an unthrottled caller holds the event loop and every
+ * other request queues behind it. Every other test disables rate limiting, so
+ * without this one nothing would notice the limiter being dropped.
+ */
+describe('the analytics page is rate limited', () => {
+  test('a caller past the limit is turned away rather than served', async () => {
+    const db = await createTestDb();
+    // Rate limiting left on, unlike everywhere else, and its ceiling lowered so
+    // that reaching it costs a few requests rather than a hundred and thirty.
+    // What is under test is that /analytics sits behind the limiter at all, not
+    // the value of the constant.
+    const app = createApp(db, { rateLimitMax: 3 });
+    try {
+      const reg = await request(app).post('/register').send({ username: 'reader', password: 'secret1' });
+      const token = reg.body.token;
+
+      const statuses = [];
+      for (let i = 0; i < 5; i++) {
+        const res = await request(app).get('/analytics').set('Authorization', `Bearer ${token}`);
+        statuses.push(res.status);
+      }
+
+      // The first three are served; the rest are turned away.
+      expect(statuses.slice(0, 3)).toEqual([200, 200, 200]);
+      expect(statuses.slice(3)).toEqual([429, 429]);
+    } finally {
+      await closeDb(db);
+    }
+  });
+});
