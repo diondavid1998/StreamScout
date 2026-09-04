@@ -312,9 +312,6 @@ struct AnalyticsView: View {
 
     @State private var showFilterSheet = false
     @State private var showImporter = false
-    @State private var importStatus: String?
-    @State private var importError: String?
-    @State private var isImporting = false
 
     @State private var isResolving = false
     @State private var resolveStatus: String?
@@ -361,7 +358,7 @@ struct AnalyticsView: View {
                         Image(systemName: "square.and.arrow.down")
                     }
                     .foregroundColor(.mkAccent)
-                    .disabled(isImporting)
+                    .disabled(app.isImportingDiary)
                     .accessibilityLabel("Import Letterboxd export")
                 }
             }
@@ -385,13 +382,22 @@ struct AnalyticsView: View {
             allowsMultipleSelection: true
         ) { result in
             switch result {
-            case .success(let urls): Task { await importExport(urls: urls) }
-            case .failure(let error): importError = error.localizedDescription
+            case .success(let urls): importExport(urls: urls)
+            case .failure(let error): app.report(failure: error.localizedDescription)
             }
         }
         .task {
             seedFromSnapshot()
             await load()
+        }
+        // An import can now finish while this screen is open, because it is no
+        // longer this screen running it. The counter changes once per completed
+        // import, which is the cue to re-read — and to drop a lens and filters
+        // that describe a history that has just been replaced.
+        .onChange(of: app.diaryImportGeneration) {
+            filters = [:]
+            dimension = "overview"
+            reload()
         }
     }
 
@@ -405,8 +411,6 @@ struct AnalyticsView: View {
                 Divider().overlay(Color.mkBorder)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        if let importStatus { banner(importStatus, tone: .accent) }
-                        if let importError { banner(importError, tone: .error) }
                         lensBody(a)
                     }
                     .padding(.horizontal, 16)
@@ -1197,7 +1201,7 @@ struct AnalyticsView: View {
             Text("Download your export from letterboxd.com/settings/data. In Files, tap and hold the zip and choose Uncompress — then pick the folder here.")
                 .font(.subheadline).foregroundColor(.mkMuted)
                 .multilineTextAlignment(.center).padding(.horizontal, 34)
-            if let message = importError ?? loadError {
+            if let message = loadError {
                 Text(message).font(.footnote).foregroundColor(.red)
                     .multilineTextAlignment(.center).padding(.horizontal, 34)
             }
@@ -1205,9 +1209,9 @@ struct AnalyticsView: View {
                 showImporter = true
             } label: {
                 HStack(spacing: 8) {
-                    if isImporting { ProgressView().tint(.mkText).scaleEffect(0.8) }
+                    if app.isImportingDiary { ProgressView().tint(.mkText).scaleEffect(0.8) }
                     else { Image(systemName: "folder.badge.plus") }
-                    Text(isImporting ? (importStatus ?? "Importing…") : "Import Letterboxd export")
+                    Text(app.isImportingDiary ? "Importing…" : "Import Letterboxd export")
                         .font(.subheadline.weight(.semibold))
                 }
                 .foregroundColor(.mkText)
@@ -1215,7 +1219,7 @@ struct AnalyticsView: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.tint(Color.mkAccent).interactive(), in: Capsule())
-            .disabled(isImporting)
+            .disabled(app.isImportingDiary)
             .padding(.top, 6)
             Spacer()
         }
@@ -1238,16 +1242,6 @@ struct AnalyticsView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func banner(_ text: String, tone: BannerTone) -> some View {
-        Text(text)
-            .font(.footnote)
-            .foregroundColor(tone == .error ? .red : .mkAccent)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private enum BannerTone { case accent, error }
 
     private func hours(_ minutes: Int) -> String {
         guard minutes > 0 else { return "—" }
@@ -1388,42 +1382,23 @@ struct AnalyticsView: View {
         isLoading = false
     }
 
-    @MainActor private func importExport(urls: [URL]) async {
-        importError = nil
-        importStatus = "Reading files…"
-        isImporting = true
-        defer { isImporting = false }
-
+    /// Read the picked files, then hand them off.
+    ///
+    /// Reading is local and quick, so it stays here where the picker is. The
+    /// upload does not: it goes to `AppState`, which outlives this screen, so
+    /// leaving the page mid-import no longer loses the progress, the result or
+    /// the error. The banner follows the reader wherever they go.
+    @MainActor private func importExport(urls: [URL]) {
         let files: [LetterboxdExport.File]
         do {
             files = try LetterboxdExport.read(urls: urls)
         } catch {
-            importStatus = nil
-            importError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            app.report(
+                failure: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            )
             return
         }
-
-        importStatus = "Uploading \(files.count) file\(files.count == 1 ? "" : "s")…"
-        do {
-            let payload = files.map { ["name": $0.name, "text": $0.text] }
-            let response: DiaryImportResponse = try await APIService.shared.post(
-                "/letterboxd/diary", body: ["files": payload], token: app.token, timeout: 120
-            )
-            let films = response.films ?? 0
-            let viewings = response.viewings ?? 0
-            importStatus = "Imported \(films) films across \(viewings) viewings."
-            // A fresh import invalidates whatever was filtered before it.
-            filters = [:]
-            dimension = "overview"
-            await load()
-        } catch let error as APIError {
-            importStatus = nil
-            importError = error.errorDescription
-            if case .unauthorized = error { app.logout() }
-        } catch {
-            importStatus = nil
-            importError = error.localizedDescription
-        }
+        app.importDiary(files: files)
     }
 
     /// Walk the backlog in batches until nothing is pending.

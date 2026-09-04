@@ -430,9 +430,11 @@ struct DetailSheet: View {
                 )
                 app.setCurrentlyWatching(movie.id, on: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Updating Currently Watching")
+        }
         isTogglingCurrent = false
     }
 
@@ -493,9 +495,7 @@ struct DetailSheet: View {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
                                 .stroke(Color.mkBorder, lineWidth: 1)
                         )
-                    if let region = extras.certificateRegion {
-                        Text("rating (\(region))").font(.caption2).foregroundColor(.mkMuted)
-                    }
+                    Text("rating").font(.caption2).foregroundColor(.mkMuted)
                 }
             }
 
@@ -597,9 +597,11 @@ struct DetailSheet: View {
                 )
                 app.setWatchlisted(movie.id, on: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Updating your watchlist")
+        }
         isTogglingWatchlist = false
     }
 
@@ -621,7 +623,11 @@ struct DetailSheet: View {
         do {
             let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
             for item in resp.items ?? [] { app.setWatched(item.itemId, watched: true) }
-        } catch { }
+        } catch {
+            // Quiet on purpose: this tops up a list the device already holds,
+            // and it only runs when that list is empty. A banner here would
+            // interrupt someone who has not asked for anything.
+        }
     }
 
     @MainActor func toggleWatched() async {
@@ -641,9 +647,11 @@ struct DetailSheet: View {
                 )
                 app.setWatched(movie.id, watched: true)
             }
-        } catch let err as APIError {
-            if case .unauthorized = err { app.logout() }
-        } catch { }
+        } catch {
+            // Silently swallowing this left the button looking untouched while
+            // the change never reached the server.
+            app.report(error: error, whileTrying: "Marking watched")
+        }
         isTogglingWatched = false
     }
 

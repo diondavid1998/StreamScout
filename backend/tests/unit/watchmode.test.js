@@ -11,7 +11,6 @@ const {
   ensureWatchmodeTables,
   getWatchmodeDetails,
   normalizeWatchmode,
-  forRegion,
   resetBreaker,
   isRationed,
 } = require('../../watchmode');
@@ -60,30 +59,26 @@ describe('reading the response', () => {
   test('a title with nothing to say produces nulls, not empty strings', () => {
     const out = normalizeWatchmode({}, []);
     expect(out).toEqual({
-      certificates: {}, pros: null, cons: null, verdict: null,
+      certificate: null, pros: null, cons: null, verdict: null,
       rent: null, buy: null, streamingOn: [],
     });
   });
 
-  test('the whole certificate map is kept so one call answers every region', () => {
+  test('the US certificate is kept, and other countries are not', () => {
     const out = normalizeWatchmode(
-      { ...DETAILS, content_ratings: { US: 'R', GB: '15', DE: '16' } },
+      { ...DETAILS, us_rating: 'R', content_ratings: { US: 'R', GB: '15', DE: '16' } },
       SOURCES
     );
-    expect(out.certificates).toEqual({ US: 'R', GB: '15', DE: '16' });
-
-    // A caller sees only their own, because a client can show one.
-    expect(forRegion(out, 'GB')).toMatchObject({ certificate: '15', certificateRegion: 'GB' });
-    expect(forRegion(out, 'US')).toMatchObject({ certificate: 'R', certificateRegion: 'US' });
-    // A country Watchmode has no rating for is null, not another country's.
-    expect(forRegion(out, 'JP').certificate).toBeNull();
-    // And the map itself never reaches the client.
-    expect(forRegion(out, 'US').certificates).toBeUndefined();
+    expect(out.certificate).toBe('R');
+    // This app is US-only; carrying thirty-seven countries would be bloat.
+    expect(out.certificates).toBeUndefined();
   });
 
-  test('us_rating fills in when the map has no US entry', () => {
-    const out = normalizeWatchmode({ ...DETAILS, us_rating: 'PG-13', content_ratings: { GB: '12A' } }, []);
-    expect(out.certificates).toEqual({ GB: '12A', US: 'PG-13' });
+  test('the certificate map fills in when us_rating is missing', () => {
+    // The gap this is here to close: TMDB has no US certificate for the film,
+    // Watchmode does.
+    const out = normalizeWatchmode({ ...DETAILS, content_ratings: { US: 'PG-13' } }, []);
+    expect(out.certificate).toBe('PG-13');
   });
 });
 
@@ -135,8 +130,8 @@ describe('spending the quota', () => {
 
     const first = await getWatchmodeDetails(db, 'movie', 777, { apiKey: 'k' });
     expect(first).toEqual({
+      certificate: null,
       pros: null, cons: null, verdict: null, rent: null, buy: null, streamingOn: [],
-      certificate: null, certificateRegion: 'US',
     });
 
     const callsAfterFirst = global.fetch.mock.calls.length;

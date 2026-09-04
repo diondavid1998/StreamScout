@@ -665,9 +665,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       // opening, so it is attached only when there is something to attach.
       let watchmode = null;
       try {
-        watchmode = await getWatchmodeDetails(db, mediaType, tmdb_id, {
-          region: req.query.region || DEFAULT_REGION,
-        });
+        watchmode = await getWatchmodeDetails(db, mediaType, tmdb_id);
       } catch (e) {
         console.warn('[watchmode] lookup failed:', e.message);
       }

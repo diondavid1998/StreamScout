@@ -284,7 +284,7 @@ final class WhatsOnTests: XCTestCase {
     func testWatchmodeWithNothingToSayIsNotDrawn() throws {
         let extras = try decode(WatchmodeExtras.self, #"""
         {"pros":null,"cons":null,"verdict":null,"rent":null,"buy":null,
-         "streamingOn":[],"certificate":null,"certificateRegion":"US"}
+         "streamingOn":[],"certificate":null}
         """#)
         XCTAssertFalse(extras.hasContent, "an empty block would draw an empty section")
     }
@@ -292,10 +292,10 @@ final class WhatsOnTests: XCTestCase {
     func testACertificateAloneIsWorthDrawingTheSectionFor() throws {
         let extras = try decode(WatchmodeExtras.self, #"""
         {"pros":null,"cons":null,"verdict":null,"rent":null,"buy":null,
-         "streamingOn":[],"certificate":"15","certificateRegion":"GB"}
+         "streamingOn":[],"certificate":"R"}
         """#)
         XCTAssertTrue(extras.hasContent)
-        XCTAssertEqual(extras.certificate, "15")
+        XCTAssertEqual(extras.certificate, "R")
     }
 
     func testAPriceReadsAsMoneyRatherThanAFloat() throws {
@@ -334,5 +334,92 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(available.options(for: "certification").first?.films, 9)
         // An unknown key is empty rather than a crash.
         XCTAssertTrue(available.options(for: "nonsense").isEmpty)
+    }
+
+    // MARK: - Notices
+
+    func testAFailureIsShownAndCanBeDismissed() {
+        let app = AppState(userDefaults: defaults)
+        XCTAssertNil(app.notice)
+
+        app.report(failure: "Marking watched failed.")
+        XCTAssertEqual(app.notice?.kind, .failure)
+        XCTAssertEqual(app.notice?.message, "Marking watched failed.")
+
+        app.dismissNotice()
+        XCTAssertNil(app.notice)
+    }
+
+    func testAnExpiredSessionLogsOutInsteadOfShowingABanner() {
+        let app = AppState(userDefaults: defaults)
+        app.saveSession(token: "t", username: "someone")
+
+        app.report(error: APIError.unauthorized, whileTrying: "Marking watched")
+
+        // Being told to sign in again is not a banner — it is a state change.
+        XCTAssertNil(app.notice)
+        XCTAssertEqual(app.page, .auth)
+    }
+
+    func testAFailureCarriesTheServerMessageRatherThanAGenericOne() {
+        let app = AppState(userDefaults: defaults)
+        app.report(error: APIError.clientError(429, "Too many requests"), whileTrying: "Search")
+
+        let message = app.notice?.message ?? ""
+        XCTAssertTrue(message.contains("Search failed"), message)
+        XCTAssertTrue(message.contains("Too many requests"), message)
+    }
+
+    /// A job still running has no dismiss timer, or a long import would lose
+    /// the only sign it is still going.
+    func testAJobInFlightStaysOnScreenWhileFinishedOnesExpire() {
+        let app = AppState(userDefaults: defaults)
+
+        app.report(progress: "Importing 5 files…")
+        XCTAssertNil(app.notice?.autoDismissAfter)
+
+        app.report(success: "Imported 412 films.")
+        XCTAssertNotNil(app.notice?.autoDismissAfter)
+        // Failures linger longer than successes; there is more to read.
+        app.report(failure: "Import failed.")
+        XCTAssertGreaterThan(app.notice?.autoDismissAfter ?? 0, 3)
+    }
+
+    func testANewNoticeReplacesTheOneBeforeIt() {
+        let app = AppState(userDefaults: defaults)
+        app.report(progress: "Importing…")
+        let first = app.notice?.id
+
+        app.report(success: "Done.")
+        XCTAssertNotEqual(app.notice?.id, first, "the older notice was still on screen")
+        XCTAssertEqual(app.notice?.kind, .success)
+    }
+
+    // MARK: - Import ownership
+
+    /// The upload belongs to the app, not to the screen that starts it, so
+    /// leaving the page cannot take the progress with it.
+    func testTheImportFlagLivesOnTheAppRatherThanAScreen() {
+        let app = AppState(userDefaults: defaults)
+        XCTAssertFalse(app.isImportingDiary)
+
+        app.importDiary(files: [.init(name: "ratings.csv", text: "Name,Year\nHeat,1995")])
+
+        // In flight the moment it is asked for, and announced.
+        XCTAssertTrue(app.isImportingDiary)
+        XCTAssertEqual(app.notice?.kind, .progress)
+    }
+
+    /// The server replaces the whole diary on each import, so two at once would
+    /// race to decide the history.
+    func testASecondImportIsRefusedWhileOneIsRunning() {
+        let app = AppState(userDefaults: defaults)
+        let files: [LetterboxdExport.File] = [.init(name: "ratings.csv", text: "Name,Year\nHeat,1995")]
+
+        app.importDiary(files: files)
+        app.importDiary(files: files)
+
+        XCTAssertEqual(app.notice?.kind, .failure)
+        XCTAssertTrue((app.notice?.message ?? "").contains("already running"))
     }
 }

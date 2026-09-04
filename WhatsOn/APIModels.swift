@@ -196,11 +196,9 @@ struct WatchmodeExtras: Decodable {
     let rent: WatchmodePrice?
     let buy: WatchmodePrice?
     let streamingOn: [String]?
-    /// The certificate for the viewer's region. TMDB carries only the US one,
-    /// so this is the only source for anywhere else — and it fills gaps where
-    /// TMDB has no US rating at all.
+    /// The US certificate, kept because it fills a gap: a film with no rating in
+    /// TMDB's release_dates often has one here.
     let certificate: String?
-    let certificateRegion: String?
 
     /// Whether there is anything worth drawing a section for.
     var hasContent: Bool {
