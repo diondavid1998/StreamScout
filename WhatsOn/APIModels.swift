@@ -196,10 +196,15 @@ struct WatchmodeExtras: Decodable {
     let rent: WatchmodePrice?
     let buy: WatchmodePrice?
     let streamingOn: [String]?
+    /// The certificate for the viewer's region. TMDB carries only the US one,
+    /// so this is the only source for anywhere else — and it fills gaps where
+    /// TMDB has no US rating at all.
+    let certificate: String?
+    let certificateRegion: String?
 
     /// Whether there is anything worth drawing a section for.
     var hasContent: Bool {
-        pros != nil || cons != nil || verdict != nil || rent != nil || buy != nil
+        pros != nil || cons != nil || verdict != nil || rent != nil || buy != nil || certificate != nil
     }
 }
 

@@ -11,6 +11,7 @@ const {
   ensureWatchmodeTables,
   getWatchmodeDetails,
   normalizeWatchmode,
+  forRegion,
   resetBreaker,
   isRationed,
 } = require('../../watchmode');
@@ -58,7 +59,31 @@ describe('reading the response', () => {
 
   test('a title with nothing to say produces nulls, not empty strings', () => {
     const out = normalizeWatchmode({}, []);
-    expect(out).toEqual({ pros: null, cons: null, verdict: null, rent: null, buy: null, streamingOn: [] });
+    expect(out).toEqual({
+      certificates: {}, pros: null, cons: null, verdict: null,
+      rent: null, buy: null, streamingOn: [],
+    });
+  });
+
+  test('the whole certificate map is kept so one call answers every region', () => {
+    const out = normalizeWatchmode(
+      { ...DETAILS, content_ratings: { US: 'R', GB: '15', DE: '16' } },
+      SOURCES
+    );
+    expect(out.certificates).toEqual({ US: 'R', GB: '15', DE: '16' });
+
+    // A caller sees only their own, because a client can show one.
+    expect(forRegion(out, 'GB')).toMatchObject({ certificate: '15', certificateRegion: 'GB' });
+    expect(forRegion(out, 'US')).toMatchObject({ certificate: 'R', certificateRegion: 'US' });
+    // A country Watchmode has no rating for is null, not another country's.
+    expect(forRegion(out, 'JP').certificate).toBeNull();
+    // And the map itself never reaches the client.
+    expect(forRegion(out, 'US').certificates).toBeUndefined();
+  });
+
+  test('us_rating fills in when the map has no US entry', () => {
+    const out = normalizeWatchmode({ ...DETAILS, us_rating: 'PG-13', content_ratings: { GB: '12A' } }, []);
+    expect(out.certificates).toEqual({ GB: '12A', US: 'PG-13' });
   });
 });
 
@@ -109,7 +134,10 @@ describe('spending the quota', () => {
     global.fetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
 
     const first = await getWatchmodeDetails(db, 'movie', 777, { apiKey: 'k' });
-    expect(first).toEqual({ pros: null, cons: null, verdict: null, rent: null, buy: null, streamingOn: [] });
+    expect(first).toEqual({
+      pros: null, cons: null, verdict: null, rent: null, buy: null, streamingOn: [],
+      certificate: null, certificateRegion: 'US',
+    });
 
     const callsAfterFirst = global.fetch.mock.calls.length;
     await getWatchmodeDetails(db, 'movie', 777, { apiKey: 'k' });

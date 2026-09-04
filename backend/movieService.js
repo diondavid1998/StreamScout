@@ -165,6 +165,79 @@ class TmdbUnreachableError extends Error {
   }
 }
 
+/**
+ * Stop asking TMDB for a minute after it makes clear it does not want to be
+ * asked.
+ *
+ * Without this every call in a batch fails on its own terms, because nothing
+ * tells the second request that the first was just refused. A single resolve
+ * batch is up to 120 requests eight at a time, so an unreachable TMDB costs
+ * nearly four minutes of timeouts to learn one thing — and a rate-limited one
+ * gets 120 more requests from us after telling us to stop, which is how a short
+ * limit becomes a long one.
+ *
+ * A minute, not until midnight. OMDB's breaker waits for the daily quota it is
+ * built around to roll over; TMDB's limit is short and per-second, so holding
+ * for hours would lock someone out of their own lookup over a blip.
+ *
+ * What trips it is deliberately narrow. A 429 or a 5xx or a dead socket is TMDB
+ * declining to answer. A 404 is an answer — the title does not exist — and a
+ * 401 is a misconfigured key that no amount of waiting fixes and that an
+ * operator needs to see rather than have muffled.
+ */
+const TMDB_BREAKER_COOLDOWN_MS = 60 * 1000;
+/**
+ * How many refusals in a row open it.
+ *
+ * Not one. A single failed request is the normal cost of a flaky network, and
+ * `searchTitleOnTmdb` is built around exactly that: when `/search/multi` fails
+ * it falls back to year-scoped searches, which routinely succeed. Opening on
+ * the first failure would block the fallback that exists to recover from it and
+ * turn a recoverable blip into a minute of nothing. Three consecutive refusals
+ * is a service that is actually down; one is Tuesday.
+ */
+const TMDB_BREAKER_THRESHOLD = 3;
+let tmdbBreakerUntil = 0;
+let tmdbConsecutiveRefusals = 0;
+
+class TmdbUnavailableError extends Error {
+  constructor(message = 'TMDB is not answering right now') {
+    super(message);
+    this.name = 'TmdbUnavailableError';
+    this.status = 503;
+  }
+}
+
+function isTmdbUnavailable() { return Date.now() < tmdbBreakerUntil; }
+
+function noteTmdbRefusal(reason) {
+  tmdbConsecutiveRefusals += 1;
+  if (tmdbConsecutiveRefusals < TMDB_BREAKER_THRESHOLD) return;
+  const wasOpen = isTmdbUnavailable();
+  tmdbBreakerUntil = Date.now() + TMDB_BREAKER_COOLDOWN_MS;
+  // Logged once per opening rather than once per refused call, so an outage
+  // leaves a line in the log instead of a wall.
+  if (!wasOpen) console.warn(`[tmdb] pausing requests for 60s after ${tmdbConsecutiveRefusals} refusals: ${reason}`);
+}
+
+/** Any answer at all means the service is back; the count starts over. */
+function noteTmdbSuccess() { tmdbConsecutiveRefusals = 0; }
+
+/** Test seam, and the way back in once a key or a network is fixed. */
+function resetTmdbBreaker() {
+  tmdbBreakerUntil = 0;
+  tmdbConsecutiveRefusals = 0;
+}
+
+/** Whether a failure means "TMDB declined" rather than "no such title". */
+function isTmdbRefusal(error) {
+  const status = error?.status;
+  if (status === 404 || status === 401 || status === 403) return false;
+  // No status at all means the request never completed — DNS, socket, abort.
+  if (status === undefined) return true;
+  return status === 429 || status >= 500;
+}
+
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -188,7 +261,13 @@ async function fetchJson(url, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(data.status_message || data.Error || data.message || `Request failed with status ${response.status}`);
+    const error = new Error(
+      data.status_message || data.Error || data.message || `Request failed with status ${response.status}`
+    );
+    // Carried so callers can tell "no such title" from "not right now". Without
+    // it every failure looks the same and a 404 gets treated like an outage.
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -214,9 +293,24 @@ async function fetchTmdb(path, params = {}) {
     return cached;
   }
 
-  const data = await fetchJson(url.toString(), {
-    headers: buildTmdbHeaders(),
-  });
+  // Checked after the cache, not before: a cached answer is free and correct
+  // whether or not TMDB is currently reachable, and refusing to serve it would
+  // make an outage look worse than it is.
+  if (isTmdbUnavailable()) {
+    throw new TmdbUnavailableError();
+  }
+
+  let data;
+  try {
+    data = await fetchJson(url.toString(), { headers: buildTmdbHeaders() });
+    noteTmdbSuccess();
+  } catch (error) {
+    // A 404 is TMDB answering, so it clears the count too — the service is
+    // plainly up, this title just does not exist.
+    if (isTmdbRefusal(error)) noteTmdbRefusal(error.message);
+    else noteTmdbSuccess();
+    throw error;
+  }
 
   setCacheEntry(tmdbCache, cacheKey, data);
   return data;
@@ -827,6 +921,10 @@ module.exports = {
   isOmdbRateLimited,
   searchTitleOnTmdb,
   TmdbUnreachableError,
+  TmdbUnavailableError,
+  isTmdbUnavailable,
+  resetTmdbBreaker,
+  isTmdbRefusal,
   includedProviders,
   searchCatalog,
   fetchTitlesByPerson,

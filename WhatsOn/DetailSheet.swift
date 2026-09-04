@@ -483,6 +483,22 @@ struct DetailSheet: View {
                 prosConsRow(icon: "hand.thumbsdown.fill", text: cons, tint: Self.consTint)
             }
 
+            if let certificate = extras.certificate {
+                HStack(spacing: 6) {
+                    Text(certificate)
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.mkText)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .stroke(Color.mkBorder, lineWidth: 1)
+                        )
+                    if let region = extras.certificateRegion {
+                        Text("rating (\(region))").font(.caption2).foregroundColor(.mkMuted)
+                    }
+                }
+            }
+
             if extras.rent != nil || extras.buy != nil {
                 HStack(spacing: 14) {
                     if let rent = extras.rent {

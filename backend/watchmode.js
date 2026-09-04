@@ -73,6 +73,20 @@ async function ensureWatchmodeTables(db) {
 
 /** The handful of fields worth keeping out of a large response. */
 function normalizeWatchmode(details, sources, region = 'US') {
+  // Watchmode carries the certificate for thirty-seven countries where TMDB's
+  // release_dates gives the app only the US one, and it fills a real gap: a
+  // film with no US certificate on TMDB often has one here.
+  //
+  // The whole map is kept rather than just the region asked for, because the
+  // cache is keyed on the title alone. Storing one region's answer would mean
+  // serving it to every other region, and re-keying the cache by region would
+  // cost a fresh request per region out of a quota that never refills. The map
+  // is a few hundred bytes and answers all of them from the one call.
+  const certificates = details?.content_ratings && typeof details.content_ratings === 'object'
+    ? details.content_ratings
+    : {};
+  if (details?.us_rating && !certificates.US) certificates.US = details.us_rating;
+
   const summary = (details?.review_summary || '').trim();
   // The summary arrives as "Pros: a; b | Cons: c; d" in one string. Split so the
   // client can style the two halves differently rather than print the marker.
@@ -96,6 +110,7 @@ function normalizeWatchmode(details, sources, region = 'US') {
   };
 
   return {
+    certificates,
     pros,
     cons,
     // "You'll like this if… Not for you if…" — the one genuinely editorial line
@@ -118,14 +133,19 @@ function normalizeWatchmode(details, sources, region = 'US') {
  * Returns null rather than throwing: this is a garnish on the detail sheet, and
  * a title with no Watchmode entry — or a spent quota — must still open.
  */
-async function getWatchmodeDetails(db, mediaType, tmdbId, { apiKey = process.env.WATCHMODE_API_KEY } = {}) {
+async function getWatchmodeDetails(
+  db,
+  mediaType,
+  tmdbId,
+  { apiKey = process.env.WATCHMODE_API_KEY, region = 'US' } = {}
+) {
   const cached = await get(
     db,
     'SELECT payload_json FROM watchmode_cache WHERE media_type = ? AND tmdb_id = ?',
     [mediaType, tmdbId]
   );
   if (cached) {
-    try { return JSON.parse(cached.payload_json); } catch { /* refetch below */ }
+    try { return forRegion(JSON.parse(cached.payload_json), region); } catch { /* refetch below */ }
   }
 
   if (!apiKey || isRationed()) return null;
@@ -152,21 +172,34 @@ async function getWatchmodeDetails(db, mediaType, tmdbId, { apiKey = process.env
     // A title Watchmode has never heard of is a real answer, and worth
     // remembering so it is not asked again — but there is nothing to show.
     if (detailsRes.status === 404) {
-      const empty = { pros: null, cons: null, verdict: null, rent: null, buy: null, streamingOn: [] };
+      const empty = {
+        certificates: {},
+        pros: null, cons: null, verdict: null, rent: null, buy: null, streamingOn: [],
+      };
       await storeWatchmode(db, mediaType, tmdbId, empty);
-      return empty;
+      return forRegion(empty, region);
     }
     if (!detailsRes.ok) return null;
 
     const details = await detailsRes.json();
     const sources = sourcesRes.ok ? await sourcesRes.json() : [];
-    const payload = normalizeWatchmode(details, sources);
+    const payload = normalizeWatchmode(details, sources, region);
     await storeWatchmode(db, mediaType, tmdbId, payload);
-    return payload;
+    return forRegion(payload, region);
   } catch (error) {
     console.warn(`[watchmode] ${watchmodeId} failed: ${error.message}`);
     return null;
   }
+}
+
+/**
+ * The stored payload as one region sees it: the certificate for that country,
+ * with the full map left behind rather than sent to a client that can only show
+ * one of them.
+ */
+function forRegion(payload, region) {
+  const { certificates = {}, ...rest } = payload || {};
+  return { ...rest, certificate: certificates[region] || null, certificateRegion: region };
 }
 
 async function storeWatchmode(db, mediaType, tmdbId, payload) {
@@ -185,6 +218,7 @@ module.exports = {
   ensureWatchmodeTables,
   getWatchmodeDetails,
   normalizeWatchmode,
+  forRegion,
   resetBreaker,
   isRationed,
 };

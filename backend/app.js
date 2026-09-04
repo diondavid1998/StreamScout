@@ -37,7 +37,7 @@ const {
 } = require('./currentlyWatching');
 const { readExport, filmKey } = require('./letterboxd');
 const { computeAnalytics, parseFilters, invalidateDiary } = require('./analytics');
-const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson } = require('./movieService');
+const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson, isTmdbUnavailable } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -665,7 +665,9 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       // opening, so it is attached only when there is something to attach.
       let watchmode = null;
       try {
-        watchmode = await getWatchmodeDetails(db, mediaType, tmdb_id);
+        watchmode = await getWatchmodeDetails(db, mediaType, tmdb_id, {
+          region: req.query.region || DEFAULT_REGION,
+        });
       } catch (e) {
         console.warn('[watchmode] lookup failed:', e.message);
       }
@@ -1130,7 +1132,17 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         [req.user.id, PAYLOAD_SENTINEL_KEY, ...keys]
       );
 
-      res.json({ resolved: done, failed: keys.length - done, pending: await countPendingFilms(req.user.id) });
+      // Told apart from an ordinary failed batch so the page can say what is
+      // actually wrong. Everything below reads as "those films could not be
+      // found", which points at the titles; when the breaker is open the truth
+      // is that nobody is answering, and that is worth waiting out rather than
+      // pressing again.
+      res.json({
+        resolved: done,
+        failed: keys.length - done,
+        pending: await countPendingFilms(req.user.id),
+        unavailable: isTmdbUnavailable(),
+      });
     } catch (e) {
       console.error('[analytics/resolve] failed:', e.message);
       res.status(500).json({ error: 'Could not resolve titles', details: e.message });
