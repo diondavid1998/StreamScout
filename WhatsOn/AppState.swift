@@ -95,7 +95,13 @@ final class AppState {
 
         token = KeychainStore.read()?.trimmingCharacters(in: .whitespaces) ?? ""
         username = defaults.string(forKey: usernameKey) ?? ""
-        selectedPlatforms = defaults.stringArray(forKey: platformsKey) ?? []
+        // Filtered against the current list rather than restored verbatim: the
+        // catalogue of services has shrunk, and a selection naming one that is
+        // gone would sit in the array invisibly — absent from the settings
+        // screen, still sent on every request. The server ignores keys it does
+        // not know, so this is about the app agreeing with what it shows.
+        selectedPlatforms = (defaults.stringArray(forKey: platformsKey) ?? [])
+            .filter { knownPlatformKeys.contains($0) }
         selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
         watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])
         watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])

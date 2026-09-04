@@ -39,7 +39,7 @@ const DEFAULT_REGION = 'US';
 // Increment this whenever PLATFORM_CONFIG provider IDs change so stale caches are invalidated
 // Bumped when availability semantics change so stale snapshots are dropped:
 // v3 added free and ad-supported tiers alongside flatrate.
-const PROVIDER_CONFIG_VERSION = 3;
+const PROVIDER_CONFIG_VERSION = 4;
 const syncLocks = new Map();
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();

@@ -23,7 +23,7 @@ const {
   withTransaction,
   invalidateWatchlistAvailability,
 } = require('./catalogCache');
-const { getTitleDetails, ensureAnalyticsDetails } = require('./titleCache');
+const { getTitleDetails, ensureAnalyticsDetails, PAYLOAD_SENTINEL_KEY } = require('./titleCache');
 const {
   listCurrentlyWatching,
   addToCurrentlyWatching,
@@ -900,12 +900,14 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
           await runSql(
             db,
             `INSERT INTO letterboxd_entries
-               (user_id, name, year, film_key, rating, watched_on, is_rewatch, tags_json, uri, source)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               (user_id, name, year, film_key, rating, watched_on, is_rewatch, tags_json, uri, source,
+                has_review, is_liked)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               req.user.id, entry.name, entry.year, filmKey(entry.name, entry.year),
               entry.rating, entry.watchedOn, entry.isRewatch,
               JSON.stringify(entry.tags), entry.uri, entry.source,
+              entry.hasReview ? 1 : 0, entry.isLiked ? 1 : 0,
             ]
           );
         }
@@ -994,7 +996,14 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
              AND e.item_id LIKE 'movie-%'
              AND d.tmdb_id = CAST(SUBSTR(e.item_id, 7) AS INTEGER)
       WHERE e.user_id = ?
-        AND d.tmdb_id IS NULL
+        -- Outstanding means "details this page can use", which is not the same
+        -- as "any details at all". A row cached before the crew, keywords and
+        -- reach fields were kept is complete for the detail sheet and blank for
+        -- half the analytics page, and nothing sweeps the cache — so unless the
+        -- queue treats it as work, a library resolved before today would never
+        -- pick those fields up. Matched on the stored text because this runs per
+        -- row in SQL and cannot parse the blob; see PAYLOAD_SENTINEL_KEY.
+        AND (d.tmdb_id IS NULL OR d.payload_json NOT LIKE '%"' || ? || '"%')
         AND (e.item_id IS NULL OR e.item_id LIKE 'movie-%')
         -- Watchlist rows share this table but are not watched history. Counting
         -- them here would make the lookup offer to resolve a queue the page
@@ -1007,7 +1016,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       `SELECT COUNT(*) AS pending FROM (
          SELECT e.film_key ${PENDING_FILM_FILTER} GROUP BY e.film_key
        )`,
-      [userId]
+      [userId, PAYLOAD_SENTINEL_KEY]
     );
     return pending;
   }
@@ -1032,7 +1041,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
            ${PENDING_FILM_FILTER}
           GROUP BY e.film_key
           LIMIT ?`,
-        [req.user.id, limit]
+        [req.user.id, PAYLOAD_SENTINEL_KEY, limit]
       );
       if (!pendingRows.length) {
         return res.json({ resolved: 0, failed: 0, pending: await countPendingFilms(req.user.id) });
@@ -1098,8 +1107,12 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
              ON d.media_type = 'movie'
             AND e.item_id LIKE 'movie-%'
             AND d.tmdb_id = CAST(SUBSTR(e.item_id, 7) AS INTEGER)
-          WHERE e.user_id = ? AND e.film_key IN (${keys.map(() => '?').join(',')})`,
-        [req.user.id, ...keys]
+          WHERE e.user_id = ?
+            -- Same test the queue applies, so "done" and "pending" cannot
+            -- disagree: a stale row that failed to refetch is still work.
+            AND d.payload_json LIKE '%"' || ? || '"%'
+            AND e.film_key IN (${keys.map(() => '?').join(',')})`,
+        [req.user.id, PAYLOAD_SENTINEL_KEY, ...keys]
       );
 
       res.json({ resolved: done, failed: keys.length - done, pending: await countPendingFilms(req.user.id) });

@@ -187,6 +187,10 @@ function readExport(files) {
   const ratings = byKind('ratings');
   const watched = byKind('watched');
   const watchlist = byKind('watchlist');
+  // likes.csv was classified and then never read. A like is not a rating —
+  // it is the separate, unscored "yes" a Letterboxd user gives a film — so it
+  // says something no other column does.
+  const liked = new Set(byKind('likes').map((entry) => filmKey(entry.name, entry.year)));
 
   // Diary rows are viewings and all of them count — two rows for the same film
   // on different dates are two viewings, which is exactly what a rewatch is.
@@ -199,20 +203,21 @@ function readExport(files) {
     // not be counted twice because it was written about.
     if (seenViewing.has(viewing)) continue;
     seenViewing.add(viewing);
-    seen.add(filmKey(entry.name, entry.year));
-    entries.push(entry);
+    const key = filmKey(entry.name, entry.year);
+    seen.add(key);
+    entries.push({ ...entry, isLiked: liked.has(key) ? 1 : 0 });
   }
   for (const entry of ratings) {
     const key = filmKey(entry.name, entry.year);
     if (seen.has(key)) continue;
     seen.add(key);
-    entries.push(entry);
+    entries.push({ ...entry, isLiked: liked.has(key) ? 1 : 0 });
   }
   for (const entry of watched) {
     const key = filmKey(entry.name, entry.year);
     if (seen.has(key)) continue;
     seen.add(key);
-    entries.push(entry);
+    entries.push({ ...entry, isLiked: liked.has(key) ? 1 : 0 });
   }
 
   const watchlistUnique = [];

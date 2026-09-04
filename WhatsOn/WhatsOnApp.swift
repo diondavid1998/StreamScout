@@ -603,23 +603,10 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "amc",         key: "amc",         name: "AMC+",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.800)),
     .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
     .init(id: "roku",        key: "roku",        name: "The Roku Channel",    logoAsset: nil,             accentColor: Color(red: 0.431, green: 0.196, blue: 0.639)),
-    .init(id: "youtube",     key: "youtube",     name: "YouTube Premium",     logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.000, blue: 0.000)),
-    .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.000, blue: 0.000)),
-    .init(id: "britbox",     key: "britbox",     name: "BritBox",             logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.180, blue: 0.400)),
-    .init(id: "hayu",        key: "hayu",        name: "Hayu",                logoAsset: nil,             accentColor: Color(red: 0.851, green: 0.000, blue: 0.502)),
-    .init(id: "shudder",     key: "shudder",     name: "Shudder",             logoAsset: nil,             accentColor: Color(red: 0.400, green: 0.000, blue: 0.000)),
-    .init(id: "acorn",       key: "acorn",       name: "Acorn TV",            logoAsset: nil,             accentColor: Color(red: 0.200, green: 0.400, blue: 0.200)),
-    .init(id: "curiosity",   key: "curiosity",   name: "Curiosity Stream",    logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.478, blue: 0.800)),
-    .init(id: "sling",       key: "sling",       name: "Sling TV",            logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.400)),
-    .init(id: "philo",       key: "philo",       name: "Philo",               logoAsset: nil,             accentColor: Color(red: 0.980, green: 0.310, blue: 0.310)),
-    .init(id: "fubo",        key: "fubo",        name: "fuboTV",              logoAsset: nil,             accentColor: Color(red: 0.910, green: 0.298, blue: 0.153)),
-    .init(id: "viu",         key: "viu",         name: "Viu",                 logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.827, blue: 0.000)),
-    .init(id: "kanopy",      key: "kanopy",      name: "Kanopy",              logoAsset: nil,             accentColor: Color(red: 0.851, green: 0.310, blue: 0.204)),
-    .init(id: "crave",       key: "crave",       name: "Crave",               logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.400, blue: 0.800)),
-    .init(id: "ifc",         key: "ifc",         name: "IFC Films Unlimited", logoAsset: nil,             accentColor: Color(red: 0.400, green: 0.400, blue: 0.400)),
-    .init(id: "criterion",   key: "criterion",   name: "Criterion Channel",   logoAsset: nil,             accentColor: Color(red: 0.086, green: 0.180, blue: 0.325)),
-    .init(id: "hidive",      key: "hidive",      name: "HiDive",              logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.702, blue: 0.898)),
 ]
+
+/// The keys `allPlatforms` covers, for pruning a stored selection.
+let knownPlatformKeys: Set<String> = Set(allPlatforms.map(\.key))
 
 // MARK: - Image Cache
 

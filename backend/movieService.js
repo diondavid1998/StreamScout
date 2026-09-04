@@ -47,40 +47,36 @@ function tripOmdbRateLimit() {
 }
 function isOmdbRateLimited() { return omdbRateLimited; }
 
+/**
+ * The services the app covers.
+ *
+ * Fifteen, deliberately. The list ran to thirty-one, and the tail of it —
+ * regional channels, live-TV bundles, single-genre niches — was a long scroll
+ * of things almost nobody was picking, in front of everybody, every time they
+ * set the app up. Each one also widens the TMDB discover query, so the cost of
+ * carrying them was not only visual.
+ *
+ * Removing a key is safe by construction: `buildProviderSelection` drops any it
+ * does not recognise, so a stored selection naming a retired service still
+ * works, minus that service.
+ */
 const PLATFORM_CONFIG = {
   netflix:    { id: 8,    name: 'Netflix' },
   hulu:       { id: 15,   name: 'Hulu' },
   prime:      { id: 9,    name: 'Prime Video' },
   disney:     { id: 337,  name: 'Disney+' },
   paramount:  { ids: [2303, 2616], name: 'Paramount+' },  // Premium + Essential
-  apple:      { id: 350,  name: 'Apple TV+' },            // was 2 (Apple TV Store = rentals)
+  apple:      { id: 350,  name: 'Apple TV+' },            // not 2 (Apple TV Store = rentals)
   peacock:    { id: 386,  name: 'Peacock' },
-  max:        { id: 1899, name: 'Max' },                  // was 384 (nonexistent)
-  crunchyroll:{ id: 283,  name: 'Crunchyroll' },          // was 105 (nonexistent)
-  starz:      { id: 43,   name: 'Starz' },                // was 318 (Adult Swim)
+  max:        { id: 1899, name: 'Max' },
+  crunchyroll:{ id: 283,  name: 'Crunchyroll' },
+  starz:      { id: 43,   name: 'Starz' },
   showtime:   { id: 37,   name: 'Showtime' },
-  amc:        { id: 526,  name: 'AMC+' },                 // was 174 (nonexistent)
-  tubi:       { id: 73,   name: 'Tubi' },                 // was 219 (nonexistent)
+  amc:        { id: 526,  name: 'AMC+' },
+  tubi:       { id: 73,   name: 'Tubi' },
   pluto:      { id: 300,  name: 'Pluto TV' },
-  roku:       { id: 207,  name: 'The Roku Channel' },     // was 432 (Flix Premiere)
-  youtube:    { id: 188,  name: 'YouTube Premium' },      // was 192 (plain YouTube)
-  mubi:       { id: 11,   name: 'MUBI' },
-  britbox:    { id: 151,  name: 'BritBox' },              // was 370 (nonexistent)
-  hayu:       { id: 223,  name: 'Hayu' },
-  shudder:    { id: 99,   name: 'Shudder' },              // was 67 (nonexistent)
-  acorn:      { id: 87,   name: 'Acorn TV' },             // was 1 (nonexistent)
-  curiosity:  { id: 190,  name: 'Curiosity Stream' },     // was 179 (nonexistent)
-  sling:      { id: 299,  name: 'Sling TV' },             // was 405 (nonexistent)
-  philo:      { id: 2383, name: 'Philo' },                // was 342 (nonexistent)
-  fubo:       { id: 257,  name: 'fuboTV' },               // was 283 (= Crunchyroll!)
-  viu:        { id: 270,  name: 'Viu' },
-  kanopy:     { id: 191,  name: 'Kanopy' },               // was 221 (nonexistent)
-  crave:      { id: 230,  name: 'Crave' },
-  ifc:        { id: 338,  name: 'IFC Films Unlimited' },
-  criterion:  { id: 258,  name: 'Criterion Channel' },    // was 31 (nonexistent)
-  hidive:     { id: 430,  name: 'HiDive' },
+  roku:       { id: 207,  name: 'The Roku Channel' },
 };
-
 const tmdbCache = new Map();
 const omdbCache = new Map();
 
@@ -347,7 +343,12 @@ async function fetchTitleWithCredits(mediaType, tmdbId) {
     // carries the IMDb id, which is how a title reaches the shared ratings
     // table — without it the analytics page cannot compare a rating to the
     // crowd's.
-    append_to_response: 'credits,external_ids',
+    // All four ride along on the one request and cost nothing extra. `credits`
+    // carries the whole crew, not just the director; `external_ids` the IMDb id
+    // that reaches the shared ratings table; `keywords` what a film is about
+    // where genres only say what shelf it sits on; `release_dates` the US
+    // certificate.
+    append_to_response: 'credits,external_ids,keywords,release_dates',
     language: 'en-US',
   });
 }
