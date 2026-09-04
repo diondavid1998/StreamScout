@@ -154,20 +154,40 @@ final class AppState {
         isImportingDiary = true
         report(progress: "Importing \(files.count) file\(files.count == 1 ? "" : "s")…")
 
+        // Asked here, not at launch: this is the first moment the permission is
+        // about to be worth something, so the prompt explains itself. The import
+        // does not wait on the answer — a refusal only costs the system
+        // notification, and the in-app banner still reports either way.
+        Task { await LocalNotifier.requestPermissionIfNeeded() }
+
         importTask = Task { [weak self] in
             guard let self else { return }
             defer { self.isImportingDiary = false }
-            do {
-                let payload = files.map { ["name": $0.name, "text": $0.text] }
-                let response: DiaryImportResponse = try await APIService.shared.post(
-                    "/letterboxd/diary", body: ["files": payload], token: self.token, timeout: 120
-                )
-                let films = response.films ?? 0
-                let viewings = response.viewings ?? 0
-                self.diaryImportGeneration &+= 1
-                self.report(success: "Imported \(films) films across \(viewings) viewings.")
-            } catch {
-                self.report(error: error, whileTrying: "Importing your diary")
+
+            // The extra runtime is what makes the notification possible at all.
+            // Backgrounded without it, the app is suspended within seconds and
+            // the upload simply stops — so there would be nothing to announce.
+            await withBackgroundTime(named: "letterboxd-import") {
+                do {
+                    let payload = files.map { ["name": $0.name, "text": $0.text] }
+                    let response: DiaryImportResponse = try await APIService.shared.post(
+                        "/letterboxd/diary", body: ["files": payload], token: self.token, timeout: 120
+                    )
+                    let films = response.films ?? 0
+                    let viewings = response.viewings ?? 0
+                    self.diaryImportGeneration &+= 1
+                    self.report(success: "Imported \(films) films across \(viewings) viewings.")
+                    await LocalNotifier.postIfBackgrounded(
+                        title: "Import finished",
+                        body: "\(films) films across \(viewings) viewings are ready."
+                    )
+                } catch {
+                    self.report(error: error, whileTrying: "Importing your diary")
+                    await LocalNotifier.postIfBackgrounded(
+                        title: "Import failed",
+                        body: "Your Letterboxd import could not be saved. Open the app to try again."
+                    )
+                }
             }
         }
     }
