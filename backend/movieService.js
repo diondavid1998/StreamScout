@@ -75,7 +75,7 @@ const PLATFORM_CONFIG = {
   amc:        { id: 526,  name: 'AMC+' },
   tubi:       { id: 73,   name: 'Tubi' },
   pluto:      { id: 300,  name: 'Pluto TV' },
-  roku:       { id: 207,  name: 'The Roku Channel' },
+  mubi:       { id: 11,   name: 'MUBI' },
 };
 const tmdbCache = new Map();
 const omdbCache = new Map();

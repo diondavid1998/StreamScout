@@ -602,7 +602,7 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "showtime",    key: "showtime",    name: "Showtime",            logoAsset: nil,             accentColor: Color(red: 0.800, green: 0.000, blue: 0.000)),
     .init(id: "amc",         key: "amc",         name: "AMC+",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.800)),
     .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
-    .init(id: "roku",        key: "roku",        name: "The Roku Channel",    logoAsset: nil,             accentColor: Color(red: 0.431, green: 0.196, blue: 0.639)),
+    .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.055, green: 0.063, blue: 0.129)),
 ]
 
 /// The keys `allPlatforms` covers, for pruning a stored selection.
