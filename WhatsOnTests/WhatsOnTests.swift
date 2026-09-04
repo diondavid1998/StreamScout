@@ -170,4 +170,64 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(cleared.scheduleMessage, item.scheduleMessage)
         XCTAssertEqual(cleared.state, item.state)
     }
+
+    // MARK: - Offline snapshots
+
+    /// The signature is what decides whether stored bytes may be shown at all,
+    /// so it has to describe the view exactly and reproduce itself for the same
+    /// view every time.
+    func testTheSnapshotSignatureIgnoresTheOrderFiltersWereAddedIn() {
+        let a = AnalyticsSnapshot.signature(
+            dimension: "cast", filters: ["language": "en", "genre": "Drama"]
+        )
+        let b = AnalyticsSnapshot.signature(
+            dimension: "cast", filters: ["genre": "Drama", "language": "en"]
+        )
+        XCTAssertEqual(a, b, "the same view signed differently depending on tap order")
+    }
+
+    func testDifferentViewsNeverShareASignature() {
+        let overview = AnalyticsSnapshot.signature(dimension: "overview", filters: [:])
+        let cast = AnalyticsSnapshot.signature(dimension: "cast", filters: [:])
+        let castFiltered = AnalyticsSnapshot.signature(dimension: "cast", filters: ["language": "en"])
+        let castOther = AnalyticsSnapshot.signature(dimension: "cast", filters: ["language": "ja"])
+        XCTAssertEqual(Set([overview, cast, castFiltered, castOther]).count, 4)
+    }
+
+    func testStoredBytesComeBackOnlyForTheViewTheyWereCapturedUnder() {
+        let store = JSONSnapshot(name: "tests-\(UUID().uuidString)")
+        defer { store.clear() }
+
+        let payload = Data(#"{"films":412}"#.utf8)
+        store.save(payload, signature: "cast&language=en")
+
+        XCTAssertEqual(store.load(signature: "cast&language=en"), payload)
+        // A different lens must not be handed the last one's numbers.
+        XCTAssertNil(store.load(signature: "cast&language=ja"))
+        XCTAssertNil(store.load(signature: "overview"))
+    }
+
+    func testClearingASnapshotLeavesNothingToRestore() {
+        let store = JSONSnapshot(name: "tests-\(UUID().uuidString)")
+        store.save(Data("{}".utf8), signature: "overview")
+        XCTAssertNotNil(store.load(signature: "overview"))
+
+        store.clear()
+        XCTAssertNil(store.load(signature: "overview"), "cleared bytes were still readable")
+    }
+
+    /// Logging out has to take the analytics snapshot with it. It is a record of
+    /// what someone has watched, and the next person to sign in on this device
+    /// must not be seeded from it.
+    func testLoggingOutDiscardsTheAnalyticsSnapshot() {
+        AnalyticsSnapshot.save(Data(#"{"films":412}"#.utf8), signature: "overview")
+        XCTAssertNotNil(AnalyticsSnapshot.load(signature: "overview"))
+
+        AppState(userDefaults: defaults).logout()
+
+        XCTAssertNil(
+            AnalyticsSnapshot.load(signature: "overview"),
+            "one account's history was left on disk for the next"
+        )
+    }
 }

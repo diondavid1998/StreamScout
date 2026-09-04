@@ -8,7 +8,19 @@
 
 /* Begin PBXBuildFile section */
 		8A852EFE2F85DB4A0063D17E /* WhatsOnApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */; };
-		8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F042F85DB4A0063D17E /* ContentView.swift */; };
+		C1A500000000000000000E00 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D00 /* AppState.swift */; };
+		C1A500000000000000000E01 /* ContentViewRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D01 /* ContentViewRoot.swift */; };
+		C1A500000000000000000E02 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D02 /* AuthView.swift */; };
+		C1A500000000000000000E03 /* PlatformsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D03 /* PlatformsView.swift */; };
+		C1A500000000000000000E04 /* CatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D04 /* CatalogView.swift */; };
+		C1A500000000000000000E05 /* MovieCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D05 /* MovieCardView.swift */; };
+		C1A500000000000000000E06 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D06 /* Components.swift */; };
+		C1A500000000000000000E07 /* PickerSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D07 /* PickerSheets.swift */; };
+		C1A500000000000000000E08 /* FormControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D08 /* FormControls.swift */; };
+		C1A500000000000000000E09 /* YearFilterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D09 /* YearFilterSheet.swift */; };
+		C1A500000000000000000E0A /* DetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D0A /* DetailSheet.swift */; };
+		C1A500000000000000000E0B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D0B /* SettingsView.swift */; };
+		C1A500000000000000000E0C /* ViewHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D0C /* ViewHelpers.swift */; };
 		8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F612F85DB4A0063D17E /* APIModels.swift */; };
 		8A852F9B2F85DB4A0063D17E /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852F9A2F85DB4A0063D17E /* AnalyticsView.swift */; };
 		8A852F072F85DB4C0063D17E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A852F062F85DB4C0063D17E /* Assets.xcassets */; };
@@ -39,7 +51,19 @@
 /* Begin PBXFileReference section */
 		8A852EFA2F85DB4A0063D17E /* WhatsOn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhatsOn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsOnApp.swift; sourceTree = "<group>"; };
-		8A852F042F85DB4A0063D17E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D00 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D01 /* ContentViewRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewRoot.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D02 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D03 /* PlatformsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformsView.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D04 /* CatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogView.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D05 /* MovieCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieCardView.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D06 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D07 /* PickerSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerSheets.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D08 /* FormControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormControls.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D09 /* YearFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YearFilterSheet.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D0A /* DetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailSheet.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D0B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		C1A500000000000000000D0C /* ViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewHelpers.swift; sourceTree = "<group>"; };
 		8A852F9A2F85DB4A0063D17E /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		8A852F062F85DB4C0063D17E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8A852F082F85DB4C0063D17E /* WhatsOn.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WhatsOn.entitlements; sourceTree = "<group>"; };
@@ -102,7 +126,19 @@
 			isa = PBXGroup;
 			children = (
 				8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */,
-				8A852F042F85DB4A0063D17E /* ContentView.swift */,
+				C1A500000000000000000D00 /* AppState.swift */,
+				C1A500000000000000000D01 /* ContentViewRoot.swift */,
+				C1A500000000000000000D02 /* AuthView.swift */,
+				C1A500000000000000000D03 /* PlatformsView.swift */,
+				C1A500000000000000000D04 /* CatalogView.swift */,
+				C1A500000000000000000D05 /* MovieCardView.swift */,
+				C1A500000000000000000D06 /* Components.swift */,
+				C1A500000000000000000D07 /* PickerSheets.swift */,
+				C1A500000000000000000D08 /* FormControls.swift */,
+				C1A500000000000000000D09 /* YearFilterSheet.swift */,
+				C1A500000000000000000D0A /* DetailSheet.swift */,
+				C1A500000000000000000D0B /* SettingsView.swift */,
+				C1A500000000000000000D0C /* ViewHelpers.swift */,
 				8A852F612F85DB4A0063D17E /* APIModels.swift */,
 				8A852F9A2F85DB4A0063D17E /* AnalyticsView.swift */,
 				8A852F062F85DB4C0063D17E /* Assets.xcassets */,
@@ -270,7 +306,19 @@
 			buildActionMask = 2147483647;
 			files = (
 				8A852EFE2F85DB4A0063D17E /* WhatsOnApp.swift in Sources */,
-				8A852F052F85DB4A0063D17E /* ContentView.swift in Sources */,
+				C1A500000000000000000E00 /* AppState.swift in Sources */,
+				C1A500000000000000000E01 /* ContentViewRoot.swift in Sources */,
+				C1A500000000000000000E02 /* AuthView.swift in Sources */,
+				C1A500000000000000000E03 /* PlatformsView.swift in Sources */,
+				C1A500000000000000000E04 /* CatalogView.swift in Sources */,
+				C1A500000000000000000E05 /* MovieCardView.swift in Sources */,
+				C1A500000000000000000E06 /* Components.swift in Sources */,
+				C1A500000000000000000E07 /* PickerSheets.swift in Sources */,
+				C1A500000000000000000E08 /* FormControls.swift in Sources */,
+				C1A500000000000000000E09 /* YearFilterSheet.swift in Sources */,
+				C1A500000000000000000E0A /* DetailSheet.swift in Sources */,
+				C1A500000000000000000E0B /* SettingsView.swift in Sources */,
+				C1A500000000000000000E0C /* ViewHelpers.swift in Sources */,
 				8A852F062F85DB4A0063D17E /* APIModels.swift in Sources */,
 				8A852F9B2F85DB4A0063D17E /* AnalyticsView.swift in Sources */,
 			);
