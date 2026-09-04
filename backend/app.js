@@ -24,6 +24,7 @@ const {
   invalidateWatchlistAvailability,
 } = require('./catalogCache');
 const { getTitleDetails, ensureAnalyticsDetails, PAYLOAD_SENTINEL_KEY } = require('./titleCache');
+const { ensureWatchmodeTables, getWatchmodeDetails } = require('./watchmode');
 const {
   listCurrentlyWatching,
   addToCurrentlyWatching,
@@ -655,7 +656,21 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       // Served from title_details_cache whenever it has been fetched before —
       // which, after the first open, is always. TMDB is only asked again when
       // the refresh button explicitly asks it to be.
-      res.json(await getTitleDetails(db, mediaType, tmdb_id));
+      const details = await getTitleDetails(db, mediaType, tmdb_id);
+
+      // Watchmode rides along on the one screen where a per-title call is
+      // affordable. Its quota is a lifetime figure, so it is asked only about
+      // titles someone has actually opened, and never in a loop over a library.
+      // A null answer — no entry, no key, quota spent — must not stop the sheet
+      // opening, so it is attached only when there is something to attach.
+      let watchmode = null;
+      try {
+        watchmode = await getWatchmodeDetails(db, mediaType, tmdb_id);
+      } catch (e) {
+        console.warn('[watchmode] lookup failed:', e.message);
+      }
+
+      res.json(watchmode ? { ...details, watchmode } : details);
     } catch (e) {
       res.status(500).json({ error: 'Failed to fetch title details', details: e.message });
     }

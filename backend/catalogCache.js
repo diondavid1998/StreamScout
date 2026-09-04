@@ -9,6 +9,7 @@ const {
 const { ensureTitleCacheTables } = require('./titleCache');
 const { ensureCurrentlyWatchingTables } = require('./currentlyWatching');
 const { ensureAnalyticsTables } = require('./analytics');
+const { ensureWatchmodeTables } = require('./watchmode');
 
 // Nothing in this app refreshes on a clock.
 //
@@ -359,6 +360,7 @@ async function ensureCatalogTables(db) {
   await ensureTitleCacheTables(db);
   await ensureCurrentlyWatchingTables(db);
   await ensureAnalyticsTables(db);
+  await ensureWatchmodeTables(db);
 
   // Invalidate catalog cache if provider IDs have changed since last deploy
   const versionRow = await get(db, `SELECT value FROM app_settings WHERE key = 'provider_config_version'`);

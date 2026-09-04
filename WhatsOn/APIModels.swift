@@ -185,6 +185,31 @@ struct CastMember: Decodable, Identifiable {
     let profileUrl: String?
 }
 
+/// Watchmode's addition to the title sheet: the pros-and-cons line, who the
+/// film is for, and what it costs to rent. Optional throughout — the sheet must
+/// open whether or not Watchmode has anything, and its quota is small enough
+/// that "nothing" is a normal answer.
+struct WatchmodeExtras: Decodable {
+    let pros: String?
+    let cons: String?
+    let verdict: String?
+    let rent: WatchmodePrice?
+    let buy: WatchmodePrice?
+    let streamingOn: [String]?
+
+    /// Whether there is anything worth drawing a section for.
+    var hasContent: Bool {
+        pros != nil || cons != nil || verdict != nil || rent != nil || buy != nil
+    }
+}
+
+struct WatchmodePrice: Decodable {
+    let price: Double
+    let service: String
+
+    var label: String { String(format: "$%.2f", price) }
+}
+
 struct TitleDetails: Decodable {
     let tmdbId: Int?
     let title: String?
@@ -198,6 +223,7 @@ struct TitleDetails: Decodable {
     let genres: [String]?
     let directors: [String]?
     let cast: [CastMember]?
+    let watchmode: WatchmodeExtras?
 }
 
 // MARK: - Watched List
