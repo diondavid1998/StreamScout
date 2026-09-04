@@ -306,6 +306,10 @@ struct AnalyticsView: View {
     @State private var dimension = "overview"
     @State private var filters: [String: String] = [:]
 
+    /// The genre named on the taste map beyond its four corners, if the reader
+    /// has tapped one. Cleared whenever the page reloads under a new lens.
+    @State private var selectedGenre: String?
+
     @State private var showFilterSheet = false
     @State private var showImporter = false
     @State private var importStatus: String?
@@ -526,7 +530,7 @@ struct AnalyticsView: View {
             switch a.dimension {
             case "overview":
                 summaryTiles(a)
-                if let mosaic = a.mosaic, !mosaic.isEmpty { posterMosaic(mosaic) }
+                if let profile = a.profile { profileSections(profile) }
                 if let rating = a.rating { ratingChart(rating) }
                 if let quadrant = a.quadrant { quadrantChart(quadrant) }
                 if let watchlist = a.watchlist { watchlistCard(watchlist) }
@@ -592,6 +596,112 @@ struct AnalyticsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(13)
         .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: Profile
+
+    /// What the film database says about a history, in the slot the poster wall
+    /// used to hold.
+    ///
+    /// Each block is a distribution rather than a list of favourites, and each
+    /// is built from a field TMDB was already returning and the cache used to
+    /// discard. Horizontal bars throughout: the labels are words of varying
+    /// length ("Everyone has seen it", "Under $1M"), and words read along a bar
+    /// where they would have to be rotated under a column.
+    @ViewBuilder
+    private func profileSections(_ profile: AnalyticsProfile) -> some View {
+        if let reach = profile.reach {
+            distributionCard(
+                "How far off the beaten path",
+                note: "\(reach.covered) films",
+                buckets: reach.buckets,
+                caption: "By how many people have scored each film on TMDB — reach, not quality. The top row is the films everyone has seen."
+            )
+        }
+        if let scale = profile.scale {
+            distributionCard(
+                "What they cost to make",
+                note: "\(scale.covered) films",
+                buckets: scale.buckets,
+                caption: "Budget separates a festival film from a franchise one more cleanly than genre does. Films with no budget on record are left out."
+            )
+        }
+        if let certifications = profile.certifications, !certifications.isEmpty {
+            distributionCard(
+                "Certificates",
+                note: nil,
+                buckets: certifications,
+                caption: nil
+            )
+        }
+        if profile.franchise != nil || profile.engagement != nil {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 148), spacing: 10)], spacing: 10) {
+                if let franchise = profile.franchise, franchise.resolved > 0 {
+                    tile("Franchise films", "\(Int(franchise.share))%",
+                         detail: "\(franchise.films) of \(franchise.resolved)")
+                }
+                if let engagement = profile.engagement {
+                    if engagement.liked > 0 {
+                        tile("Liked", "\(engagement.liked)",
+                             detail: engagement.likedUnrated > 0
+                                ? "\(engagement.likedUnrated) without a score" : nil)
+                    }
+                    if engagement.reviewed > 0 {
+                        tile("Written about", "\(engagement.reviewed)", detail: "of \(engagement.films) films")
+                    }
+                }
+            }
+        }
+    }
+
+    /// One distribution as horizontal bars, each labelled with its count and,
+    /// where the films in it were scored, the mean they were given.
+    private func distributionCard(
+        _ title: String,
+        note: String?,
+        buckets: [ProfileBucket],
+        caption captionText: String?
+    ) -> some View {
+        // Shares of the largest bucket rather than of the total: with four or
+        // five buckets a share of the total leaves every bar short, and the
+        // comparison a reader makes here is between the bars.
+        let largest = max(buckets.map(\.films).max() ?? 1, 1)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            sectionHeader(title, note: note)
+            VStack(spacing: 0) {
+                ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(bucket.label)
+                                .font(.subheadline).foregroundColor(.mkText)
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                            Spacer(minLength: 8)
+                            if let mean = bucket.meanRating {
+                                Text(String(format: "%.2f★", mean))
+                                    .font(.caption).foregroundColor(.mkMuted).monospacedDigit()
+                            }
+                            Text("\(bucket.films)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.mkText).monospacedDigit()
+                        }
+                        GeometryReader { geo in
+                            Capsule()
+                                .fill(Color.mkAccent.opacity(0.85))
+                                .frame(width: max(geo.size.width * (Double(bucket.films) / Double(largest)), 3))
+                        }
+                        .frame(height: 6)
+                    }
+                    .padding(.vertical, 9).padding(.horizontal, 13)
+                    if index < buckets.count - 1 {
+                        Divider().overlay(Color.mkBorder)
+                    }
+                }
+            }
+            .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            if let captionText { caption(captionText) }
+        }
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: Ratings
@@ -833,49 +943,59 @@ struct AnalyticsView: View {
 
     /// The best-rated films, as artwork. Analytics was the only screen in a film
     /// app with no film on it.
-    private func posterMosaic(_ films: [MosaicFilm]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Your highest rated", note: "\(films.count) films")
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
-                spacing: 6
-            ) {
-                ForEach(films) { film in
-                    posterTile(film)
-                }
-            }
-        }
-    }
-
-    private func posterTile(_ film: MosaicFilm) -> some View {
-        Group {
-            if let urlString = film.posterUrl, let url = URL(string: urlString) {
-                CachedAsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    default: Color.mkSurface
-                    }
-                }
-            } else {
-                Color.mkSurface
-            }
-        }
-        .aspectRatio(2.0 / 3.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(Color.mkHairline, lineWidth: 1)
-        )
-        .accessibilityLabel("\(film.name), rated \(stars(film.rating))")
-    }
-
     // MARK: The taste quadrant
 
     /// Genres on two axes: how often against how highly. The crosshair sits at
     /// the medians of this history, so the corners describe the reader relative
     /// to themselves rather than to an absolute scale.
+    /// The four points a reader should actually read, one per corner.
+    ///
+    /// Labelling every point was the whole problem: ten genre names, drawn at a
+    /// fixed offset above ten dots inside a chart a couple of hundred points
+    /// tall, land on top of each other and on the dots, and the result reads as
+    /// noise rather than as a map. The corners are where the meaning is — the
+    /// caption below the chart is written about them — so the extreme of each
+    /// quadrant is named and the rest are reachable by tapping.
+    ///
+    /// Distance is measured on each axis separately as a share of that axis's
+    /// own spread, because films and ratings are not comparable units: a genre
+    /// twenty films out and a genre a star and a half out are both a long way
+    /// from the middle, and raw arithmetic would let the film count win every
+    /// time.
+    private func cornerLabels(_ q: AnalyticsQuadrant) -> Set<String> {
+        let films = q.points.map { Double($0.films) }
+        let ratings = q.points.map(\.meanRating)
+        let filmSpread = max((films.max() ?? 0) - (films.min() ?? 0), 0.0001)
+        let ratingSpread = max((ratings.max() ?? 0) - (ratings.min() ?? 0), 0.0001)
+
+        var picked: Set<String> = []
+        // (moreFilmsThanTypical, ratedAboveTypical) — the four corners.
+        for wantRight in [true, false] {
+            for wantTop in [true, false] {
+                let corner = q.points.filter {
+                    (Double($0.films) >= q.filmsMedian) == wantRight
+                        && ($0.meanRating >= q.ratingMedian) == wantTop
+                }
+                let furthest = corner.max { a, b in
+                    let da = abs(Double(a.films) - q.filmsMedian) / filmSpread
+                        + abs(a.meanRating - q.ratingMedian) / ratingSpread
+                    let db = abs(Double(b.films) - q.filmsMedian) / filmSpread
+                        + abs(b.meanRating - q.ratingMedian) / ratingSpread
+                    return da < db
+                }
+                if let furthest { picked.insert(furthest.name) }
+            }
+        }
+        return picked
+    }
+
     private func quadrantChart(_ q: AnalyticsQuadrant) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let corners = cornerLabels(q)
+        // A tapped genre is named whether or not it is a corner, and the corners
+        // stay named so the chart still reads before anyone touches it.
+        let labelled = selectedGenre.map { corners.union([$0]) } ?? corners
+
+        return VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Taste map", note: "watched against rated")
             Chart {
                 RuleMark(x: .value("Median films", q.filmsMedian))
@@ -890,13 +1010,20 @@ struct AnalyticsView: View {
                         y: .value("Mean rating", point.meanRating)
                     )
                     .foregroundStyle(
-                        point.meanRating >= q.ratingMedian ? Color.mkAccent : Color.mkText.opacity(0.4)
+                        point.name == selectedGenre
+                            ? Color.mkAccent
+                            : (point.meanRating >= q.ratingMedian
+                               ? Color.mkAccent.opacity(0.75)
+                               : Color.mkText.opacity(0.35))
                     )
-                    .symbolSize(120)
-                    .annotation(position: .top, spacing: 2) {
-                        Text(point.name)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundColor(.mkMuted)
+                    .symbolSize(point.name == selectedGenre ? 220 : 110)
+                    .annotation(position: .top, spacing: 3) {
+                        if labelled.contains(point.name) {
+                            Text(point.name)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(point.name == selectedGenre ? .mkAccent : .mkMuted)
+                                .fixedSize()
+                        }
                     }
                 }
             }
@@ -908,8 +1035,47 @@ struct AnalyticsView: View {
                 AxisGridLine().foregroundStyle(Color.mkHairline)
                 AxisValueLabel()
             } }
-            .frame(height: 210)
-            caption("Right of the line is what you watch most; above it is what you rate best. The top-left corner is what you love but rarely reach for.")
+            // Taller than it was. The labels need somewhere to sit that is not
+            // on top of another point.
+            .frame(height: 260)
+            .padding(.top, 6)
+
+            // Every genre on the map, including the ones the chart leaves
+            // unnamed. Tapping one names and highlights it, which is how the
+            // detail survives having been taken off the plot.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(q.points) { point in
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                selectedGenre = selectedGenre == point.name ? nil : point.name
+                            }
+                        } label: {
+                            Text(point.name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(point.name == selectedGenre ? .mkOnAccent : .mkMuted)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(
+                                    point.name == selectedGenre ? Color.mkAccent : Color.mkSurface,
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            "\(point.name), \(point.films) films, average \(String(format: "%.1f", point.meanRating)) stars"
+                        )
+                    }
+                }
+                .padding(.horizontal, 1)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+
+            if let name = selectedGenre, let point = q.points.first(where: { $0.name == name }) {
+                Text("\(point.name) — \(point.films) films, averaging \(String(format: "%.2f", point.meanRating))★")
+                    .font(.footnote).foregroundColor(.mkText)
+            } else {
+                caption("Right of the line is what you watch most; above it is what you rate best. The top-left corner is what you love but rarely reach for.")
+            }
         }
     }
 
@@ -1207,6 +1373,9 @@ struct AnalyticsView: View {
         switch result {
         case .success(let response):
             analytics = response
+            // The old selection named a genre from the previous slice, which
+            // this one may not even contain.
+            selectedGenre = nil
             loadError = nil
         case .failure(let error):
             if let api = error as? APIError {
@@ -1334,6 +1503,13 @@ private struct FilterSheet: View {
         ("director", "Director"),
         ("actor", "Actor"),
         ("tag", "Tag"),
+        ("country", "Country"),
+        ("writer", "Writer"),
+        ("cinematographer", "Cinematographer"),
+        ("composer", "Composer"),
+        ("studio", "Studio"),
+        ("keyword", "Theme"),
+        ("certification", "Certificate"),
     ]
 
     var body: some View {
@@ -1353,6 +1529,25 @@ private struct FilterSheet: View {
                     }
                 } header: {
                     Text("Your rating")
+                }
+
+                // Both come out of the export and neither is a score: a like is
+                // the unscored yes, and a review is the films you had something
+                // to say about. They sit apart from the star rating for that
+                // reason.
+                Section {
+                    Picker("Liked", selection: likedBinding) {
+                        Text("All films").tag("")
+                        Text("Liked only").tag("yes")
+                        Text("Not liked").tag("no")
+                    }
+                    Picker("Reviewed", selection: reviewedBinding) {
+                        Text("All films").tag("")
+                        Text("Reviewed only").tag("yes")
+                        Text("Not reviewed").tag("no")
+                    }
+                } header: {
+                    Text("From your export")
                 }
 
                 ForEach(Self.facets, id: \.key) { facet in
@@ -1411,6 +1606,8 @@ private struct FilterSheet: View {
 
     private var ratedBinding: Binding<String> { binding(for: "rated") }
     private var minBinding: Binding<String> { binding(for: "ratingMin") }
+    private var likedBinding: Binding<String> { binding(for: "liked") }
+    private var reviewedBinding: Binding<String> { binding(for: "reviewed") }
 }
 
 /// One facet's options, searchable because a director list runs to sixty names.

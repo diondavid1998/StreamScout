@@ -27,6 +27,9 @@ const MIN_FILMS_FOR_AFFINITY = 3;
 const TOP_N = 12;
 // Posters shown in the mosaic — a full screen of artwork without paging.
 const MOSAIC_SIZE = 24;
+// Genres plotted on the taste map. Beyond about this many the points crowd each
+// other on a phone no matter how they are labelled.
+const QUADRANT_POINTS = 10;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -792,7 +795,14 @@ function buildQuadrant(rows) {
   const resolved = rows.filter((r) => r.resolved);
   const points = rankBy(groupBy(resolved, (r) => r.genres))
     .filter((entry) => entry.meanRating !== null && entry.films >= MIN_FILMS_FOR_AFFINITY)
-    .map((entry) => ({ name: entry.name, films: entry.films, meanRating: entry.meanRating }));
+    .map((entry) => ({ name: entry.name, films: entry.films, meanRating: entry.meanRating }))
+    // Capped. TMDB carries nineteen film genres and a broad history qualifies
+    // under most of them, which put nineteen points and nineteen labels into a
+    // chart a couple of hundred points tall — unreadable, and the tail of it
+    // was the genres the reader has seen three films of. `rankBy` has already
+    // sorted by how much of the history each accounts for, so this keeps the
+    // ones the map is actually about.
+    .slice(0, QUADRANT_POINTS);
   if (points.length < 3) return null;
 
   return {
