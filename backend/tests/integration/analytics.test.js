@@ -816,3 +816,120 @@ test('a numeric filter reads as a chip, not a raw value', async () => {
   ]);
   expect(res.body.scope.films).toBe(1);
 });
+
+/**
+ * The parsed diary is cached between requests, because reading and parsing it
+ * is almost the whole cost of the page. That makes invalidation the only thing
+ * standing between a fast page and a wrong one, so each way the underlying rows
+ * can change gets a test that would fail if the cache were left in place.
+ */
+describe('the cached diary never outlives the rows behind it', () => {
+  const FIRST = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Alpha,1995,https://boxd.it/a,5',
+    '2026-01-01,Beta,2005,https://boxd.it/b,4',
+  ].join('\n');
+  const SECOND = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Gamma,2015,https://boxd.it/c,1',
+  ].join('\n');
+
+  test('a re-import is reflected immediately, not on the next restart', async () => {
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: FIRST }] });
+    const before = await auth(request(app).get('/analytics'));
+    expect(before.body.summary.films).toBe(2);
+    expect(before.body.summary.meanRating).toBe(4.5);
+
+    // Same user, different history. Reading the page again must re-read it.
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: SECOND }] });
+    const after = await auth(request(app).get('/analytics'));
+    expect(after.body.summary.films).toBe(1);
+    expect(after.body.summary.meanRating).toBe(1);
+  });
+
+  test('resolving titles moves coverage on the very next read', async () => {
+    let next = 900;
+    const byId = {};
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      const id = ++next;
+      byId[id] = name;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: byId[id], runtime: 100, vote_average: 7, original_language: 'en',
+      production_countries: [{ name: 'France' }], poster_path: `/p${id}.jpg`,
+      genres: [{ name: 'Drama' }], external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: [{ id: 1, name: 'Someone' }], crew: [{ job: 'Director', name: 'Someone Else' }] },
+    }));
+
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: FIRST }] });
+    // Read the page first, so there is a cached diary to go stale.
+    const before = await auth(request(app).get('/analytics'));
+    expect(before.body.coverage.resolved).toBe(0);
+
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+
+    const after = await auth(request(app).get('/analytics?dimension=genres'));
+    expect(after.body.coverage.resolved).toBe(2);
+    expect(after.body.breakdown.entries.map((e) => e.name)).toEqual(['Drama']);
+  });
+
+  test('one user is never served another user cached history', async () => {
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: FIRST }] });
+    expect((await auth(request(app).get('/analytics'))).body.summary.films).toBe(2);
+
+    const other = await request(app).post('/register').send({ username: 'someone-else', password: 'secret1' });
+    const asOther = (req) => req.set('Authorization', `Bearer ${other.body.token}`);
+    await asOther(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: SECOND }] });
+
+    expect((await asOther(request(app).get('/analytics'))).body.summary.films).toBe(1);
+    // And the first user's answer is still their own.
+    expect((await auth(request(app).get('/analytics'))).body.summary.films).toBe(2);
+  });
+
+  test('repeated reads of one history agree with each other', async () => {
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: FIRST }] });
+    const a = await auth(request(app).get('/analytics'));
+    const b = await auth(request(app).get('/analytics'));
+    const c = await auth(request(app).get('/analytics?dimension=decades'));
+    expect(b.body.summary).toEqual(a.body.summary);
+    // A different lens over the same cached rows must still see the same history.
+    expect(c.body.summary).toEqual(a.body.summary);
+  });
+});
+
+/**
+ * The diary joins to the film cache on the numeric half of `item_id`. That is
+ * an index seek rather than the scan a concatenated key forced, but it means a
+ * `tv-` row now has a substring that can parse as a film id: 'tv-1234567' drops
+ * its first six characters and yields 4567, which is a perfectly ordinary film.
+ * Nothing but the LIKE guard stops a series adopting that film's genres and
+ * cast, so it gets a test of its own.
+ */
+test('a series row does not inherit the film its digits collide with', async () => {
+  const RATINGS = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Some Series,2015,https://boxd.it/s,4',
+  ].join('\n');
+  await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: RATINGS }] });
+
+  // 'tv-1234567' minus its prefix is 4567 — this film.
+  await new Promise((resolve, reject) => db.run(
+    `INSERT INTO title_details_cache (media_type, tmdb_id, payload_json, fetched_at, original_language)
+     VALUES ('movie', 4567, ?, CURRENT_TIMESTAMP, 'en')`,
+    [JSON.stringify({ genres: [{ name: 'Western' }], directors: ['Nobody'], cast: [] })],
+    (e) => (e ? reject(e) : resolve())
+  ));
+  // The diary row resolved to a series, whose details the film cache never holds.
+  await new Promise((resolve, reject) => db.run(
+    "UPDATE letterboxd_entries SET item_id = 'tv-1234567' WHERE user_id = 1",
+    (e) => (e ? reject(e) : resolve())
+  ));
+
+  const res = await auth(request(app).get('/analytics?dimension=genres'));
+  expect(res.body.coverage.resolved).toBe(0);
+  // Reported as something the lookup has finished with, not as a Western.
+  expect(res.body.coverage.unmatched).toBe(1);
+  expect(res.body.coverage.pending).toBe(0);
+  expect(res.body.breakdown.entries).toEqual([]);
+});
