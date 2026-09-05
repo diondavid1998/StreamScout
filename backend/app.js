@@ -26,6 +26,9 @@ const {
 const { getTitleDetails, ensureAnalyticsDetails, PAYLOAD_SENTINEL_KEY } = require('./titleCache');
 const { ensureWatchmodeTables, getWatchmodeDetails } = require('./watchmode');
 const {
+  ensureDiscoveryTables, buildDiscoveryQueue, recordSwipe, forgetSwipe,
+} = require('./discovery');
+const {
   listCurrentlyWatching,
   addToCurrentlyWatching,
   removeFromCurrentlyWatching,
@@ -1304,6 +1307,93 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     } catch (e) {
       console.error('Reset password error:', e.message);
       res.status(500).json({ error: 'Reset failed. Please try again.' });
+    }
+  });
+
+  // ── Discovery (swipe) ────────────────────────────────────────────────────
+  //
+  // The expensive one. Scoring runs over the whole catalog slice in memory, and
+  // tier 2 can spend up to forty TMDB calls on a cold cache, so it gets the
+  // analytics budget rather than the catalog's — the two would starve each
+  // other otherwise.
+  app.get('/discovery', analyticsLimiter, authenticateToken, async (req, res) => {
+    try {
+      const row = await getRow(db, 'SELECT platforms, languages FROM users WHERE id = ?', [req.user.id]);
+      if (!row) return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+
+      let platforms = [];
+      let languages = [];
+      try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
+      try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+
+      const queue = await buildDiscoveryQueue(db, req.user.id, {
+        scopeKey: buildScopeKey(platforms, DEFAULT_REGION, languages),
+        mediaType: ['movie', 'tv'].includes(req.query.mediaType) ? req.query.mediaType : 'all',
+        // Defaults to on. A suggestion for something already seen is not a
+        // suggestion, so the burden is on asking for them back.
+        hideWatched: req.query.hideWatched !== 'false',
+        limit: Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 50),
+        platforms,
+      });
+
+      res.json(queue);
+    } catch (e) {
+      console.error('[discovery] failed:', e.message);
+      res.status(500).json({ error: 'Could not build suggestions', details: e.message });
+    }
+  });
+
+  /**
+   * Record a swipe.
+   *
+   * A right also adds to the watchlist, so the client makes one call rather
+   * than two and cannot end up with the two records disagreeing.
+   */
+  app.post('/discovery/swipe', authenticateToken, async (req, res) => {
+    const { itemId, direction, genres, language, mediaType, title, posterUrl } = req.body || {};
+    if (!itemId || !['left', 'right'].includes(direction)) {
+      return res.status(400).json({ error: 'itemId and a direction of left or right are required' });
+    }
+    try {
+      await recordSwipe(db, req.user.id, {
+        itemId,
+        direction,
+        genres: Array.isArray(genres) ? genres : [],
+        language: language || null,
+      });
+
+      if (direction === 'right') {
+        await runSql(
+          db,
+          `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url)
+           VALUES (?, ?, ?, ?, ?)`,
+          [req.user.id, itemId, mediaType || null, title || null, posterUrl || null]
+        );
+      }
+      res.json({ success: true, saved: direction === 'right' });
+    } catch (e) {
+      console.error('[discovery] swipe failed:', e.message);
+      res.status(500).json({ error: 'Could not record that' });
+    }
+  });
+
+  /**
+   * Undo the last swipe.
+   *
+   * A mis-swipe on a card that is gone forever is the most irritating failure
+   * this screen can have, so the record is removable and a right-swipe's
+   * watchlist entry goes with it.
+   */
+  app.delete('/discovery/swipe/:itemId', authenticateToken, async (req, res) => {
+    try {
+      await forgetSwipe(db, req.user.id, req.params.itemId);
+      await runSql(
+        db, 'DELETE FROM watchlist_items WHERE user_id = ? AND item_id = ?',
+        [req.user.id, req.params.itemId]
+      );
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: 'Could not undo that' });
     }
   });
 

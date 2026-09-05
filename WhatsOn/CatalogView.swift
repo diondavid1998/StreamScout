@@ -12,6 +12,7 @@ import SwiftUI
 struct CatalogView: View {
     enum MainTab: String, CaseIterable, Identifiable {
         case discover
+        case forYou
         case watching
         case watched
         case watchlist
@@ -20,6 +21,7 @@ struct CatalogView: View {
         var label: String {
             switch self {
             case .discover: return "Discover"
+            case .forYou: return "For You"
             case .watching: return "Watching"
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
@@ -28,6 +30,7 @@ struct CatalogView: View {
         var systemImage: String {
             switch self {
             case .discover: return "safari"
+            case .forYou: return "sparkles"
             case .watching: return "play.tv"
             case .watched: return "checkmark.circle"
             case .watchlist: return "bookmark"
@@ -36,6 +39,7 @@ struct CatalogView: View {
         var title: String {
             switch self {
             case .discover: return "Streaming Catalog"
+            case .forYou: return "For You"
             case .watching: return "Currently Watching"
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
@@ -115,6 +119,8 @@ struct CatalogView: View {
                     switch mainTab {
                     case .discover:
                         discoverContent
+                    case .forYou:
+                        DiscoveryView().environment(app)
                     case .watching:
                         CurrentlyWatchingTabView().environment(app)
                     case .watched:
