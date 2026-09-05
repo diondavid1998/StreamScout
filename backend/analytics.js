@@ -30,6 +30,9 @@ const MOSAIC_SIZE = 24;
 // Genres plotted on the taste map. Beyond about this many the points crowd each
 // other on a phone no matter how they are labelled.
 const QUADRANT_POINTS = 10;
+// Entries per lens on the overview. Three was a teaser; five is enough to
+// recognise yourself in the list without turning the page into every ranking.
+const HIGHLIGHT_DEPTH = 5;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -1061,9 +1064,16 @@ async function computeAnalytics(db, userId, options = {}) {
   if (dimension === 'overview') {
     const top = (id) => {
       const b = buildBreakdown(id, rows, overallMean);
-      return b ? { id, title: b.title, entries: b.entries.slice(0, 3) } : null;
+      if (!b || !b.entries.length) return null;
+      return { id, title: b.title, entries: b.entries.slice(0, HIGHLIGHT_DEPTH) };
     };
-    payload.highlights = ['directors', 'genres', 'cast', 'languages', 'decades']
+    // Every lens, not a hand-picked five. The overview's job is to point at the
+    // rest of the page, and leaving writers, studios and themes out of it meant
+    // the lenses added most recently were the ones nothing pointed at. An empty
+    // one drops out rather than showing a heading with nothing under it, so a
+    // history with no lookups still gets a short, honest page.
+    payload.highlights = Object.keys(DIMENSIONS)
+      .filter((id) => DIMENSIONS[id].keysOf)
       .map(top)
       .filter(Boolean);
   }

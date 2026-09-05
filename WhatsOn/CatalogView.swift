@@ -12,6 +12,7 @@ import SwiftUI
 struct CatalogView: View {
     enum MainTab: String, CaseIterable, Identifiable {
         case discover
+        case forYou
         case watching
         case watched
         case watchlist
@@ -20,6 +21,7 @@ struct CatalogView: View {
         var label: String {
             switch self {
             case .discover: return "Discover"
+            case .forYou: return "For You"
             case .watching: return "Watching"
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
@@ -28,6 +30,7 @@ struct CatalogView: View {
         var systemImage: String {
             switch self {
             case .discover: return "safari"
+            case .forYou: return "sparkles"
             case .watching: return "play.tv"
             case .watched: return "checkmark.circle"
             case .watchlist: return "bookmark"
@@ -36,6 +39,7 @@ struct CatalogView: View {
         var title: String {
             switch self {
             case .discover: return "Streaming Catalog"
+            case .forYou: return "For You"
             case .watching: return "Currently Watching"
             case .watched: return "Watched"
             case .watchlist: return "Watchlist"
@@ -115,6 +119,8 @@ struct CatalogView: View {
                     switch mainTab {
                     case .discover:
                         discoverContent
+                    case .forYou:
+                        DiscoveryView().environment(app)
                     case .watching:
                         CurrentlyWatchingTabView().environment(app)
                     case .watched:
@@ -346,7 +352,11 @@ struct CatalogView: View {
                     FilterChip(label: mediaTypeLabel, icon: "tv", active: mediaType != "all")
                 }
                 Menu {
-                    ForEach([("popularity","Popularity"),("tmdb","TMDb"),("imdb","IMDb"),("rotten_tomatoes","Rotten Tomatoes"),("metacritic","Metacritic"),("release_date","Release Date"),("title","A–Z")], id: \.0) { k, l in
+                    // "Just added" leads: it is the only sort that answers a
+                    // question the others cannot — what is here now that was not
+                    // last time — and the backend has been recording the answer
+                    // in `first_seen_at` since long before anything asked for it.
+                    ForEach([("recently_added","Just Added"),("popularity","Popularity"),("tmdb","TMDb"),("imdb","IMDb"),("rotten_tomatoes","Rotten Tomatoes"),("metacritic","Metacritic"),("release_date","Release Date"),("title","A–Z")], id: \.0) { k, l in
                         Button(l) { sortBy = k; page = 1; Task { await fetch() } }
                     }
                 } label: {
@@ -586,6 +596,7 @@ struct CatalogView: View {
         case "tmdb": return "TMDb"; case "imdb": return "IMDb"
         case "rotten_tomatoes": return "RT Score"; case "metacritic": return "Metacritic"
         case "release_date": return "Release Date"; case "title": return "A–Z"
+        case "recently_added": return "Just Added"
         default: return "Popularity"
         }
     }

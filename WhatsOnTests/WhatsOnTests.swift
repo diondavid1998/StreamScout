@@ -422,4 +422,45 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(app.notice?.kind, .failure)
         XCTAssertTrue((app.notice?.message ?? "").contains("already running"))
     }
+
+    // MARK: - Discovery
+
+    func testACardDecodesWithOnlyWhatTheServerAlwaysSends() throws {
+        let card = try decode(DiscoveryCard.self, #"""
+        {"itemId":"movie-949","title":"Heat","year":1995,"mediaType":"movie",
+         "posterUrl":null,"overview":null,"genres":["Crime"],"availableOn":[],
+         "ratings":null,"because":[],"tier":1,"exploration":false}
+        """#)
+        XCTAssertEqual(card.id, "movie-949")
+        XCTAssertEqual(card.kind, .movie)
+        XCTAssertTrue(card.because.isEmpty)
+    }
+
+    func testAReasonSurvivesAMissingDetail() throws {
+        // The server omits `detail` for some reason kinds; the card must still
+        // render rather than failing to decode the whole queue.
+        let reason = try decode(DiscoveryReason.self, #"{"kind":"genre","value":"Crime"}"#)
+        XCTAssertEqual(reason.value, "Crime")
+        XCTAssertNil(reason.detail)
+    }
+
+    /// A queue built from the crowd must not present itself as personal.
+    func testAProfileKnowsWhetherItIsActuallyAboutYou() throws {
+        let crowd = try decode(DiscoveryProfile.self,
+            #"{"basis":"crowd","ratedFilms":0,"films":0,"confidence":"none"}"#)
+        XCTAssertFalse(crowd.isPersonal)
+
+        let diary = try decode(DiscoveryProfile.self,
+            #"{"basis":"diary","ratedFilms":412,"films":500,"confidence":"high"}"#)
+        XCTAssertTrue(diary.isPersonal)
+    }
+
+    func testAnExhaustedQueueDecodesAsEmptyRatherThanFailing() throws {
+        let response = try decode(DiscoveryResponse.self, #"""
+        {"cards":[],"profile":{"basis":"crowd","ratedFilms":0,"films":0,"confidence":"none"},
+         "exhausted":true}
+        """#)
+        XCTAssertTrue(response.cards.isEmpty)
+        XCTAssertTrue(response.exhausted)
+    }
 }

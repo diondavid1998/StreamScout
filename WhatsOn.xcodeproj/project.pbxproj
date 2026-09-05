@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		8A852EFE2F85DB4A0063D17E /* WhatsOnApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */; };
 		C1A500000000000000000E00 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D00 /* AppState.swift */; };
+		C1A500000000000000000E11 /* DiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000E10 /* DiscoveryView.swift */; };
 		C1A500000000000000000E01 /* ContentViewRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D01 /* ContentViewRoot.swift */; };
 		C1A500000000000000000E02 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D02 /* AuthView.swift */; };
 		C1A500000000000000000E03 /* PlatformsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A500000000000000000D03 /* PlatformsView.swift */; };
@@ -52,6 +53,7 @@
 		8A852EFA2F85DB4A0063D17E /* WhatsOn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhatsOn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsOnApp.swift; sourceTree = "<group>"; };
 		C1A500000000000000000D00 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		C1A500000000000000000E10 /* DiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryView.swift; sourceTree = "<group>"; };
 		C1A500000000000000000D01 /* ContentViewRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewRoot.swift; sourceTree = "<group>"; };
 		C1A500000000000000000D02 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
 		C1A500000000000000000D03 /* PlatformsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformsView.swift; sourceTree = "<group>"; };
@@ -127,6 +129,7 @@
 			children = (
 				8A852EFD2F85DB4A0063D17E /* WhatsOnApp.swift */,
 				C1A500000000000000000D00 /* AppState.swift */,
+				C1A500000000000000000E10 /* DiscoveryView.swift */,
 				C1A500000000000000000D01 /* ContentViewRoot.swift */,
 				C1A500000000000000000D02 /* AuthView.swift */,
 				C1A500000000000000000D03 /* PlatformsView.swift */,
@@ -307,6 +310,7 @@
 			files = (
 				8A852EFE2F85DB4A0063D17E /* WhatsOnApp.swift in Sources */,
 				C1A500000000000000000E00 /* AppState.swift in Sources */,
+				C1A500000000000000000E11 /* DiscoveryView.swift in Sources */,
 				C1A500000000000000000E01 /* ContentViewRoot.swift in Sources */,
 				C1A500000000000000000E02 /* AuthView.swift in Sources */,
 				C1A500000000000000000E03 /* PlatformsView.swift in Sources */,

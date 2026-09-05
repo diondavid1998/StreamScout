@@ -591,3 +591,51 @@ describe('DELETE /watchlist/:item_id — stale cache cleanup', () => {
     expect(after.body.items.some((item) => item.id === 'movie-9999')).toBe(false);
   });
 });
+
+/**
+ * "Just Added" answers the one question the other sorts cannot — what is on
+ * your services now that was not last time. The column behind it, and the sort
+ * itself, have been in the backend since long before the app offered it, which
+ * is exactly why it is worth a test: nothing was exercising either.
+ */
+describe('sorting by what arrived most recently', () => {
+  test('the newest arrival leads, and a title with no arrival date sinks', async () => {
+    const db = await createTestDb();
+    const app = createApp(db, { disableRateLimit: true });
+    try {
+      const reg = await request(app).post('/register').send({ username: 'browser', password: 'secret1' });
+      const token = reg.body.token;
+      await request(app).put('/platforms')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ platforms: ['netflix'], languages: [] });
+
+      const scopeKey = 'region:US|platforms:netflix|languages:';
+      const rows = [
+        ['Older Arrival',  1, '2026-01-01T00:00:00Z'],
+        ['Newest Arrival', 2, '2026-06-01T00:00:00Z'],
+        ['Never Recorded', 3, null],
+      ];
+      for (const [title, id, firstSeen] of rows) {
+        await new Promise((resolve, reject) => db.run(
+          `INSERT INTO catalog_cache_entries
+             (scope_key, media_type, tmdb_id, title, popularity, updated_at, first_seen_at,
+              available_on_keys_json)
+           VALUES (?, 'movie', ?, ?, 50, CURRENT_TIMESTAMP, ?, '["netflix"]')`,
+          [scopeKey, id, title, firstSeen],
+          (e) => (e ? reject(e) : resolve())
+        ));
+      }
+
+      const res = await request(app)
+        .get('/movies?sortBy=recently_added')
+        .set('Authorization', `Bearer ${token}`);
+
+      const titles = res.body.items.map((i) => i.title);
+      expect(titles.indexOf('Newest Arrival')).toBeLessThan(titles.indexOf('Older Arrival'));
+      // A title we never recorded an arrival for cannot claim to be new.
+      expect(titles.indexOf('Never Recorded')).toBeGreaterThan(titles.indexOf('Older Arrival'));
+    } finally {
+      await closeDb(db);
+    }
+  });
+});

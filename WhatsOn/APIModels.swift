@@ -807,6 +807,62 @@ final class APIService {
     }
 }
 
+// MARK: - Discovery
+
+/// One suggestion, and the reason it is being made.
+struct DiscoveryCard: Decodable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let title: String
+    let year: Int?
+    let mediaType: String?
+    let posterUrl: String?
+    let overview: String?
+    let genres: [String]
+    let availableOn: [String]
+    let ratings: CardRatings?
+    /// Why this card is here. Not decoration — a recommendation nobody can
+    /// interrogate is one nobody can trust, and it is what makes a bad
+    /// suggestion forgivable rather than baffling.
+    let because: [DiscoveryReason]
+    /// 1 = matched on what the catalog already knew; 2 = crew and themes too.
+    let tier: Int
+    /// The deliberate slice outside the reader's usual, labelled as such.
+    let exploration: Bool
+
+    var kind: MediaKind { mediaType == "tv" ? .series : .movie }
+}
+
+struct CardRatings: Decodable {
+    let imdb: String?
+    let rottenTomatoes: String?
+    let metacritic: String?
+}
+
+struct DiscoveryReason: Decodable, Identifiable {
+    var id: String { "\(kind)-\(value)" }
+    let kind: String
+    let value: String
+    let detail: String?
+}
+
+/// What the queue was built from, so the screen can be honest about it.
+struct DiscoveryProfile: Decodable {
+    /// "crowd", "blended" or "diary".
+    let basis: String
+    let ratedFilms: Int
+    let films: Int
+    let confidence: String
+
+    var isPersonal: Bool { basis != "crowd" }
+}
+
+struct DiscoveryResponse: Decodable {
+    let cards: [DiscoveryCard]
+    let profile: DiscoveryProfile
+    let exhausted: Bool
+}
+
 // MARK: - Offline snapshots
 
 /// The last successful response for one screen, kept on disk so it shows

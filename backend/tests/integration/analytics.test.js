@@ -691,8 +691,15 @@ describe('lenses and filters', () => {
     const over = await auth(request(app).get('/analytics'));
     expect(over.body.dimension).toBe('overview');
     expect(over.body.rating).not.toBeNull();
-    expect(over.body.highlights.map((h) => h.id))
-      .toEqual(['directors', 'genres', 'cast', 'languages', 'decades']);
+    // Every lens with something in it, not a hand-picked few: the overview
+    // points at the rest of the page, and the lenses added most recently were
+    // the ones nothing pointed at.
+    const shown = over.body.highlights.map((h) => h.id);
+    expect(shown).toEqual(expect.arrayContaining(['directors', 'genres', 'cast', 'languages', 'decades']));
+    // A lens with nothing under it is left out rather than shown empty.
+    expect(over.body.highlights.every((h) => h.entries.length > 0)).toBe(true);
+    // Five apiece, where there are five to give.
+    expect(Math.max(...over.body.highlights.map((h) => h.entries.length))).toBeLessThanOrEqual(5);
   });
 
   test('an unknown lens falls back rather than erroring', async () => {
