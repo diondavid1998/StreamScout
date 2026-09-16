@@ -605,10 +605,23 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
     .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.055, green: 0.063, blue: 0.129)),
     // Not a subscription — a tier. Picking it says "also show me what I could
-    // rent or buy", and the card then names the storefronts. Last in the list
-    // because it is the one entry that is not a service you already pay for.
-    .init(id: "pvod",        key: "pvod",        name: "PVOD",                logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.761, blue: 0.302)),
+    // rent or buy right now", and the card then names the storefronts. Last in
+    // the list because it is the one entry that is not a service you already
+    // pay for.
+    //
+    // VOD, not PVOD: PVOD means the premium window specifically, and nothing in
+    // the data distinguishes a twenty-pound new release from a four-pound
+    // catalogue rental. This tile answers "can I rent or buy it right now".
+    .init(id: "vod",         key: "vod",         name: "VOD",                 logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.761, blue: 0.302)),
 ]
+
+/// Keys that shipped under an older name, mapped to what they are called now.
+///
+/// A stored selection is pruned against `knownPlatformKeys` on launch, so a
+/// rename without this entry would quietly un-pick the tile for anyone who had
+/// chosen it — no error, no empty state, just a setting that reverted. The
+/// server runs the matching one-off migration on its own copy.
+let renamedPlatformKeys: [String: String] = ["pvod": "vod"]
 
 /// The keys `allPlatforms` covers, for pruning a stored selection.
 let knownPlatformKeys: Set<String> = Set(allPlatforms.map(\.key))

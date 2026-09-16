@@ -56,7 +56,10 @@ struct DetailSheet: View {
                             // in what you already pay" under the same sentence.
                             if let stores = movie.purchaseOn, !stores.isEmpty {
                                 sectionBlock("Rent or buy") {
-                                    serviceGrid(stores)
+                                    // The grid draws logos from names, so it is
+                                    // handed names; the per-store verb is on the
+                                    // card, where the chip has room for it.
+                                    serviceGrid(stores.map(\.name))
                                 }
                             }
 

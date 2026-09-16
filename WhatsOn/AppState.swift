@@ -239,6 +239,7 @@ final class AppState {
         // screen, still sent on every request. The server ignores keys it does
         // not know, so this is about the app agreeing with what it shows.
         selectedPlatforms = (defaults.stringArray(forKey: platformsKey) ?? [])
+            .map { renamedPlatformKeys[$0] ?? $0 }
             .filter { knownPlatformKeys.contains($0) }
         selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
         watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])

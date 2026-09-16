@@ -649,6 +649,20 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         if (this.changes === 0) {
           return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
         }
+        // A saved title's availability is computed against the selection — "on
+        // Netflix" only means something to someone who has Netflix — so changing
+        // the selection makes every cached row an answer to the wrong question.
+        //
+        // Nothing expired them before. The rows carry a `checked_at`, but
+        // `isAvailabilityFresh` short-circuits to true whenever CATALOG_SYNC_HOURS
+        // is unset, which is the default: this server refreshes when asked and
+        // not on a timer. So picking a new service changed nothing at all in the
+        // watchlist view, indefinitely, until someone pressed Refresh Catalog.
+        //
+        // Marked rather than deleted, and the re-fetch is lazy on the next read,
+        // so saving your services never blocks on a walk of the whole watchlist.
+        invalidateWatchlistAvailability(db, req.user.id)
+          .catch((e) => console.error('[platforms] could not invalidate availability:', e.message));
         res.json({ success: true });
       }
     );
@@ -1634,8 +1648,15 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     const streamingOnly = req.query.streamingOnly === 'true';
 
     // watchlistOnly: bypass the shared catalog and query TMDB directly for each
-    // watchlist item, with a per-user 24-hour streaming-availability cache. This
-    // ensures obscure titles (not in the popular snapshot) are still found.
+    // watchlist item, with a per-user streaming-availability cache. This ensures
+    // obscure titles (not in the popular snapshot) are still found.
+    //
+    // That cache does not expire on a clock, whatever this comment used to say:
+    // `isAvailabilityFresh` short-circuits to true unless CATALOG_SYNC_HOURS is
+    // set, and it is unset by default. Rows are refreshed when the user changes
+    // their services or presses Refresh Catalog, and not otherwise — which is
+    // the whole manual-refresh policy, not an oversight. The stale "24-hour"
+    // wording here is what made a genuine staleness bug look like a wait.
     if (watchlistOnly) {
       let watchlistDetailRows = [];
       let watchedIds = new Set();
@@ -1811,7 +1832,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     db.run('DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id], function (err) {
       if (err) return res.status(500).json({ error: 'Database error' });
       // Drop the availability cache too, or cleared titles resurface in the
-      // "From watchlist" view until their 24-hour TTL expires.
+      // "From watchlist" view — nothing expires them on a timer.
       db.run('DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
       res.json({ success: true, removed: this.changes });
     });
@@ -1969,6 +1990,14 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     let unavailable = 0;
     let matched = 0;
     let added = 0;
+    // The rows behind those two counts, so the summary can name them.
+    //
+    // A count on its own is not something a reader can act on: "4 not found"
+    // out of three hundred says a gap exists and gives no way to find it. The
+    // names are already here — `results` is index-aligned with `usable` — and
+    // were simply being dropped on the floor.
+    const notFoundTitles = [];
+    const unavailableTitles = [];
 
     let results;
     try {
@@ -1993,16 +2022,33 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
           ? await alreadyWatched(db, req.user.id, candidateIds)
           : new Set();
 
-        for (const result of results) {
+        // Indexed rather than `for…of`, because `results[i]` and `usable[i]`
+        // are the same row: resolveImportBatch returns one entry per input in
+        // input order. That alignment is what lets a failure be named.
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          const { name, year } = usable[i];
           // Told apart on purpose. "TMDB has nothing under this name" is about
           // the film; "TMDB did not answer" is about the network, and reporting
           // the second as the first is what made an outage look like a library
           // full of unknown films.
-          if (result === LOOKUP_UNAVAILABLE) { unavailable++; continue; }
-          if (!result) { notFound++; continue; }
+          if (result === LOOKUP_UNAVAILABLE) {
+            unavailable++;
+            unavailableTitles.push({ name, year: Number.isInteger(year) ? year : null });
+            continue;
+          }
+          if (!result) {
+            notFound++;
+            notFoundTitles.push({ name, year: Number.isInteger(year) ? year : null });
+            continue;
+          }
           // Letterboxd holds films and nothing else, so a television match here
           // is the search having reached for the nearest thing, not a show.
-          if (result.mediaType !== 'movie') { notFound++; continue; }
+          if (result.mediaType !== 'movie') {
+            notFound++;
+            notFoundTitles.push({ name, year: Number.isInteger(year) ? year : null });
+            continue;
+          }
           if (watched.has(result.itemId)) { skippedAlreadyWatched.add(result.itemId); continue; }
 
           const { changes } = await runSql(
@@ -2058,6 +2104,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         return res.status(503).json({
           error: 'The title database stopped answering, so your existing watchlist was left alone. Try the import again.',
           matched, notFound, unavailable, unusable, processed: batch.length, replaced: 0, finalised: false,
+          notFoundTitles, unavailableTitles,
         });
       }
       try {
@@ -2079,6 +2126,11 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       notFound,
       unavailable,
       unusable,
+      // The rows behind the two counts above, named. The client accumulates
+      // these across batches so the summary can list what it could not import
+      // instead of only counting it.
+      notFoundTitles,
+      unavailableTitles,
       skippedAlreadyWatched: skippedAlreadyWatched.size,
       processed: batch.length,
       replaced,

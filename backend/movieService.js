@@ -21,14 +21,21 @@ const INCLUDED_MONETIZATION = ['flatrate', 'free', 'ads'];
 //
 // These used to be excluded outright, on the reasoning that this app answers
 // "what can I already watch", not "what could I buy". That reasoning still
-// holds for anyone who has not asked — which is why PVOD is a service you pick
+// holds for anyone who has not asked — which is why VOD is a service you pick
 // rather than a tier that is always on. Nothing below changes for a user who
 // leaves it unselected.
+//
+// Named VOD, not PVOD. PVOD means the premium window specifically — a film
+// still in or just out of cinemas, at around twenty pounds, before it reaches
+// any subscription. These two buckets are all of transactional video on demand,
+// a four-pound rental of a 1995 film included, and TMDB carries no price or
+// window to tell those apart with. The question this answers is "can I rent or
+// buy it right now", and VOD is the name of that question.
 const PURCHASE_MONETIZATION = ['rent', 'buy'];
 
-// PVOD is one entry in the picker but not one storefront, so it gets a key of
+// VOD is one entry in the picker but not one storefront, so it gets a key of
 // its own and every store that rents or sells is filed under it.
-const PVOD_KEY = 'pvod';
+const VOD_KEY = 'vod';
 const DISCOVER_PAGE_COUNT = 1;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 // Hard ceiling on each in-memory response cache. A full snapshot sync touches
@@ -90,14 +97,15 @@ const PLATFORM_CONFIG = {
   mubi:       { id: 11,   name: 'MUBI' },
 
   // Not a service anyone subscribes to — a tier. Selecting it says "also show
-  // me what I could rent or buy", and these are the storefronts that answer.
+  // me what I could rent or buy right now", and these are the storefronts that
+  // answer.
   //
   // The ids scope the discover query only. Availability is read from TMDB's own
   // `rent` and `buy` buckets rather than from this list, so a storefront missing
   // here still shows up on a title's card correctly — it just will not pull that
   // title into the catalog on its own. That is the safe direction to be wrong in:
   // a store nobody listed costs you some breadth, not a wrong answer.
-  pvod: {
+  vod: {
     ids: [
       2,    // Apple TV  (the store — Apple TV+ the subscription is 350)
       3,    // Google Play Movies
@@ -106,7 +114,7 @@ const PLATFORM_CONFIG = {
       68,   // Microsoft Store
       192,  // YouTube
     ],
-    name: 'PVOD',
+    name: 'VOD',
     // What marks this entry as the purchase tier everywhere else in the code.
     purchase: true,
   },
@@ -426,7 +434,7 @@ function toSortableRating(value) {
 /**
  * Whether a built selection asked for rentals and purchases.
  *
- * Read off the map rather than threaded through every call site: the PVOD entry
+ * Read off the map rather than threaded through every call site: the VOD entry
  * is in the map exactly when the user picked it, so the map already knows. One
  * pass over at most a couple of dozen entries.
  */
@@ -529,7 +537,7 @@ function includedProviders(watchProviders, region = DEFAULT_REGION, { includePur
  * Subscription offers are matched against the user's selection, because "on
  * Netflix" is only interesting to someone who has Netflix. Purchase offers are
  * not: whoever sells it, you can buy it, so every store found under `rent` or
- * `buy` is named as it comes — which is also why an id missing from the PVOD
+ * `buy` is named as it comes — which is also why an id missing from the VOD
  * list above cannot produce a wrong answer here.
  */
 function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
@@ -537,16 +545,23 @@ function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
   const seen = new Set();
   const names = [];
   const keys = [];
-  const purchaseNames = [];
+  const purchaseOffers = [];
 
   for (const provider of includedProviders(details['watch/providers'], region, { includePurchase })) {
     if (PURCHASE_MONETIZATION.includes(provider.tier)) {
-      // One store lists a film once to rent and again to buy; it is one place
-      // to get it either way.
+      // One store lists a film under rent, under buy, or under both, and those
+      // are different offers. Collapsing them to a name alone made a title you
+      // can only purchase read as "Rent · Apple TV", which is the kind of small
+      // untruth this codebase keeps finding in its own labels.
       const name = provider.provider_name;
-      if (!name || purchaseNames.includes(name)) continue;
-      purchaseNames.push(name);
-      if (!keys.includes(PVOD_KEY)) keys.push(PVOD_KEY);
+      if (!name) continue;
+      const existing = purchaseOffers.find((o) => o.name === name);
+      if (existing) {
+        if (!existing.tiers.includes(provider.tier)) existing.tiers.push(provider.tier);
+      } else {
+        purchaseOffers.push({ name, tiers: [provider.tier] });
+      }
+      if (!keys.includes(VOD_KEY)) keys.push(VOD_KEY);
       continue;
     }
     const entry = providerMapById.get(provider.provider_id);
@@ -558,7 +573,7 @@ function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
       keys.push(entry.key);
     }
   }
-  return { names, keys, purchaseNames };
+  return { names, keys, purchaseOffers };
 }
 
 function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
@@ -584,8 +599,9 @@ function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
     originalLanguage: rawItem.original_language || details.original_language || null,
     genres: Array.isArray(details.genres) ? details.genres.map((genre) => genre.name) : [],
     // Where you can rent or buy it, named separately from what a subscription
-    // covers. Empty for anyone who has not picked PVOD.
-    purchaseOn: providers?.purchaseNames || [],
+    // covers, each store carrying which of the two it offers. Empty for anyone
+    // who has not picked VOD.
+    purchaseOn: providers?.purchaseOffers || [],
     imdbId: details.external_ids?.imdb_id || r.imdbId || null,
     ratings: {
       tmdb: rawItem.vote_average || details.vote_average || null,
@@ -802,8 +818,41 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
 // ── Letterboxd title search ───────────────────────────────────────────────
 // Searches TMDB by title + year with ±1 year tolerance.
 // Tries movie first, then TV, returns {itemId, title, posterUrl, mediaType} or null.
+/**
+ * The form two spellings of the same title are compared in.
+ *
+ * This decides whether a result TMDB already returned is allowed to count, so
+ * anything it throws away is a film the search found and the import reported as
+ * missing. The old rule kept `[a-z0-9 ]` and deleted the rest, which lost three
+ * classes of title outright:
+ *
+ *   - An accent was deleted rather than folded, so TMDB's "Rashōmon" became
+ *     `rashmon` and could never equal an export's "Rashomon". Same for Amélie,
+ *     Léon, and every other title the two sources spell differently.
+ *   - A title in any non-Latin script normalised to the empty string, and the
+ *     search returns null on an empty name — so those rows were reported as not
+ *     found without TMDB ever being asked about them.
+ *   - Punctuation was deleted instead of separating the words it sat between,
+ *     so "Spider-Man" became `spiderman` and stopped matching "Spider Man".
+ *
+ * Folding to ASCII handles the first, `\p{L}\p{N}` keeps the second (a Japanese
+ * title now normalises to itself and matches its own spelling exactly), and
+ * collapsing punctuation to a single space handles the third — which also keeps
+ * the word-boundary test in `titleMatches` working, since that test needs
+ * single spaces to line up.
+ */
 function normalizeTitle(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  return String(value || '')
+    // NFKD so a ligature or a full-width character decomposes too, not just an
+    // accented letter; the combining marks it leaves behind are then dropped.
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    // Every run of non-alphanumeric characters becomes one space, so words that
+    // punctuation separated stay separated and words it joined stay joined.
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Only accept an exact normalized-title match (or a whole-word substring match)
@@ -1084,7 +1133,7 @@ module.exports = {
   selectionIncludesPurchase,
   monetizationFor,
   PURCHASE_MONETIZATION,
-  PVOD_KEY,
+  VOD_KEY,
   searchCatalog,
   fetchTitlesByPerson,
   // Exported for unit testing

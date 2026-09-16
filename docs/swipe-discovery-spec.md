@@ -64,14 +64,36 @@ For each lens, an **affinity**: the mean rating the reader gives that value,
 minus their overall mean, weighted by how many films support it.
 
 ```
-affinity(value) = (meanRating(value) - overallMean) × confidence(value)
+affinity(value) = (meanRating(value) - overallMean) × confidence(value) × volume(value)
 confidence(value) = min(1, films(value) / MIN_FILMS_FOR_CONFIDENCE)
+volume(value)     = 1 + log10(films(value)) / 2
 ```
 
 The confidence term matters more than the delta. One five-star film by a
 director is not a preference, and without damping it would outrank a director
 with twenty films at a steady four. `MIN_FILMS_FOR_AFFINITY` already exists and
 encodes this judgement; reuse the constant rather than inventing a second one.
+
+`volume` answers the other half of the question. Confidence asks *is this
+preference real yet* and is satisfied at three films — after which it caps, so
+a director with three films and one with thirty scored the same. "Most watched"
+and "highest rated" are different claims and the profile owes the reader both.
+Logarithmic, because the gap between three films and thirty is real and the gap
+between thirty and three hundred is mostly a long career.
+
+### 3.1.1 Not every lens is worth the same
+
+A shared value is worth what it is *specific*. A film has one director and a
+dozen billed actors, so counting every match equally made the cast lens the
+loudest thing in the room: four familiar faces outscored a shared author, and a
+genre a fifth of the catalog carries counted as much as the person who made the
+film.
+
+Each lens therefore carries a weight and a cap (`LENS_WEIGHTS`), ordered by
+specificity — cinematographer and director highest, genre and decade lowest —
+and within a lens each match after the strongest is divided by its rank. The
+second familiar face genuinely tells you less than the first; halving says so
+without pretending it tells you nothing.
 
 Three signals beyond rating, all free and all currently unused for this:
 
@@ -89,16 +111,29 @@ Three signals beyond rating, all free and all currently unused for this:
 catalog already has: genre, language, decade, crowd rating. Cheap enough to run
 over the whole catalog on every request.
 
-**Tier 2 — the top N only, one call each, cached forever.** Take the top ~40
-from tier 1 and enrich them through the existing `ensureAnalyticsDetails`, which
-already caches into `title_details_cache` and is already shared across users.
-Re-score those on crew, keywords and studio, and serve the queue from that.
+**Tier 1.5 — every candidate we already know about, still no API calls.** Much
+of the pool is already in `title_details_cache`: resolved by the analytics page,
+opened as a detail sheet, enriched in an earlier session. One bulk read
+(`readCachedDetailsBulk`) scores all of those on the full profile for the cost
+of a single query. Rows written before crew and keywords were kept are skipped
+rather than returned, or "we have never looked this film up" would score as
+"this film shares nothing with you" — and nothing would ever go and fetch it.
+
+**Tier 2 — the top N *unknown* only, one call each, cached forever.** Take the
+best candidates tier 1.5 could not answer for and enrich them through
+`ensureAnalyticsDetails`, which already caches into `title_details_cache` and is
+already shared across users.
 
 Why this shape:
 
-- The expensive signals are applied only where they can change the outcome. A
-  title that ranks 900th on genre and language alone is not going to reach the
-  reader's cards because its cinematographer is a good match.
+- The expensive signals are applied wherever they can change the outcome, and
+  paid for only where they cannot be had for free. The original two-tier split
+  read "the catalog does not carry crew" as "crew costs an API call", which is
+  only true for a title nobody has looked at yet.
+- Restricting crew scoring to the top 40 by genre had a cost the spec did not
+  admit: a film by the reader's most-watched director sat wherever its genre put
+  it, and if that was rank 200 nothing ever looked at who made it. The budget
+  now buys forty *new* titles rather than forty rows already in SQLite.
 - Enrichment is permanent and shared. The cost falls with use, and a popular
   title is fetched once for the whole service.
 - It degrades honestly. If TMDB is unreachable — see the circuit breaker — tier

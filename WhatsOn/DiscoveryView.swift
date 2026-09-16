@@ -527,7 +527,7 @@ private struct DiscoveryCardView: View {
             } else if let stores = card.purchaseOn, !stores.isEmpty {
                 // Only when nothing a subscription covers is offering it. A card
                 // that says both would bury the free way to watch under a paid one.
-                Text("Rent from \(stores.prefix(2).joined(separator: ", "))")
+                Text("Rent or buy from \(stores.prefix(2).map(\.name).joined(separator: ", "))")
                     .font(.caption2).foregroundColor(.white.opacity(0.65))
             }
         }

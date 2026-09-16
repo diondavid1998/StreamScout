@@ -217,6 +217,59 @@ describe('Letterboxd import semantics', () => {
     expect(await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1')).toHaveLength(0);
   });
 
+  it('names the rows it could not resolve, not just how many', async () => {
+    // "4 not found" out of three hundred tells the reader a gap exists and
+    // gives them no way to find it. The names were already on hand — results
+    // are index-aligned with the rows they came from — and were being dropped.
+    searchTitleOnTmdb.mockImplementation(async (name) => (
+      name === 'Real Film'
+        ? { itemId: 'movie-1', mediaType: 'movie', title: 'Real Film', posterUrl: null }
+        : null
+    ));
+
+    const res = await request(app)
+      .post('/import/letterboxd')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        importType: 'watchlist',
+        items: [
+          { name: 'Real Film', year: 2020 },
+          { name: 'Ghost Film', year: 1999 },
+          { name: 'Yearless Ghost' },
+        ],
+      });
+
+    expect(res.body.notFound).toBe(2);
+    expect(res.body.notFoundTitles).toEqual([
+      { name: 'Ghost Film', year: 1999 },
+      // Null rather than absent, so the client can tell "no year in the export"
+      // from a year it failed to read.
+      { name: 'Yearless Ghost', year: null },
+    ]);
+    // A row that resolved is not a failure and must not be listed.
+    expect(res.body.notFoundTitles.map((t) => t.name)).not.toContain('Real Film');
+  });
+
+  it('names an outage row separately from a film that does not exist', async () => {
+    // The two are different problems with different fixes — retry the import
+    // versus add the film by hand — so they are listed apart.
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      if (name === 'Unreachable Film') throw new Error('socket hang up');
+      return null;
+    });
+
+    const res = await request(app)
+      .post('/import/letterboxd')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        importType: 'watchlist',
+        items: [{ name: 'Unreachable Film', year: 2021 }, { name: 'Absent Film', year: 2021 }],
+      });
+
+    expect(res.body.unavailableTitles).toEqual([{ name: 'Unreachable Film', year: 2021 }]);
+    expect(res.body.notFoundTitles).toEqual([{ name: 'Absent Film', year: 2021 }]);
+  });
+
   it('keeps a row whose year Letterboxd has not filled in yet', async () => {
     // An unreleased film has no year. It used to be dropped before the search,
     // and the count the user saw had already been reduced.

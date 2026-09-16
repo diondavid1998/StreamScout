@@ -227,6 +227,48 @@ async function readCachedDetails(db, mediaType, tmdbId) {
   }
 }
 
+/**
+ * The cached payloads for many titles at once, as a Map keyed by TMDB id.
+ *
+ * Same table and same rows as `readCachedDetails`; the difference is that it
+ * costs one query instead of one per title. Discovery scores four hundred
+ * candidates against a reader's crew preferences, and asking row by row made
+ * that a choice between a wide net and a fast page. It is a local read either
+ * way — nothing here touches TMDB, so a caller can afford to ask about
+ * everything and simply use whatever comes back.
+ *
+ * Only payloads written after the last field the callers read was added are
+ * returned. A row cached before crew and keywords were kept parses perfectly
+ * well and has those arrays empty, so handing it back would let a caller score
+ * "we have never looked this film up" as "this film shares nothing with you" —
+ * silently, and permanently, because nothing would ever go and fetch it. Left
+ * out, it reads as a miss and takes its turn at being refilled.
+ *
+ * Chunked at 500 for SQLite's 999-parameter ceiling.
+ */
+async function readCachedDetailsBulk(db, mediaType, tmdbIds) {
+  const unique = [...new Set((tmdbIds || []).filter(Number.isInteger))];
+  const out = new Map();
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const rows = await all(
+      db,
+      `SELECT tmdb_id, payload_json FROM title_details_cache
+        WHERE media_type = ? AND tmdb_id IN (${chunk.map(() => '?').join(',')})`,
+      [mediaType, ...chunk]
+    );
+    for (const row of rows) {
+      if (!payloadIsCurrent(row.payload_json)) continue;
+      try {
+        out.set(row.tmdb_id, JSON.parse(row.payload_json));
+      } catch {
+        // A corrupt blob is a miss, as it is in the single-row read.
+      }
+    }
+  }
+  return out;
+}
+
 async function storeDetails(db, mediaType, tmdbId, data) {
   const payload = normalizeDetails(data, mediaType);
   const series = seriesFields(data);
@@ -367,6 +409,7 @@ module.exports = {
   normalizeDetails,
   seriesFields,
   readCachedDetails,
+  readCachedDetailsBulk,
   storeDetails,
   getTitleDetails,
   ensureAnalyticsDetails,

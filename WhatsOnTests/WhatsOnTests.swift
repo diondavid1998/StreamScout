@@ -95,6 +95,20 @@ final class WhatsOnTests: XCTestCase {
 
     // MARK: - Letterboxd export reading
 
+    /// The rows an import could not resolve, as the summary lists them.
+    ///
+    /// "4 not found" gives the reader no way to find the gap in a list of three
+    /// hundred, so the server now names them. The year is what separates two
+    /// films sharing a title, and it is genuinely absent for anything the
+    /// export has no release date for — so the label has to read both ways.
+    func testAnUnresolvedRowIsLabelledWithItsYearWhenThereIsOne() throws {
+        let titles = try decode([LetterboxdUnresolvedTitle].self, #"""
+        [{"name":"Rashomon","year":1950},{"name":"Untitled Sequel","year":null}]
+        """#)
+
+        XCTAssertEqual(titles.map(\.label), ["Rashomon (1950)", "Untitled Sequel"])
+    }
+
     /// A temporary directory shaped like an uncompressed Letterboxd export.
     private func makeExportFolder(files: [String: String]) throws -> URL {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -270,17 +284,29 @@ final class WhatsOnTests: XCTestCase {
         // would shrink it silently and let one tile shadow another.
         XCTAssertEqual(knownPlatformKeys.count, allPlatforms.count,
                        "two services share a key")
-        // Fifteen subscriptions plus PVOD, which is a tier rather than a
+        // Fifteen subscriptions plus VOD, which is a tier rather than a
         // service. Update deliberately: the number failing is the point.
         XCTAssertEqual(allPlatforms.count, 16)
     }
 
-    /// PVOD is the one tile that is not something you subscribe to, and the
+    /// VOD is the one tile that is not something you subscribe to, and the
     /// backend keys off exactly this string to widen the discover query.
-    func testPVODShipsUnderTheKeyTheBackendExpects() {
-        let pvod = allPlatforms.first { $0.key == "pvod" }
-        XCTAssertNotNil(pvod, "the PVOD tile is missing from the picker")
-        XCTAssertEqual(pvod?.name, "PVOD")
+    func testVODShipsUnderTheKeyTheBackendExpects() {
+        let vod = allPlatforms.first { $0.key == "vod" }
+        XCTAssertNotNil(vod, "the VOD tile is missing from the picker")
+        XCTAssertEqual(vod?.name, "VOD")
+    }
+
+    /// The tile shipped once as "pvod". A stored selection is pruned against
+    /// `knownPlatformKeys` on launch, so without the rename map that key would
+    /// be dropped as unknown — the tile silently un-picking itself.
+    func testASelectionSavedUnderTheOldPvodKeySurvivesTheRename() {
+        defaults.set(["netflix", "pvod"], forKey: "mk_platforms")
+
+        let app = AppState(userDefaults: defaults)
+
+        XCTAssertEqual(app.selectedPlatforms, ["netflix", "vod"],
+                       "the VOD tile reverted for anyone who had already picked it")
     }
 
     func testAServiceMonogramStaysLegibleOnItsOwnAccent() {
@@ -352,15 +378,20 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertTrue(response.filters.available.options(for: "country").isEmpty)
     }
 
-    /// PVOD arrived after the app shipped, so a server that predates it sends no
-    /// `purchaseOn` at all — and a catalog item has to decode either way.
+    /// The VOD tier arrived after the app shipped, so a server that predates it
+    /// sends no `purchaseOn` at all — and a catalog item has to decode either way.
     func testACatalogItemDecodesWithAndWithoutStorefronts() throws {
         let withStores = try decode(CatalogItem.self, #"""
         {"id":"movie-1","title":"A Film","mediaType":"movie","year":2024,
-         "availableOn":["Netflix"],"purchaseOn":["Apple TV","Amazon Video"]}
+         "availableOn":["Netflix"],
+         "purchaseOn":[{"name":"Apple TV","tiers":["rent","buy"]},
+                       {"name":"Amazon Video","tiers":["buy"]}]}
         """#)
         XCTAssertEqual(withStores.availableOn, ["Netflix"])
-        XCTAssertEqual(withStores.purchaseOn, ["Apple TV", "Amazon Video"])
+        XCTAssertEqual(withStores.purchaseOn?.map(\.name), ["Apple TV", "Amazon Video"])
+        // The verb follows the offer: a store that only sells must not say Rent.
+        XCTAssertEqual(withStores.purchaseOn?[0].label, "Rent · Apple TV")
+        XCTAssertEqual(withStores.purchaseOn?[1].label, "Buy · Amazon Video")
 
         let older = try decode(CatalogItem.self, #"""
         {"id":"movie-2","title":"Another","mediaType":"movie","year":2024,
@@ -375,11 +406,11 @@ final class WhatsOnTests: XCTestCase {
         let card = try decode(DiscoveryCard.self, #"""
         {"itemId":"movie-3","title":"Rent Only","year":2026,"mediaType":"movie",
          "posterUrl":null,"overview":null,"genres":[],"availableOn":[],
-         "purchaseOn":["Apple TV"],"ratings":null,"because":[],"tier":1,
-         "exploration":false}
+         "purchaseOn":[{"name":"Apple TV","tiers":["rent"]}],
+         "ratings":null,"because":[],"tier":1,"exploration":false}
         """#)
         XCTAssertTrue(card.availableOn.isEmpty)
-        XCTAssertEqual(card.purchaseOn, ["Apple TV"])
+        XCTAssertEqual(card.purchaseOn?.map(\.name), ["Apple TV"])
     }
 
     /// The lookup button drives on `totalPending`, not on `pending`. Someone who
@@ -472,9 +503,9 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(sorts.map(\.needsRating), [false, true, false])
     }
 
-    /// The film list is absent on an unfiltered page and present on a filtered
-    /// one, and the page has to render both.
-    func testTheFilmListIsOptional() throws {
+    /// Every section below the headline numbers is optional, and a server that
+    /// sends none of them still has to decode.
+    func testAPayloadWithNoOptionalSectionsDecodes() throws {
         let response = try decode(AnalyticsResponse.self, #"""
         {"dimension":"overview","dimensions":[],
          "filters":{"applied":[],"available":{"languages":[],"genres":[],"decades":[],
@@ -484,25 +515,10 @@ final class WhatsOnTests: XCTestCase {
          "summary":{"films":0,"viewings":0,"rated":0,"meanRating":null,"runtimeMinutes":0,
                     "tasteOffset":null,"comparedOn":0}}
         """#)
-        XCTAssertNil(response.films)
+        XCTAssertEqual(response.dimension, "overview")
+        XCTAssertEqual(response.summary.films, 0)
+        XCTAssertNil(response.breakdown)
     }
-
-    func testAnUnmatchedFilmDecodesAsUnresolved() throws {
-        // The distinction the list exists for: a film that counts toward the
-        // totals and toward no genre, director or cast.
-        let films = try decode([AnalyticsFilm].self, #"""
-        [{"name":"Found Film","year":2020,"rating":5,"watchedOn":"2026-01-01",
-          "posterUrl":null,"resolved":true,"viewings":2},
-         {"name":"Missing Film","year":2019,"rating":null,"watchedOn":null,
-          "posterUrl":null,"resolved":false,"viewings":1}]
-        """#)
-        XCTAssertEqual(films.count, 2)
-        XCTAssertTrue(films[0].resolved)
-        XCTAssertEqual(films[0].viewings, 2)
-        XCTAssertFalse(films[1].resolved)
-        XCTAssertNil(films[1].rating)
-    }
-
     func testTheNewFacetsAreReadWhenTheServerSendsThem() throws {
         let available = try decode(AvailableFilters.self, #"""
         {"languages":[],"genres":[],"decades":[],"directors":[],"cast":[],"tags":[],

@@ -87,13 +87,13 @@ struct PlatformsView: View {
                         }
                         .padding(.horizontal, 16)
 
-                        // PVOD is the one tile that is not a subscription, so it
+                        // VOD is the one tile that is not a subscription, so it
                         // gets a line saying what picking it does. Almost every
                         // film ever made is buyable somewhere, and someone who
                         // turns this on without knowing that will wonder why
                         // their catalog suddenly holds everything.
-                        if selected.contains("pvod") {
-                            Text("PVOD adds films you can rent or buy — from Apple TV, Amazon, Fandango at Home and the rest. They are labelled separately from what your subscriptions already cover.")
+                        if selected.contains("vod") {
+                            Text("VOD adds films you can rent or buy right now — from Apple TV, Amazon, Fandango at Home and the rest. They are labelled separately from what your subscriptions already cover.")
                                 .font(.caption)
                                 .foregroundColor(.mkMuted)
                                 .multilineTextAlignment(.leading)

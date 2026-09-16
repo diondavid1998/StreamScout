@@ -314,3 +314,90 @@ describe('choosing between films that share a title', () => {
     expect(result.itemId).toBe('movie-992');
   });
 });
+/**
+ * When the two sources spell the same film differently.
+ *
+ * TMDB is asked with the raw name, so it finds these on its own — its search
+ * index folds accents and punctuation. What decided the outcome was our own
+ * acceptance filter, and it used to normalise by keeping `[a-z0-9 ]` and
+ * deleting everything else. Every case below is a film TMDB returned and the
+ * import then reported as "not found".
+ */
+describe('titles the two sources spell differently', () => {
+  const { resetTmdbBreaker } = require('../../movieService');
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+    resetTmdbBreaker();
+  });
+  afterEach(() => { delete global.fetch; });
+
+  it('matches an accented TMDB title to the plain spelling in an export', async () => {
+    // The accent used to be deleted rather than folded, so TMDB's title
+    // normalised to `rashmon delta` — which the export's spelling can never
+    // equal, however it is written.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 771, title: 'Rashōmon Delta', release_date: '1950-08-25', poster_path: '/r.jpg' },
+        ],
+      })
+    );
+
+    const result = await searchTitleOnTmdb('Rashomon Delta', 1950);
+
+    expect(result).toMatchObject({ itemId: 'movie-771', title: 'Rashōmon Delta' });
+  });
+
+  it('asks TMDB about a title written in a non-Latin script', async () => {
+    // This is the sharpest case: the name normalised to the empty string, and
+    // the search gives up on an empty name — so the row came back "not found"
+    // without a single request being sent. The request count is the assertion.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 882, title: '千と千尋の神隠し', release_date: '2001-07-20', poster_path: '/s.jpg' },
+        ],
+      })
+    );
+
+    const result = await searchTitleOnTmdb('千と千尋の神隠し', 2001);
+
+    expect(requestedPaths().length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ itemId: 'movie-882' });
+  });
+
+  it('matches across a hyphen the export wrote as a space', async () => {
+    // Punctuation was deleted rather than separating the words around it, so
+    // "Spider-Man" collapsed to one word and stopped matching two.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 993, title: 'Spider-Man Epsilon', release_date: '2021-12-15', poster_path: '/t.jpg' },
+        ],
+      })
+    );
+
+    const result = await searchTitleOnTmdb('Spider Man Epsilon', 2021);
+
+    expect(result).toMatchObject({ itemId: 'movie-993' });
+  });
+
+  it('still refuses an unrelated title that merely shares a short word', async () => {
+    // The looser normalisation must not loosen what counts as a match: a
+    // one-word name that is also an ordinary word still has to be rejected,
+    // or a row resolves to somebody else's film and every lens counts it.
+    global.fetch.mockResolvedValueOnce(jsonResponse({ results: [], total_results: 0 }));
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 404, title: 'Interstellar Zeta', release_date: '2014-11-05', poster_path: '/u.jpg' },
+        ],
+      })
+    );
+
+    const result = await searchTitleOnTmdb('Ité', 2014);
+
+    expect(result).toBeNull();
+  });
+});

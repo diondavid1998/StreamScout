@@ -5,7 +5,7 @@ const {
   includedProviders,
   selectionIncludesPurchase,
   PURCHASE_MONETIZATION,
-  PVOD_KEY,
+  VOD_KEY,
   isOmdbRateLimited,
   PLATFORM_CONFIG,
 } = require('./movieService');
@@ -47,7 +47,7 @@ const DEFAULT_REGION = 'US';
 // Adding a whole new key does not need it: buildScopeKey includes the sorted
 // platform list, so a selection naming the new service is a new scope and its
 // cache is cold already. Bumping regardless would re-sync every user in the
-// database to no effect — which is why PVOD, added later, left this at 4.
+// database to no effect — which is why the VOD tier, added later, left this at 4.
 // Bumped when availability semantics change so stale snapshots are dropped:
 // v3 added free and ad-supported tiers alongside flatrate.
 const PROVIDER_CONFIG_VERSION = 4;
@@ -196,8 +196,9 @@ async function ensureCatalogTables(db) {
       available_on_json TEXT DEFAULT '[]',
       available_on_keys_json TEXT DEFAULT '[]',
       -- Where a title can be rented or bought, kept apart from what a
-      -- subscription covers. "On Apple TV" and "£13.99 on Apple TV" are not the
-      -- same sentence, and one list cannot say both.
+      -- subscription covers, each store tagged with which of the two it offers.
+      -- "On Apple TV" and "£13.99 on Apple TV" are not the same sentence, and
+      -- one list cannot say both.
       purchase_on_json TEXT DEFAULT '[]',
       updated_at TEXT NOT NULL,
       first_seen_at TEXT,
@@ -210,7 +211,7 @@ async function ensureCatalogTables(db) {
     await run(db, `ALTER TABLE catalog_cache_entries ADD COLUMN first_seen_at TEXT`);
   } catch { /* column already exists */ }
 
-  // Migrate: purchase_on_json arrived with the PVOD tier.
+  // Migrate: purchase_on_json arrived with the VOD tier.
   try {
     await run(db, `ALTER TABLE catalog_cache_entries ADD COLUMN purchase_on_json TEXT DEFAULT '[]'`);
   } catch { /* column already exists */ }
@@ -375,7 +376,7 @@ async function ensureCatalogTables(db) {
     )`
   );
 
-  // Migrate: the same column, for a watchlist cache that predates the PVOD tier.
+  // Migrate: the same column, for a watchlist cache that predates the VOD tier.
   try {
     await run(db, `ALTER TABLE watchlist_streaming_cache ADD COLUMN purchase_on_json TEXT DEFAULT '[]'`);
   } catch { /* column already exists */ }
@@ -1341,7 +1342,7 @@ function extractAvailability(watchProviders, providerMap, region) {
   // or Pluto came back with an empty availableOn even after the discover query
   // had found it.
   //
-  // Rentals and purchases ride along only when the user picked PVOD, and are
+  // Rentals and purchases ride along only when the user picked VOD, and are
   // kept in a list of their own: this is the watchlist view, where "where can I
   // watch this" and "what would it cost me" are different questions.
   const includePurchase = selectionIncludesPurchase(providerMap);
@@ -1349,14 +1350,20 @@ function extractAvailability(watchProviders, providerMap, region) {
   const seen = new Set();
   const names = [];
   const keys = [];
-  const purchaseNames = [];
+  const purchaseOffers = [];
   for (const p of offers) {
     if (PURCHASE_MONETIZATION.includes(p.tier)) {
       // Named as TMDB gives it, not from the id list: whoever sells it, you can
       // buy it, so a storefront nobody thought to list still reads correctly.
-      if (p.provider_name && !purchaseNames.includes(p.provider_name)) {
-        purchaseNames.push(p.provider_name);
-        if (!keys.includes(PVOD_KEY)) keys.push(PVOD_KEY);
+      // Rent and buy are kept apart per store — see normalizeProviders.
+      if (p.provider_name) {
+        const existing = purchaseOffers.find((o) => o.name === p.provider_name);
+        if (existing) {
+          if (!existing.tiers.includes(p.tier)) existing.tiers.push(p.tier);
+        } else {
+          purchaseOffers.push({ name: p.provider_name, tiers: [p.tier] });
+        }
+        if (!keys.includes(VOD_KEY)) keys.push(VOD_KEY);
       }
       continue;
     }
@@ -1367,7 +1374,7 @@ function extractAvailability(watchProviders, providerMap, region) {
       keys.push(entry.key);
     }
   }
-  return { names, keys, purchaseNames };
+  return { names, keys, purchaseOffers };
 }
 
 /**
@@ -1449,7 +1456,7 @@ async function getWatchlistItemsWithAvailability(
             details.external_ids?.imdb_id || null,
             JSON.stringify(available.names),
             JSON.stringify(available.keys),
-            JSON.stringify(available.purchaseNames || []),
+            JSON.stringify(available.purchaseOffers || []),
             nowIso,
           ];
           await run(db,

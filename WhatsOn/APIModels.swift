@@ -85,10 +85,11 @@ struct CatalogItem: Identifiable {
     var posterUrl: String?
     var genres: [String]?
     var availableOn: [String]?
-    /// Storefronts that rent or sell this title. Separate from `availableOn`
-    /// because "on Apple TV" and "£13.99 on Apple TV" are different sentences,
-    /// and one list cannot say both. Empty unless PVOD is a selected service.
-    var purchaseOn: [String]?
+    /// Storefronts that rent or sell this title, each carrying which of the two
+    /// it offers. Separate from `availableOn` because "on Apple TV" and "£13.99
+    /// on Apple TV" are different sentences, and one list cannot say both.
+    /// Empty unless VOD is a selected service.
+    var purchaseOn: [PurchaseOffer]?
     var popularity: Double?
     var tmdbRating: Double?
     var tmdbVotes: Int?
@@ -137,7 +138,7 @@ extension CatalogItem: Decodable {
         posterUrl   = try? c.decode(String.self,    forKey: .posterUrl)
         genres      = try? c.decode([String].self,  forKey: .genres)
         availableOn = try? c.decode([String].self,  forKey: .availableOn)
-        purchaseOn  = try? c.decode([String].self,  forKey: .purchaseOn)
+        purchaseOn  = try? c.decode([PurchaseOffer].self, forKey: .purchaseOn)
         popularity  = try? c.decode(Double.self,    forKey: .popularity)
         tmdbVotes   = try? c.decode(Int.self,       forKey: .tmdbVotes)
 
@@ -512,22 +513,6 @@ struct AnalyticsBreakdown: Decodable {
     let hidden: Int?
 }
 
-/// One film behind a number, with whether the film database ever matched it.
-///
-/// The page is otherwise entirely counts of films the reader cannot see, which
-/// is fine until one looks wrong — and then there is no way to tell a thin
-/// lookup from a title that resolved to the wrong film.
-struct AnalyticsFilm: Decodable, Identifiable {
-    var id: String { "\(name)|\(year ?? 0)" }
-    let name: String
-    let year: Int?
-    let rating: Double?
-    let watchedOn: String?
-    let posterUrl: String?
-    let resolved: Bool
-    let viewings: Int
-}
-
 /// A lens the page can be pointed at. Named by the server so the two can't drift.
 struct AnalyticsDimension: Decodable, Identifiable {
     let id: String
@@ -617,9 +602,6 @@ struct AnalyticsResponse: Decodable {
     let sort: String?
     let sorts: [AnalyticsSort]?
     let minFilms: Int?
-    /// The films in scope, sent only once something is filtered — unfiltered it
-    /// would be the whole library on every request.
-    let films: [AnalyticsFilm]?
     let filters: AnalyticsFilters
     let scope: AnalyticsScope
     let coverage: AnalyticsCoverage
@@ -760,6 +742,18 @@ struct LetterboxdPreviewResult: Decodable {
     let items: [LetterboxdPreviewItem]
 }
 
+/// A row an import could not turn into a film, named so it can be listed.
+struct LetterboxdUnresolvedTitle: Decodable, Hashable {
+    let name: String
+    let year: Int?
+
+    /// "Rashomon (1950)", or just the name when the export left Year blank.
+    var label: String {
+        guard let year else { return name }
+        return "\(name) (\(year))"
+    }
+}
+
 struct LetterboxdImportResponse: Decodable {
     /// Titles this batch accounted for, whether or not the row was new.
     let matched: Int?
@@ -771,6 +765,10 @@ struct LetterboxdImportResponse: Decodable {
     /// reason a replacing import refuses to finish.
     let unavailable: Int?
     let unusable: Int?
+    /// The rows behind `notFound` and `unavailable`. A count alone gives the
+    /// reader no way to find the gap in a list of hundreds; these name it.
+    let notFoundTitles: [LetterboxdUnresolvedTitle]?
+    let unavailableTitles: [LetterboxdUnresolvedTitle]?
     let skippedAlreadyWatched: Int?
     let replaced: Int?
     let finalised: Bool?
@@ -923,6 +921,20 @@ final class APIService {
     }
 }
 
+/// One storefront selling a title, and on what terms.
+///
+/// `tiers` holds "rent", "buy", or both. Kept apart rather than collapsed to a
+/// name, because a title you can only purchase was reading as "Rent · Apple TV".
+struct PurchaseOffer: Decodable, Hashable {
+    let name: String
+    let tiers: [String]
+
+    /// The verb that actually applies. Rent wins when a store offers both: it
+    /// is the cheaper way in, and the one someone deciding tonight wants.
+    var verb: String { tiers.contains("rent") ? "Rent" : "Buy" }
+    var label: String { "\(verb) · \(name)" }
+}
+
 // MARK: - Discovery
 
 /// One suggestion, and the reason it is being made.
@@ -937,8 +949,8 @@ struct DiscoveryCard: Decodable, Identifiable {
     let genres: [String]
     let availableOn: [String]
     /// Storefronts, for a suggestion no subscription covers. Optional so a
-    /// server that predates PVOD still decodes.
-    let purchaseOn: [String]?
+    /// server that predates VOD still decodes.
+    let purchaseOn: [PurchaseOffer]?
     let ratings: CardRatings?
     /// Why this card is here. Not decoration — a recommendation nobody can
     /// interrogate is one nobody can trust, and it is what makes a bad

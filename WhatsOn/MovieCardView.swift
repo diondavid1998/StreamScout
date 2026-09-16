@@ -158,11 +158,13 @@ struct MovieCardView: View {
                     // Rentals sit after everything a subscription covers, and
                     // carry the word: a chip reading "Apple TV" beside one
                     // reading "Netflix" would claim this costs nothing extra.
-                    ForEach(stores, id: \.self) { name in
+                    // The verb comes from the offer, so a title you can only
+                    // buy does not say "Rent".
+                    ForEach(stores, id: \.self) { store in
                         HStack(spacing: 5) {
-                            ProviderMark(name: name, size: 15)
+                            ProviderMark(name: store.name, size: 15)
                                 .accessibilityHidden(true)
-                            Text("Rent · \(name)")
+                            Text(store.label)
                                 .font(.caption2.weight(.semibold))
                                 .foregroundColor(.mkMuted)
                                 .lineLimit(1)

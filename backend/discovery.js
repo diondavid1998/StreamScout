@@ -23,7 +23,7 @@
  */
 
 const { readDiary, toPeople } = require('./analytics');
-const { ensureAnalyticsDetails, readCachedDetails } = require('./titleCache');
+const { ensureAnalyticsDetails, readCachedDetails, readCachedDetailsBulk } = require('./titleCache');
 
 /** Below this many films, a mean is an anecdote. Mirrors the analytics rule. */
 const MIN_FILMS_FOR_CONFIDENCE = 3;
@@ -35,6 +35,42 @@ const ENRICH_LIMIT = 40;
 const EXPLORATION_SHARE = 0.2;
 /** Passes on one value with no rights before it counts against. */
 const SUPPRESS_AFTER_PASSES = 4;
+
+/**
+ * What a match on each lens is worth, and how many of them one film may count.
+ *
+ * Every lens used to contribute equally and without limit, which quietly made
+ * the cast lens the loudest thing in the room: a film has one director and
+ * fifteen billed actors, so "shares four actors with films you liked" scored
+ * four times a shared director, and a genre — which a fifth of the catalog
+ * shares — counted the same as the person who made the film.
+ *
+ * The weights are ordered by how *specific* a shared value is, which is close
+ * to the inverse of how many films carry it. A cinematographer is the rarest
+ * and most telling: nobody keeps landing on the same one by accident, and it is
+ * the clearest statement about what a reader likes to look at. A genre is the
+ * broadest thing two films can share and is weighted accordingly — it still
+ * counts, it just no longer decides.
+ *
+ * `maxHits` caps how many values of one lens a single film may bank at all.
+ * It is the hard stop; `applyLens` also halves each match after the strongest,
+ * so the two together stop breadth of credits standing in for strength of
+ * match. Lenses a film carries one of (language, decade) cap at one because a
+ * second would mean the data is wrong.
+ */
+const LENS_WEIGHTS = {
+  directors:        { weight: 1.4, maxHits: 2 },
+  cinematographers: { weight: 1.2, maxHits: 2 },
+  writers:          { weight: 1.1, maxHits: 3 },
+  composers:        { weight: 1.0, maxHits: 2 },
+  keywords:         { weight: 0.8, maxHits: 4 },
+  cast:             { weight: 0.7, maxHits: 3 },
+  genres:           { weight: 0.6, maxHits: 3 },
+  languages:        { weight: 0.5, maxHits: 1 },
+  studios:          { weight: 0.5, maxHits: 2 },
+  decades:          { weight: 0.4, maxHits: 1 },
+};
+const DEFAULT_LENS_WEIGHT = { weight: 1, maxHits: 3 };
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -74,6 +110,19 @@ function mean(values) {
 }
 
 /**
+ * How much weight a name earns from sheer volume, on top of how it is rated.
+ *
+ * "Most watched" and "highest rated" are different claims and a recommender
+ * needs both: a director someone has seen thirty times is a fact about their
+ * viewing whatever the mean says about it. Log-scaled so the first few films
+ * count for most of it and a prolific career does not run away with the queue.
+ */
+function volumeWeight(filmCount) {
+  if (!filmCount || filmCount < 1) return 0;
+  return 1 + Math.log10(filmCount) / 2;
+}
+
+/**
  * How much better than their own average the reader rates each value of each
  * lens, damped by how much evidence there is for it.
  *
@@ -100,6 +149,14 @@ function buildTasteProfile(rows) {
     directors: (r) => r.directors,
     cast:      (r) => r.cast,
     writers:   (r) => r.writers,
+    // The two crew lenses the diary has always carried and this file never
+    // read. A cinematographer is the strongest style signal on a film after the
+    // director — someone who keeps returning to Deakins or Doyle is describing
+    // what they like to look at, not a coincidence — and a composer is the same
+    // claim about how a film sounds. Both cost nothing: they are already in the
+    // cached payload and already normalised onto every diary row.
+    cinematographers: (r) => r.cinematographers,
+    composers: (r) => r.composers,
     keywords:  (r) => r.keywords,
     studios:   (r) => r.studios,
   };
@@ -131,7 +188,20 @@ function buildTasteProfile(rows) {
       const confidence = Math.min(1, filmCount / MIN_FILMS_FOR_CONFIDENCE);
       const delta = valueMean !== null && overallMean !== null ? valueMean - overallMean : 0;
       scores[value] = {
-        score: (delta + bucket.bonus * 0.25) * confidence,
+        // Two different questions, and the old score only answered one.
+        //
+        // `confidence` asks "is this preference real yet", and it is satisfied
+        // at three films — correctly, because a mean over three is no longer an
+        // accident. But it then caps, so a director with three films and one
+        // with thirty scored identically, and how much of someone's viewing a
+        // name accounts for carried no weight at all past the third film.
+        //
+        // `volumeWeight` asks the other question: how much of this reader's
+        // attention this name has actually held. Logarithmic because the
+        // difference between three films and thirty is real and the difference
+        // between thirty and three hundred is mostly a long career — 3 films
+        // gives ~1.24, 30 gives ~1.74, 300 gives ~2.24.
+        score: (delta + bucket.bonus * 0.25) * confidence * volumeWeight(filmCount),
         films: filmCount,
         meanRating: valueMean,
       };
@@ -192,14 +262,37 @@ function scoreCandidate(candidate, profile, lenses, details = null) {
   const applyLens = (lens, entries, kind, describe) => {
     if (!lenses.includes(lens)) return;
     const table = profile.affinities[lens] || {};
+    const { weight, maxHits } = LENS_WEIGHTS[lens] || DEFAULT_LENS_WEIGHT;
+
+    const hits = [];
     for (const entry of entries || []) {
       const key = typeof entry === 'string' ? entry : entry?.key;
       const label = typeof entry === 'string' ? entry : entry?.label;
       const hit = key && table[key];
       if (!hit || hit.films < MIN_FILMS_FOR_CONFIDENCE) continue;
-      score += hit.score;
-      if (hit.score > 0) reasons.push({ kind, value: label, detail: describe(hit) });
+      hits.push({ hit, label });
     }
+
+    // Strongest first, then capped, then each one after the first worth less.
+    //
+    // A film carries one director and a dozen billed actors, so a lens that
+    // simply sums its matches lets the cast outvote everything else: four
+    // familiar faces in an ordinary film beat a favourite director in a good
+    // one, which is not what the reader meant by either signal.
+    //
+    // The cap is the blunt half. The division is the honest one: the second
+    // familiar face genuinely tells you less than the first did, and the third
+    // less again. Halving and thirding says so, and keeps one strong match
+    // worth more than a pile of weak ones without pretending the pile is
+    // worth nothing.
+    hits.sort((a, b) => b.hit.score - a.hit.score);
+    hits.slice(0, maxHits).forEach(({ hit, label }, rank) => {
+      const contribution = (hit.score * weight) / (rank + 1);
+      score += contribution;
+      if (contribution > 0) {
+        reasons.push({ kind, value: label, detail: describe(hit), strength: contribution });
+      }
+    });
   };
 
   const stars = (hit) => `you rate these ${hit.meanRating.toFixed(1)} over ${hit.films} films`;
@@ -216,6 +309,8 @@ function scoreCandidate(candidate, profile, lenses, details = null) {
     applyLens('directors', toPeople(details.directors), 'director', stars);
     applyLens('cast', toPeople(details.cast), 'cast', stars);
     applyLens('writers', toPeople(details.writers), 'writer', stars);
+    applyLens('cinematographers', toPeople(details.cinematographers), 'cinematographer', stars);
+    applyLens('composers', toPeople(details.composers), 'composer', stars);
     applyLens('keywords', details.keywords, 'theme', stars);
     applyLens('studios', toPeople(details.studios), 'studio', stars);
   }
@@ -227,8 +322,18 @@ function scoreCandidate(candidate, profile, lenses, details = null) {
 
   // Strongest reasons first, and only a couple: a card listing eight reasons
   // reads as a machine justifying itself.
-  reasons.sort((a, b) => b.value.length - a.value.length);
-  return { score: blended, reasons: reasons.slice(0, 3) };
+  //
+  // This compared `b.value.length - a.value.length`, which sorts by how long
+  // the name is. The card therefore led with whichever match had the longest
+  // label — so "Hoyte van Hoytema" outranked a director the reader has watched
+  // thirty times, and the stated intent and the code disagreed silently. Now it
+  // sorts on what each match actually contributed.
+  reasons.sort((a, b) => b.strength - a.strength);
+  return {
+    score: blended,
+    // `strength` is an internal ranking key, not something the card shows.
+    reasons: reasons.slice(0, 3).map(({ strength, ...reason }) => reason),
+  };
 }
 
 /**
@@ -340,16 +445,60 @@ async function buildDiscoveryQueue(db, userId, {
   }
 
   const TIER_ONE = ['genres', 'languages', 'decades'];
-  const TIER_TWO = [...TIER_ONE, 'directors', 'cast', 'writers', 'keywords', 'studios'];
+  const TIER_TWO = [
+    ...TIER_ONE,
+    'directors', 'cast', 'writers', 'cinematographers', 'composers', 'keywords', 'studios',
+  ];
+
+  const hasProfile = blendWeight(profile) > 0;
+
+  /**
+   * Everything already known about these candidates, for nothing.
+   *
+   * The two tiers exist because the crew lenses need a payload the catalog does
+   * not carry — but "does not carry" was being read as "costs a TMDB call", and
+   * it only costs one for a title nobody has looked at yet. Plenty of this pool
+   * is already in `title_details_cache`: resolved by the analytics page, pulled
+   * for a detail sheet, enriched by an earlier session.
+   *
+   * Reading those in one query changes which films can win. Before, the crew
+   * lenses only ever saw the forty candidates that ranked highest on genre,
+   * language and decade — so a film by the reader's most-watched director sat
+   * wherever its genre put it, and if that was rank two hundred nothing ever
+   * looked at who made it. Now every candidate we already know about is scored
+   * on the whole profile, and the capped TMDB budget goes to the ones we do not.
+   */
+  const knownDetails = hasProfile
+    ? await readCachedDetailsBulk(
+      db,
+      'movie',
+      candidates
+        .filter((c) => c.mediaType === 'movie')
+        .map((c) => parseInt(String(c.id).split('-')[1], 10))
+    )
+    : new Map();
 
   const tierOne = candidates
-    .map((candidate) => ({ candidate, ...scoreCandidate(candidate, profile, TIER_ONE) }))
+    .map((candidate) => {
+      const tmdbId = parseInt(String(candidate.id).split('-')[1], 10);
+      const details = candidate.mediaType === 'movie' ? knownDetails.get(tmdbId) : null;
+      if (details) {
+        return { candidate, ...scoreCandidate(candidate, profile, TIER_TWO, details), tier: 2 };
+      }
+      return { candidate, ...scoreCandidate(candidate, profile, TIER_ONE) };
+    })
     .sort((a, b) => b.score - a.score);
 
-  // Tier 2: only the shortlist, and only when the reader has a diary worth
-  // matching against. With no profile the extra axes have nothing to say and
-  // the calls would buy nothing.
-  const shortlist = blendWeight(profile) > 0 ? tierOne.slice(0, ENRICH_LIMIT) : [];
+  // The TMDB budget, spent only on candidates nothing is known about yet.
+  //
+  // Anything scored from the cache above is already on the full profile, so
+  // paying for it again would buy the same answer. Skipping those means the
+  // forty calls reach forty *new* titles rather than forty rows that were in
+  // SQLite all along — which is what makes a cold service warm up in one pass
+  // instead of forty.
+  const unknown = hasProfile ? tierOne.filter((entry) => entry.tier !== 2) : [];
+  const shortlist = unknown.slice(0, ENRICH_LIMIT);
+  const shortlisted = new Set(shortlist.map((entry) => entry.candidate.id));
   const enriched = await Promise.all(shortlist.map(async (entry) => {
     if (entry.candidate.mediaType !== 'movie') return entry;
     const tmdbId = parseInt(String(entry.candidate.id).split('-')[1], 10);
@@ -375,7 +524,11 @@ async function buildDiscoveryQueue(db, userId, {
     }
   }));
 
-  const ranked = [...enriched, ...tierOne.slice(shortlist.length)]
+  // By identity rather than by slice position: the shortlist is now a filtered
+  // subset of `tierOne`, not its head, so `slice(shortlist.length)` would drop
+  // whichever entries happened to sit in those positions and keep the ones it
+  // had just re-scored — losing cards and duplicating others.
+  const ranked = [...enriched, ...tierOne.filter((entry) => !shortlisted.has(entry.candidate.id))]
     .sort((a, b) => b.score - a.score);
 
   return {
