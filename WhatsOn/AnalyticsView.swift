@@ -620,65 +620,6 @@ struct AnalyticsView: View {
         )
     }
 
-    /// The films behind whatever the filters have narrowed to.
-    ///
-    /// Every other number on this page is a count of films the reader cannot
-    /// see. That is fine until one of them looks wrong — a director you know you
-    /// have watched more of than it says — and then there is nothing to check
-    /// against. Two causes look identical from the outside and are both common:
-    /// films the lookup has not reached, and films that resolved to the wrong
-    /// title. The first is marked here; the second is visible the moment you
-    /// read the list and find something that does not belong.
-    @ViewBuilder
-    private func filmList(_ films: [AnalyticsFilm]) -> some View {
-        let unresolved = films.filter { !$0.resolved }.count
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("The films behind this", note: "\(films.count)")
-            if unresolved > 0 {
-                caption("\(unresolved) of these could not be matched to the film database, so they count toward your totals but toward no genre, director or cast.")
-            }
-            // Lazy, and indexed rather than enumerated: this can be two hundred
-            // rows, and only the ones on screen are worth building.
-            LazyVStack(spacing: 0) {
-                ForEach(films.indices, id: \.self) { index in
-                    let film = films[index]
-                    HStack(spacing: 10) {
-                        Text(film.name)
-                            .font(.subheadline)
-                            .foregroundColor(film.resolved ? .mkText : .mkMuted)
-                            .lineLimit(1)
-                        if !film.resolved {
-                            Image(systemName: "questionmark.circle")
-                                .font(.caption2)
-                                .foregroundColor(.mkMuted)
-                                .accessibilityLabel("Not matched to the film database")
-                        }
-                        Spacer(minLength: 6)
-                        if film.viewings > 1 {
-                            Text("×\(film.viewings)")
-                                .font(.caption2.monospacedDigit()).foregroundColor(.mkMuted)
-                        }
-                        if let year = film.year {
-                            Text(String(year))
-                                .font(.caption.monospacedDigit()).foregroundColor(.mkMuted)
-                        }
-                        if let rating = film.rating {
-                            Text(String(format: "%.1f★", rating))
-                                .font(.caption.monospacedDigit()).foregroundColor(.mkMuted)
-                                .frame(minWidth: 40, alignment: .trailing)
-                        }
-                    }
-                    .padding(.horizontal, 13).padding(.vertical, 9)
-                    .accessibilityElement(children: .combine)
-                    if index < films.count - 1 {
-                        Divider().overlay(Color.mkBorder).padding(.leading, 13)
-                    }
-                }
-            }
-            .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-    }
-
     private func scopeLine(_ a: AnalyticsResponse) -> String {
         let films = a.scope.films
         if !a.scope.filtered { return "\(films) film\(films == 1 ? "" : "s")" }
@@ -720,12 +661,6 @@ struct AnalyticsView: View {
                     tagList(collection)
                 }
             }
-
-            // On every lens, because a drilled-in view is a filtered view
-            // whatever lens it happens to be pointed at, and the working is
-            // worth having on all of them. The server sends it only when
-            // something is filtered.
-            if let films = a.films, !films.isEmpty { filmList(films) }
         }
     }
 

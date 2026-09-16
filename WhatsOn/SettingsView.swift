@@ -301,6 +301,12 @@ struct ProfileTabView: View {
     @State private var showLbxMismatch = false
     @State private var lbxImportProgress: String? = nil
     @State private var lbxImportDone: String? = nil
+    /// The rows the last import could not resolve, named.
+    ///
+    /// The summary line can only ever say "4 not found", which tells a reader
+    /// that a gap exists and gives them no way to find it in a list of three
+    /// hundred. These are the four.
+    @State private var lbxUnresolved: [LetterboxdUnresolvedTitle] = []
     // Catalog refresh
     @State private var showRefreshConfirm = false
     @State private var isRefreshing = false
@@ -353,6 +359,7 @@ struct ProfileTabView: View {
                         }
                     } else if let done = lbxImportDone {
                         Text(done).font(.caption).foregroundColor(.green)
+                        if !lbxUnresolved.isEmpty { unresolvedList }
                     }
 
                     HStack(spacing: 10) {
@@ -448,6 +455,9 @@ struct ProfileTabView: View {
 
     @MainActor func handleLetterboxdFile(url: URL) async {
         lbxImportDone = nil
+        // Cleared with the summary it belongs to, or the previous import's
+        // failures would sit under the next one's result.
+        lbxUnresolved = []
         lbxImportProgress = "Reading file…"
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
@@ -486,6 +496,33 @@ struct ProfileTabView: View {
         }
     }
 
+    /// The unresolved rows, named and capped.
+    ///
+    /// Capped because the point is to be actionable, not exhaustive: a dozen
+    /// names is something a reader can scan and add by hand, and a hundred is
+    /// a wall that says no more than the count already did. With the title
+    /// matcher fixed this list is normally short — a long one is itself worth
+    /// noticing.
+    private var unresolvedList: some View {
+        let shown = lbxUnresolved.prefix(12)
+        let extra = lbxUnresolved.count - shown.count
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("Could not be matched:")
+                .font(.caption2).foregroundColor(.mkMuted)
+            ForEach(Array(shown), id: \.self) { title in
+                Text("• \(title.label)")
+                    .font(.caption2)
+                    .foregroundColor(.mkMuted)
+                    .lineLimit(1)
+            }
+            if extra > 0 {
+                Text("+ \(extra) more").font(.caption2).foregroundColor(.mkMuted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+    }
+
     @MainActor func runLetterboxdImport() async {
         // Matches MAX_IMPORT_BATCH on the server.
         let batchSize = 100
@@ -494,7 +531,10 @@ struct ProfileTabView: View {
         var totalNotFound = 0
         var totalUnavailable = 0
         var totalSkipped = 0
+        var unresolved: [LetterboxdUnresolvedTitle] = []
         var failure: String?
+        // A previous run's list must not survive into this one's summary.
+        lbxUnresolved = []
 
         // One token for the whole upload. A replacing watchlist import stamps
         // every row it writes with this and deletes the rows carrying anything
@@ -535,6 +575,10 @@ struct ProfileTabView: View {
                 totalNotFound    += resp.notFound ?? 0
                 totalUnavailable += resp.unavailable ?? 0
                 totalSkipped     += resp.skippedAlreadyWatched ?? 0
+                // Accumulated the same way the counters are, so the list covers
+                // the whole upload rather than whichever batch finished last.
+                unresolved += resp.notFoundTitles ?? []
+                unresolved += resp.unavailableTitles ?? []
             } catch {
                 // Reported, not swallowed. This used to `break` in silence, so a
                 // network blip mid-import looked exactly like a finished one.
@@ -559,6 +603,12 @@ struct ProfileTabView: View {
         }
 
         lbxImportProgress = nil
+        // Deduplicated, in the order they were met. One export can list the
+        // same film twice — a diary holds a row per viewing — and `ForEach`
+        // identifies these by value, so a repeat would be a duplicate id as
+        // well as a line the reader has already read.
+        var seen = Set<LetterboxdUnresolvedTitle>()
+        lbxUnresolved = unresolved.filter { seen.insert($0).inserted }
         if let failure {
             let kept = replacing ? " Your existing watchlist was left alone." : ""
             lbxImportDone = "⚠ Stopped after \(totalMatched) of \(lbxItems.count) — \(failure).\(kept) Try again."

@@ -2,7 +2,7 @@
 require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
 const { ensureCatalogTables } = require('./catalogCache');
-const { ensureListTables, reconcileLists, renamePvodToVod } = require('./lists');
+const { ensureListTables, reconcileLists, renamePvodToVod, purgeNegativeLookups } = require('./lists');
 const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 4000;
@@ -109,9 +109,13 @@ db.run(`CREATE TABLE IF NOT EXISTS reset_tokens (
 )`);
 });
 
-ensureCatalogTables(db).catch((error) => {
+// Held onto rather than fired and forgotten: the lookup-cache purge below needs
+// `title_lookup_cache` to exist, and that table is created here.
+const catalogTablesReady = ensureCatalogTables(db).catch((error) => {
   console.error('Failed to initialize catalog cache tables:', error);
+  throw error;
 });
+catalogTablesReady.catch(() => {});
 
 // The three lists are exclusive, and until that rule was centralised it was
 // enforced in some write paths and not others — so existing databases hold
@@ -136,6 +140,23 @@ ensureListTables(db)
   })
   .catch((error) => {
     console.error('Failed to initialize list tables:', error);
+  })
+  // Separate chain, and deliberately after both table sets exist: this one
+  // reads the repair ledger (list tables) and writes the lookup cache (catalog
+  // tables). Its own catch, so a failure here is not reported as the list
+  // tables failing to initialise.
+  .then(() => catalogTablesReady)
+  .then(() => purgeNegativeLookups(db))
+  .then((purged) => {
+    if (purged?.purged) {
+      console.log(
+        `[lookup] cleared ${purged.purged} remembered miss(es) so the corrected ` +
+        'title matcher can search for them again'
+      );
+    }
+  })
+  .catch((error) => {
+    console.error('Failed to purge remembered title lookups:', error);
   });
 
 // No scheduled refresh runs here on purpose. TMDB is called when data has never

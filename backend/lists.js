@@ -245,6 +245,40 @@ async function renamePvodToVod(db) {
 }
 
 /**
+ * Drop the remembered misses left by the old title matcher.
+ *
+ * `title_lookup_cache` stores a null for a title TMDB had nothing under, and
+ * `resolveImportBatch` serves that null for `NEGATIVE_LOOKUP_TTL_MS` — fourteen
+ * days — without asking again. That is the right behaviour for a film that
+ * genuinely does not exist, and the wrong one for these: every null written
+ * before the matcher was fixed may be a film TMDB *did* return and the old
+ * normaliser refused. Left alone, the fix would appear not to work, because
+ * re-importing would replay the stored miss rather than re-run the search.
+ *
+ * Only the nulls go. A row that resolved is an answer, still correct, and worth
+ * far more than the request it would cost to fetch again.
+ *
+ * One-off and ledger-guarded like the repairs above, for a different reason:
+ * it is not destructive of anything a user can see, but a cache that empties
+ * itself on every boot is not a cache.
+ */
+async function purgeNegativeLookups(db) {
+  const done = await all(db, "SELECT 1 FROM list_repairs WHERE name = 'negative-lookups-purged-v1'");
+  if (done.length) return null;
+  await run(db, "INSERT OR IGNORE INTO list_repairs (name) VALUES ('negative-lookups-purged-v1')");
+
+  // Counted before the delete: sqlite3's `this.changes` after a statement that
+  // matched nothing reports the previous statement's count, which is how the
+  // list repair came to run twice.
+  const [{ n = 0 } = {}] = await all(
+    db,
+    'SELECT COUNT(*) AS n FROM title_lookup_cache WHERE item_id IS NULL'
+  );
+  if (n > 0) await run(db, 'DELETE FROM title_lookup_cache WHERE item_id IS NULL');
+  return { purged: n };
+}
+
+/**
  * One-off repair for the overlaps that already exist.
  *
  * Precedence is watched > currently watching > watchlist, which is what every
@@ -328,5 +362,6 @@ module.exports = {
   finaliseWatchlistImport,
   reconcileLists,
   renamePvodToVod,
+  purgeNegativeLookups,
   findListOverlaps,
 };

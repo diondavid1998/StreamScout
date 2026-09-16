@@ -33,8 +33,6 @@ const QUADRANT_POINTS = 10;
 // Entries per lens on the overview. Three was a teaser; five is enough to
 // recognise yourself in the list without turning the page into every ranking.
 const HIGHLIGHT_DEPTH = 5;
-/** How many films the drilled-in list shows. Long enough to hold a career. */
-const FILM_LIST_DEPTH = 200;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -555,46 +553,6 @@ function ratedFilms(rows) {
     }
   }
   return [...byFilm.values()];
-}
-
-/**
- * One row per film, newest scoring first, with whether the film database ever
- * matched it.
- *
- * `resolved` is the part worth showing. A film the lookup could not match
- * contributes nothing to any genre, director or cast count, so a lens that
- * looks short is usually short for that reason — and a film that resolved to
- * the *wrong* title is only visible by reading the list and noticing something
- * that does not belong.
- */
-function buildFilmList(rows) {
-  const byFilm = new Map();
-  for (const row of rows) {
-    const existing = byFilm.get(row.filmKey);
-    if (!existing) {
-      byFilm.set(row.filmKey, {
-        name: row.name,
-        year: row.year,
-        rating: row.rating,
-        watchedOn: row.watchedOn,
-        posterUrl: row.posterUrl,
-        resolved: row.resolved,
-        viewings: 1,
-      });
-      continue;
-    }
-    existing.viewings += 1;
-    // The most recent scoring stands, as everywhere else on this page.
-    if ((row.watchedOn || '') >= (existing.watchedOn || '')) {
-      existing.rating = row.rating;
-      existing.watchedOn = row.watchedOn;
-    }
-  }
-  return [...byFilm.values()]
-    .sort((a, b) =>
-      (b.watchedOn || '').localeCompare(a.watchedOn || '')
-      || String(a.name).localeCompare(String(b.name)))
-    .slice(0, FILM_LIST_DEPTH);
 }
 
 function buildSummary(rows) {
@@ -1294,22 +1252,8 @@ async function computeAnalytics(db, userId, options = {}) {
   const summary = buildSummary(rows);
   const overallMean = summary.meanRating;
 
-  // The films behind whatever the filters have narrowed to.
-  //
-  // Every number on this page is a count of films the reader cannot see. That
-  // is fine until one of them looks wrong — and then there is no way to tell a
-  // thin lookup from a mis-resolved title, because the page will not say which
-  // films it counted. Drilling into an entry sets a filter, so this list is
-  // simply "what is in scope", and on a drilled-in view that is exactly the
-  // working behind the number.
-  //
-  // Only sent when something is filtered: unfiltered it would be the whole
-  // library on every request, which is a megabyte nobody asked for.
-  const filmList = Object.keys(applied).length > 0 ? buildFilmList(rows) : null;
-
   const payload = {
     dimension,
-    films: filmList,
     // Every lens the client may offer, named by the server so the two cannot
     // drift out of step.
     dimensions: Object.entries(DIMENSIONS).map(([id, spec]) => ({

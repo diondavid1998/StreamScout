@@ -1990,6 +1990,14 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     let unavailable = 0;
     let matched = 0;
     let added = 0;
+    // The rows behind those two counts, so the summary can name them.
+    //
+    // A count on its own is not something a reader can act on: "4 not found"
+    // out of three hundred says a gap exists and gives no way to find it. The
+    // names are already here — `results` is index-aligned with `usable` — and
+    // were simply being dropped on the floor.
+    const notFoundTitles = [];
+    const unavailableTitles = [];
 
     let results;
     try {
@@ -2014,16 +2022,33 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
           ? await alreadyWatched(db, req.user.id, candidateIds)
           : new Set();
 
-        for (const result of results) {
+        // Indexed rather than `for…of`, because `results[i]` and `usable[i]`
+        // are the same row: resolveImportBatch returns one entry per input in
+        // input order. That alignment is what lets a failure be named.
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          const { name, year } = usable[i];
           // Told apart on purpose. "TMDB has nothing under this name" is about
           // the film; "TMDB did not answer" is about the network, and reporting
           // the second as the first is what made an outage look like a library
           // full of unknown films.
-          if (result === LOOKUP_UNAVAILABLE) { unavailable++; continue; }
-          if (!result) { notFound++; continue; }
+          if (result === LOOKUP_UNAVAILABLE) {
+            unavailable++;
+            unavailableTitles.push({ name, year: Number.isInteger(year) ? year : null });
+            continue;
+          }
+          if (!result) {
+            notFound++;
+            notFoundTitles.push({ name, year: Number.isInteger(year) ? year : null });
+            continue;
+          }
           // Letterboxd holds films and nothing else, so a television match here
           // is the search having reached for the nearest thing, not a show.
-          if (result.mediaType !== 'movie') { notFound++; continue; }
+          if (result.mediaType !== 'movie') {
+            notFound++;
+            notFoundTitles.push({ name, year: Number.isInteger(year) ? year : null });
+            continue;
+          }
           if (watched.has(result.itemId)) { skippedAlreadyWatched.add(result.itemId); continue; }
 
           const { changes } = await runSql(
@@ -2079,6 +2104,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         return res.status(503).json({
           error: 'The title database stopped answering, so your existing watchlist was left alone. Try the import again.',
           matched, notFound, unavailable, unusable, processed: batch.length, replaced: 0, finalised: false,
+          notFoundTitles, unavailableTitles,
         });
       }
       try {
@@ -2100,6 +2126,11 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       notFound,
       unavailable,
       unusable,
+      // The rows behind the two counts above, named. The client accumulates
+      // these across batches so the summary can list what it could not import
+      // instead of only counting it.
+      notFoundTitles,
+      unavailableTitles,
       skippedAlreadyWatched: skippedAlreadyWatched.size,
       processed: batch.length,
       replaced,

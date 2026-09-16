@@ -818,8 +818,41 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
 // ── Letterboxd title search ───────────────────────────────────────────────
 // Searches TMDB by title + year with ±1 year tolerance.
 // Tries movie first, then TV, returns {itemId, title, posterUrl, mediaType} or null.
+/**
+ * The form two spellings of the same title are compared in.
+ *
+ * This decides whether a result TMDB already returned is allowed to count, so
+ * anything it throws away is a film the search found and the import reported as
+ * missing. The old rule kept `[a-z0-9 ]` and deleted the rest, which lost three
+ * classes of title outright:
+ *
+ *   - An accent was deleted rather than folded, so TMDB's "Rashōmon" became
+ *     `rashmon` and could never equal an export's "Rashomon". Same for Amélie,
+ *     Léon, and every other title the two sources spell differently.
+ *   - A title in any non-Latin script normalised to the empty string, and the
+ *     search returns null on an empty name — so those rows were reported as not
+ *     found without TMDB ever being asked about them.
+ *   - Punctuation was deleted instead of separating the words it sat between,
+ *     so "Spider-Man" became `spiderman` and stopped matching "Spider Man".
+ *
+ * Folding to ASCII handles the first, `\p{L}\p{N}` keeps the second (a Japanese
+ * title now normalises to itself and matches its own spelling exactly), and
+ * collapsing punctuation to a single space handles the third — which also keeps
+ * the word-boundary test in `titleMatches` working, since that test needs
+ * single spaces to line up.
+ */
 function normalizeTitle(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  return String(value || '')
+    // NFKD so a ligature or a full-width character decomposes too, not just an
+    // accented letter; the combining marks it leaves behind are then dropped.
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    // Every run of non-alphanumeric characters becomes one space, so words that
+    // punctuation separated stay separated and words it joined stay joined.
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Only accept an exact normalized-title match (or a whole-word substring match)

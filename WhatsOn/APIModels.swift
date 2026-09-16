@@ -513,22 +513,6 @@ struct AnalyticsBreakdown: Decodable {
     let hidden: Int?
 }
 
-/// One film behind a number, with whether the film database ever matched it.
-///
-/// The page is otherwise entirely counts of films the reader cannot see, which
-/// is fine until one looks wrong — and then there is no way to tell a thin
-/// lookup from a title that resolved to the wrong film.
-struct AnalyticsFilm: Decodable, Identifiable {
-    var id: String { "\(name)|\(year ?? 0)" }
-    let name: String
-    let year: Int?
-    let rating: Double?
-    let watchedOn: String?
-    let posterUrl: String?
-    let resolved: Bool
-    let viewings: Int
-}
-
 /// A lens the page can be pointed at. Named by the server so the two can't drift.
 struct AnalyticsDimension: Decodable, Identifiable {
     let id: String
@@ -618,9 +602,6 @@ struct AnalyticsResponse: Decodable {
     let sort: String?
     let sorts: [AnalyticsSort]?
     let minFilms: Int?
-    /// The films in scope, sent only once something is filtered — unfiltered it
-    /// would be the whole library on every request.
-    let films: [AnalyticsFilm]?
     let filters: AnalyticsFilters
     let scope: AnalyticsScope
     let coverage: AnalyticsCoverage
@@ -761,6 +742,18 @@ struct LetterboxdPreviewResult: Decodable {
     let items: [LetterboxdPreviewItem]
 }
 
+/// A row an import could not turn into a film, named so it can be listed.
+struct LetterboxdUnresolvedTitle: Decodable, Hashable {
+    let name: String
+    let year: Int?
+
+    /// "Rashomon (1950)", or just the name when the export left Year blank.
+    var label: String {
+        guard let year else { return name }
+        return "\(name) (\(year))"
+    }
+}
+
 struct LetterboxdImportResponse: Decodable {
     /// Titles this batch accounted for, whether or not the row was new.
     let matched: Int?
@@ -772,6 +765,10 @@ struct LetterboxdImportResponse: Decodable {
     /// reason a replacing import refuses to finish.
     let unavailable: Int?
     let unusable: Int?
+    /// The rows behind `notFound` and `unavailable`. A count alone gives the
+    /// reader no way to find the gap in a list of hundreds; these name it.
+    let notFoundTitles: [LetterboxdUnresolvedTitle]?
+    let unavailableTitles: [LetterboxdUnresolvedTitle]?
     let skippedAlreadyWatched: Int?
     let replaced: Int?
     let finalised: Bool?
