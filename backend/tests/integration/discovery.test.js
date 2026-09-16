@@ -66,6 +66,7 @@ describe('the taste profile', () => {
     filmKey: `f${i}`, name: `Film ${i}`, year: 2010, rating: r.rating ?? null,
     genres: r.genres || [], language: 'en', directors: r.directors || [],
     cast: [], writers: [], keywords: [], studios: [],
+    cinematographers: r.cinematographers || [], composers: r.composers || [],
     isRewatch: Boolean(r.rewatch), isLiked: Boolean(r.liked), hasReview: false,
     countries: [], tags: [], crowdRating: null, resolved: true,
   }));
@@ -95,6 +96,42 @@ describe('the taste profile', () => {
     ));
     expect(endorsed.affinities.genres.Drama.score)
       .toBeGreaterThan(plain.affinities.genres.Drama.score);
+  });
+
+  test('how much of your viewing a name holds counts, not just how you rate it', () => {
+    // "Most watched" and "highest rated" are different claims and the profile
+    // owes the reader both. Confidence is satisfied at three films and then
+    // caps, so without a volume term a director with three films and one with
+    // thirty scored identically — and the one the reader has actually built
+    // their viewing around carried no extra weight at all.
+    const person = (id) => [{ key: `p:${id}`, label: `Director ${id}` }];
+    const profile = buildTasteProfile(diary([
+      ...Array.from({ length: 3 }, () => ({ rating: 4.5, directors: person(1) })),
+      ...Array.from({ length: 30 }, () => ({ rating: 4.5, directors: person(2) })),
+      ...Array.from({ length: 20 }, () => ({ rating: 2, genres: ['Horror'] })),
+    ]));
+
+    const occasional = profile.affinities.directors['p:1'];
+    const habitual = profile.affinities.directors['p:2'];
+    // Rated identically. Only the volume differs.
+    expect(occasional.meanRating).toBeCloseTo(habitual.meanRating, 5);
+    expect(habitual.score).toBeGreaterThan(occasional.score);
+  });
+
+  test('the crew the diary always carried is now part of the profile', () => {
+    // Both were on every diary row and in every cached payload, and the
+    // recommender read neither.
+    const profile = buildTasteProfile(diary([
+      ...Array.from({ length: 5 }, () => ({
+        rating: 5,
+        cinematographers: [{ key: 'p:10', label: 'Roger Deakins' }],
+        composers: [{ key: 'p:20', label: 'Jóhann Jóhannsson' }],
+      })),
+      ...Array.from({ length: 10 }, () => ({ rating: 2.5 })),
+    ]));
+
+    expect(profile.affinities.cinematographers['p:10'].score).toBeGreaterThan(0);
+    expect(profile.affinities.composers['p:20'].score).toBeGreaterThan(0);
   });
 
   test('a thin diary is blended toward the crowd rather than believed', () => {
@@ -403,5 +440,215 @@ describe('a suggestion nobody streams', () => {
     // render no availability line at all.
     expect(card.availableOn).toEqual([]);
     expect(card.purchaseOn).toEqual([{ name: 'Apple TV', tiers: ['rent'] }]);
+  });
+});
+
+
+/**
+ * What the ranking weighs, now that it weighs more than genre.
+ *
+ * The queue used to score everything on genre, language and decade, then buy a
+ * TMDB call for the best forty and score only those on who made the film. Two
+ * consequences the reader could feel: a film by the director they have watched
+ * thirty times sat wherever its genre put it, and a film sharing four familiar
+ * faces outranked one sharing an author, because every lens counted the same
+ * and none of them had a ceiling.
+ */
+describe('what the ranking weighs', () => {
+  // A reader with a clear author and a clear set of favourite faces, both rated
+  // well above their own average.
+  const DIARY = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    ...Array.from({ length: 8 }, (_, i) => `2026-01-0${(i % 9) + 1},Auteur Film ${i},200${i},https://boxd.it/a${i},5`),
+    ...Array.from({ length: 8 }, (_, i) => `2026-03-0${(i % 9) + 1},Ensemble Film ${i},200${i},https://boxd.it/e${i},5`),
+    ...Array.from({ length: 30 }, (_, i) => `2026-02-01,Filler Film ${i},1999,https://boxd.it/f${i},2.5`),
+  ].join('\n');
+
+  /** Credits for the diary, keyed by the title the search resolved. */
+  function creditsFor(name, id) {
+    if (String(name).startsWith('Auteur')) {
+      return {
+        cast: [],
+        crew: [
+          { id: 7001, job: 'Director', name: 'The Auteur' },
+          { id: 7002, job: 'Director of Photography', name: 'The Eye' },
+          { id: 7003, job: 'Original Music Composer', name: 'The Ear' },
+        ],
+      };
+    }
+    if (String(name).startsWith('Ensemble')) {
+      return {
+        cast: [
+          { id: 8001, name: 'Face One' }, { id: 8002, name: 'Face Two' },
+          { id: 8003, name: 'Face Three' }, { id: 8004, name: 'Face Four' },
+        ],
+        crew: [{ id: 9999, job: 'Director', name: `Jobbing Director ${id}` }],
+      };
+    }
+    return { cast: [], crew: [{ id: 6000 + id, job: 'Director', name: `Nobody ${id}` }] };
+  }
+
+  async function seedDiary() {
+    let next = 5000;
+    const byId = {};
+    const { searchTitleOnTmdb } = require('../../movieService');
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      const id = ++next; byId[id] = name;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id,
+      title: byId[id] || CANDIDATE_CREDITS[id]?.title || `Title ${id}`,
+      runtime: 100, vote_average: 7, vote_count: 900, original_language: 'en',
+      genres: [{ name: 'Drama' }], external_ids: { imdb_id: `tt${id}` },
+      keywords: { keywords: [] }, release_dates: { results: [] },
+      production_countries: [], production_companies: [],
+      credits: CANDIDATE_CREDITS[id]?.credits || creditsFor(byId[id], id),
+    }));
+    await auth(request(app).post('/letterboxd/diary')).send({ files: [{ name: 'ratings.csv', text: DIARY }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 200 });
+  }
+
+  /** Credits the candidates carry, keyed by TMDB id. */
+  const CANDIDATE_CREDITS = {};
+
+  test('one shared author outranks four shared faces', async () => {
+    await seedDiary();
+
+    // Identical to the catalog: same genre, language, decade and crowd score.
+    CANDIDATE_CREDITS[910] = {
+      title: 'By The Auteur',
+      credits: { cast: [], crew: [{ id: 7001, job: 'Director', name: 'The Auteur' }] },
+    };
+    CANDIDATE_CREDITS[911] = {
+      title: 'Four Familiar Faces',
+      credits: {
+        cast: [
+          { id: 8001, name: 'Face One' }, { id: 8002, name: 'Face Two' },
+          { id: 8003, name: 'Face Three' }, { id: 8004, name: 'Face Four' },
+        ],
+        crew: [{ id: 9998, job: 'Director', name: 'Nobody At All' }],
+      },
+    };
+    await addCandidate({ id: 910, title: 'By The Auteur', genres: ['Drama'], year: 2015, imdb: '7.0' });
+    await addCandidate({ id: 911, title: 'Four Familiar Faces', genres: ['Drama'], year: 2015, imdb: '7.0' });
+
+    const res = await auth(request(app).get('/discovery?limit=10'));
+    const titles = res.body.cards.map((c) => c.title);
+
+    // A film has one director and a dozen billed actors. Counting them equally
+    // is what let breadth of credits stand in for strength of match.
+    expect(titles.indexOf('By The Auteur')).toBeLessThan(titles.indexOf('Four Familiar Faces'));
+  });
+
+  test('the cinematographer and the composer both lift a film', async () => {
+    await seedDiary();
+
+    CANDIDATE_CREDITS[920] = {
+      title: 'Shot And Scored',
+      credits: {
+        cast: [],
+        crew: [
+          { id: 9997, job: 'Director', name: 'Nobody Here' },
+          { id: 7002, job: 'Director of Photography', name: 'The Eye' },
+          { id: 7003, job: 'Original Music Composer', name: 'The Ear' },
+        ],
+      },
+    };
+    CANDIDATE_CREDITS[921] = {
+      title: 'Plain Drama',
+      credits: { cast: [], crew: [{ id: 9996, job: 'Director', name: 'Nobody Else' }] },
+    };
+    await addCandidate({ id: 920, title: 'Shot And Scored', genres: ['Drama'], year: 2015, imdb: '7.0' });
+    await addCandidate({ id: 921, title: 'Plain Drama', genres: ['Drama'], year: 2015, imdb: '7.0' });
+
+    const res = await auth(request(app).get('/discovery?limit=10'));
+    const titles = res.body.cards.map((c) => c.title);
+    expect(titles.indexOf('Shot And Scored')).toBeLessThan(titles.indexOf('Plain Drama'));
+
+    // And it says which, rather than falling back to "Drama".
+    const lifted = res.body.cards.find((c) => c.title === 'Shot And Scored');
+    const kinds = lifted.because.map((r) => r.kind);
+    expect(kinds).toEqual(expect.arrayContaining(['cinematographer', 'composer']));
+  });
+
+  test('a cached film is scored on who made it even from outside the enrich window', async () => {
+    await seedDiary();
+
+    // Fifty candidates the catalog cannot tell apart, and one of them — the one
+    // by the reader's author — deliberately last on the only signals tier 1 has.
+    // The enrich budget is forty, so under the old shape nothing would ever have
+    // looked at its credits: it was not in the top forty by genre, and the crew
+    // lenses only ever saw the top forty.
+    for (let i = 0; i < 50; i++) {
+      await addCandidate({ id: 1000 + i, title: `Filler ${i}`, genres: ['Drama'], year: 2015, imdb: '7.9' });
+    }
+    CANDIDATE_CREDITS[1099] = {
+      title: 'Buried Auteur',
+      credits: { cast: [], crew: [{ id: 7001, job: 'Director', name: 'The Auteur' }] },
+    };
+    await addCandidate({ id: 1099, title: 'Buried Auteur', genres: ['Drama'], year: 2015, imdb: '5.5' });
+
+    // Warm the details cache the way the analytics page or a detail sheet would.
+    const { ensureAnalyticsDetails } = require('../../titleCache');
+    await ensureAnalyticsDetails(db, 1099);
+    fetchTitleWithCredits.mockClear();
+
+    const res = await auth(request(app).get('/discovery?limit=10'));
+    const card = res.body.cards.find((c) => c.title === 'Buried Auteur');
+
+    // It surfaces at all, and for the right reason.
+    expect(card).toBeDefined();
+    expect(card.tier).toBe(2);
+    expect(card.because.some((r) => r.kind === 'director' && r.value === 'The Auteur')).toBe(true);
+    // And the TMDB budget was not spent on a film SQLite already described.
+    expect(fetchTitleWithCredits).not.toHaveBeenCalledWith('movie', 1099);
+  });
+
+  test('a payload cached before crew was kept is refilled, not read as a blank', async () => {
+    await seedDiary();
+
+    CANDIDATE_CREDITS[950] = {
+      title: 'Stale Row',
+      credits: { cast: [], crew: [{ id: 7001, job: 'Director', name: 'The Auteur' }] },
+    };
+    await addCandidate({ id: 950, title: 'Stale Row', genres: ['Drama'], year: 2015, imdb: '7.0' });
+
+    // A row from before crew and keywords were kept. It parses, and every lens
+    // that matters reads as an empty array — so accepting it would score "never
+    // looked this film up" as "shares nothing with you", permanently, because
+    // nothing would go back for it.
+    await new Promise((resolve, reject) => db.run(
+      `INSERT INTO title_details_cache (media_type, tmdb_id, payload_json, fetched_at)
+       VALUES ('movie', 950, ?, CURRENT_TIMESTAMP)`,
+      [JSON.stringify({ id: 950, title: 'Stale Row', genres: ['Drama'], cast: [], directors: [] })],
+      (e) => (e ? reject(e) : resolve())
+    ));
+
+    const res = await auth(request(app).get('/discovery?limit=10'));
+    const card = res.body.cards.find((c) => c.title === 'Stale Row');
+
+    // Refilled through the enrich path and scored on the director after all.
+    expect(card.because.some((r) => r.kind === 'director' && r.value === 'The Auteur')).toBe(true);
+  });
+
+  test('the reason a card leads with is its strongest, not its longest', async () => {
+    await seedDiary();
+
+    CANDIDATE_CREDITS[940] = {
+      title: 'Mixed Signals',
+      credits: {
+        cast: [{ id: 8001, name: 'Face One With A Very Long Name Indeed' }],
+        crew: [{ id: 7001, job: 'Director', name: 'The Auteur' }],
+      },
+    };
+    await addCandidate({ id: 940, title: 'Mixed Signals', genres: ['Drama'], year: 2015, imdb: '7.0' });
+
+    const res = await auth(request(app).get('/discovery?limit=10'));
+    const card = res.body.cards.find((c) => c.title === 'Mixed Signals');
+
+    // Reasons used to be sorted by how long the label was, so the actor with
+    // the longest name led over the director the reader has built a diary on.
+    expect(card.because[0].kind).toBe('director');
   });
 });
