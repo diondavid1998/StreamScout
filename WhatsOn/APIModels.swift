@@ -172,6 +172,9 @@ struct CatalogMeta: Codable {
     let lastUpdatedAt: String?
     let refreshing: Bool?
     let languages: [String]?
+    /// Set only when the shelf is empty *because* a sync failed, so the app can
+    /// say so instead of letting an outage read as "this service has nothing".
+    let syncError: String?
 }
 
 struct CatalogResponse: Decodable {

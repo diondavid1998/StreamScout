@@ -52,6 +52,12 @@ const DEFAULT_REGION = 'US';
 // v3 added free and ad-supported tiers alongside flatrate.
 const PROVIDER_CONFIG_VERSION = 4;
 const syncLocks = new Map();
+// Why a scope last failed to sync, so an empty catalog can say "TMDB would not
+// answer" instead of silently looking like a service with nothing on it. Also
+// how long to leave it alone: a full sweep is ~1,000 requests, and restarting it
+// on every page load is what turns one refusal into a rate-limited hour.
+const syncFailures = new Map();
+const SYNC_RETRY_COOLDOWN_MS = 2 * 60 * 1000;
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
 const savedRatingLocks = new Map();
@@ -488,6 +494,17 @@ async function syncScope(
       snapshotMode: true,
     });
 
+    // A sweep can finish having lost titles without that being an outage — but
+    // it should never be silent, because the same counter goes up when a code
+    // change starts throwing inside the mapper rather than when TMDB declines.
+    const { discoverFailures = 0, enrichFailures = 0 } = catalog.meta || {};
+    if (discoverFailures || enrichFailures) {
+      console.warn(
+        `[cache] ${scopeKey} synced with gaps: ${discoverFailures} discover pages ` +
+        `and ${enrichFailures} titles could not be loaded`
+      );
+    }
+
     const syncStartTime = new Date().toISOString();
 
     await enqueueWrite(async () => {
@@ -642,7 +659,16 @@ async function syncScope(
     });
 
     return { scopeKey, itemCount: catalog.items.length, meta: catalog.meta };
-  })().finally(() => {
+  })().then(
+    (result) => {
+      syncFailures.delete(scopeKey);
+      return result;
+    },
+    (error) => {
+      syncFailures.set(scopeKey, { message: error.message, at: Date.now() });
+      throw error;
+    }
+  ).finally(() => {
     syncLocks.delete(scopeKey);
   });
 
@@ -654,13 +680,16 @@ async function ensureScopeSynced(db, { platforms, languages, region = DEFAULT_RE
   const scopeKey = buildScopeKey(platforms, region, languages);
   const stateRow = await get(db, 'SELECT * FROM catalog_cache_state WHERE scope_key = ?', [scopeKey]);
 
+  const failure = syncFailures.get(scopeKey);
+  const coolingDown = failure && Date.now() - failure.at < SYNC_RETRY_COOLDOWN_MS;
+
   if (!stateRow) {
-    if (!syncLocks.has(scopeKey)) {
+    if (!syncLocks.has(scopeKey) && !coolingDown) {
       syncScope(db, { platforms, languages, region }).catch((error) => {
         console.error(`Initial catalog sync failed for ${scopeKey}:`, error);
       });
     }
-  } else if (isScopeStale(stateRow) && !syncLocks.has(scopeKey)) {
+  } else if (isScopeStale(stateRow) && !syncLocks.has(scopeKey) && !coolingDown) {
     syncScope(db, { platforms, languages, region }).catch((error) => {
       console.error(`Background catalog refresh failed for ${scopeKey}:`, error);
     });
@@ -1312,6 +1341,7 @@ async function readCachedCatalog(
         syncLocks.has(scopeKey) ||
         identifierBackfillLocks.has(scopeKey) ||
         ratingHydrationLocks.has(scopeKey),
+      syncError: totalCount === 0 && !stateRow ? (syncFailures.get(scopeKey)?.message || null) : null,
       cacheMode: 'manual_refresh',
     },
   };
@@ -1567,6 +1597,7 @@ module.exports = {
   extractAvailability,
   buildProviderLookupMap,
   ensureScopeSynced,
+  resetSyncFailures: () => syncFailures.clear(),
   readCachedCatalog,
   buildSortExpression,
   getWatchlistItemsWithAvailability,
