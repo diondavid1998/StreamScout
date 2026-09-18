@@ -47,6 +47,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .themedSheet()
     }
 
     var tabPicker: some View {

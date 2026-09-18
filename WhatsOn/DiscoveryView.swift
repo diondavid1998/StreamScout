@@ -68,7 +68,7 @@ struct DiscoveryView: View {
         }
         .background(Color.mkBackground.ignoresSafeArea())
         .task { await load() }
-        .sheet(isPresented: $showFilters) { filterSheet }
+        .sheet(isPresented: $showFilters) { filterSheet.themedSheet() }
         .sheet(isPresented: $showGenres) {
             GenrePickerSheet(selected: $genreFilters) { Task { await load(reset: true) } }
         }

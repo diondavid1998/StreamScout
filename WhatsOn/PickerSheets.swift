@@ -91,6 +91,7 @@ struct GenrePickerSheet: View {
                 }
             }
         }
+        .themedSheet()
     }
 }
 
@@ -181,5 +182,6 @@ struct LanguagePickerSheet: View {
                 }
             }
         }
+        .themedSheet()
     }
 }

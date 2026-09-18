@@ -15,6 +15,7 @@ const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const {
   ensureScopeSynced,
+  getPersonTitlesOnPlatforms,
   readCachedCatalog,
   getWatchlistItemsWithAvailability,
   hydrateSavedTitleRatings,
@@ -46,7 +47,7 @@ const {
   finaliseWatchlistImport,
 } = require('./lists');
 const { computeAnalytics, parseFilters, invalidateDiary } = require('./analytics');
-const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson, isTmdbUnavailable } = require('./movieService');
+const { searchTitleOnTmdb, searchCatalog, isTmdbUnavailable, TmdbUnavailableError } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -706,20 +707,49 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   });
 
   // ── Person filmography on streaming ──────────────────────────────────────
-  app.get('/titles/person/:personId', authenticateToken, (req, res) => {
-    const personId = parseInt(req.params.personId, 10);
-    if (!personId) return res.status(400).json({ error: 'Invalid personId' });
-    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], async (err, row) => {
-      if (err || !row) return res.status(500).json({ error: 'Database error' });
-      let platforms = [];
-      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
-      try {
-        const items = await fetchTitlesByPerson(personId, platforms);
-        res.json({ items });
-      } catch (e) {
-        res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
+  //
+  // `:person` is a TMDB id, or one of the identity keys the analytics page
+  // uses — `p:<id>` where the import resolved one, `n:<name>` where it did not.
+  // `?role=director` asks for that person's directing work specifically, which
+  // is the difference between the Directors lens answering with what someone
+  // directed and answering with the cameos they turned up in.
+  app.get('/titles/person/:person', catalogLimiter, authenticateToken, async (req, res) => {
+    const person = String(req.params.person || '').trim();
+    if (!person) return res.status(400).json({ error: 'Invalid person' });
+
+    const role = typeof req.query.role === 'string' ? req.query.role.toLowerCase() : null;
+    const region = req.query.region || DEFAULT_REGION;
+
+    let row;
+    try {
+      row = await getRow(db, 'SELECT platforms, languages FROM users WHERE id = ?', [req.user.id]);
+    } catch {
+      return res.status(500).json({ error: 'Database error' });
+    }
+    if (!row) return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+
+    let platforms = [];
+    let languages = [];
+    try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
+    try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+
+    // Nothing selected is not an empty filmography, and saying "not on your
+    // services" when there are no services is the wrong sentence.
+    if (!platforms.length) {
+      return res.json({ items: [], personId: null, personName: null, noPlatforms: true });
+    }
+
+    try {
+      const result = await getPersonTitlesOnPlatforms(db, {
+        person, role, platforms, languages, region,
+      });
+      res.json(result);
+    } catch (e) {
+      if (e instanceof TmdbUnavailableError || isTmdbUnavailable()) {
+        return res.status(503).json({ error: 'TMDB is not answering right now. Try again shortly.' });
       }
-    });
+      res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
+    }
   });
 
   // ── Catalog status ────────────────────────────────────────────────────────

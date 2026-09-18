@@ -99,6 +99,10 @@ struct CatalogItem: Identifiable {
     var rottenTomatoesAudience: String?
     var metacriticRating: String?
     var metacriticAudience: String?
+    /// What this person did on this title — "Director", "Screenplay", a
+    /// character name. Only the person filmography endpoint sends it, and a
+    /// title can carry more than one (directed and wrote).
+    var roles: [String]?
 
     /// Media classification derived from the backend's mediaType string.
     var kind: MediaKind { mediaType == "tv" ? .series : .movie }
@@ -107,7 +111,7 @@ struct CatalogItem: Identifiable {
 extension CatalogItem: Decodable {
     enum CodingKeys: String, CodingKey {
         case id, title, mediaType, year, overview, posterUrl, genres, availableOn
-        case purchaseOn
+        case purchaseOn, roles
         case popularity, tmdbRating, tmdbVotes
         // Backend nests all third-party ratings inside a "ratings" object
         case ratings
@@ -139,6 +143,7 @@ extension CatalogItem: Decodable {
         genres      = try? c.decode([String].self,  forKey: .genres)
         availableOn = try? c.decode([String].self,  forKey: .availableOn)
         purchaseOn  = try? c.decode([PurchaseOffer].self, forKey: .purchaseOn)
+        roles       = try? c.decode([String].self,  forKey: .roles)
         popularity  = try? c.decode(Double.self,    forKey: .popularity)
         tmdbVotes   = try? c.decode(Int.self,       forKey: .tmdbVotes)
 
@@ -172,6 +177,9 @@ struct CatalogMeta: Codable {
     let lastUpdatedAt: String?
     let refreshing: Bool?
     let languages: [String]?
+    /// Set only when the shelf is empty *because* a sync failed, so the app can
+    /// say so instead of letting an outage read as "this service has nothing".
+    let syncError: String?
 }
 
 struct CatalogResponse: Decodable {
@@ -803,8 +811,42 @@ struct SimpleResponse: Decodable {
 
 // MARK: - Person Filmography
 
+/// Who a person page is about, and how it was asked.
+///
+/// The analytics page knows people by the identity key its lenses group on —
+/// `p:<tmdb id>` where the import captured one, `n:<name>` where it did not —
+/// and by the lens they were listed under, which is the role to answer in. The
+/// detail sheet knows a cast member by their TMDB id and nothing else.
+struct PersonRef: Identifiable, Hashable {
+    /// What the server is asked for: a bare id, or one of the analytics keys.
+    let reference: String
+    let name: String
+    /// The lens they came from — "director", "writer", "actor" and so on. Nil
+    /// asks for everything they have worked on.
+    let role: String?
+
+    var id: String { "\(reference)|\(role ?? "")" }
+
+    init(reference: String, name: String, role: String? = nil) {
+        self.reference = reference
+        self.name = name
+        self.role = role
+    }
+
+    init(castMember: CastMember) {
+        self.init(reference: String(castMember.id), name: castMember.name, role: nil)
+    }
+}
+
 struct PersonMoviesResponse: Decodable {
     let items: [CatalogItem]
+    /// The name the server settled on, which is the answer to an `n:` key that
+    /// had to go through search. Nil on a server that predates it.
+    let personName: String?
+    let personId: Int?
+    /// True when the reader has picked no services at all — a different fact
+    /// from "nothing of theirs is on the ones you picked".
+    let noPlatforms: Bool?
 }
 
 // MARK: - Password Reset

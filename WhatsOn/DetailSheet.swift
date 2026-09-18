@@ -144,6 +144,7 @@ struct DetailSheet: View {
             await loadDetails()
             await loadWatched()
         }
+        .themedSheet()
     }
 
     // MARK: Hero
@@ -724,7 +725,7 @@ struct CastCell: View {
         }
         .buttonStyle(ScaleButtonStyle())
         .sheet(isPresented: $showPersonMovies) {
-            PersonMoviesSheet(person: member)
+            PersonMoviesSheet(person: PersonRef(castMember: member))
         }
     }
     var placeholderPerson: some View {
@@ -737,13 +738,30 @@ struct CastCell: View {
 
 // MARK: - Person Movies Sheet
 
+/// One person's work, narrowed to what the reader can actually watch.
+///
+/// Reached two ways, which is why it takes a `PersonRef` rather than a cast
+/// member: from a face in the detail sheet, where the person is a TMDB id and
+/// the question is "what else have they been in", and from a name on the
+/// analytics page, where the person is the identity key that lens groups on and
+/// the question is about that role specifically — what they *directed*, not the
+/// cameos they turned up in.
 struct PersonMoviesSheet: View {
-    let person: CastMember
+    let person: PersonRef
+    /// Offered only where narrowing makes sense: from the analytics page, where
+    /// it is the drill-down the row used to do on its own.
+    var onFilterAnalytics: (() -> Void)?
+
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
+
     @State private var items: [CatalogItem] = []
     @State private var isLoading = true
     @State private var errorMsg: String?
+    @State private var noPlatforms = false
+    @State private var resolvedName: String?
+
+    private var title: String { resolvedName ?? person.name }
 
     var body: some View {
         NavigationStack {
@@ -751,7 +769,7 @@ struct PersonMoviesSheet: View {
                 Color.mkBackground.ignoresSafeArea()
                 content
             }
-            .navigationTitle(person.name)
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -759,55 +777,167 @@ struct PersonMoviesSheet: View {
                 }
             }
         }
+        .themedSheet()
         .task { await load() }
+    }
+
+    /// The credit shared by everything on screen — "Director", "Director &
+    /// Screenplay" — or nil when there is no single answer.
+    ///
+    /// A crew role repeats across a whole career, so naming it says something
+    /// true about the list. A cast list is a different character every time,
+    /// and "Ripley & Sarah Connor & …" summarises nothing.
+    private var roleSummary: String? {
+        var seen = Set<String>()
+        let unique = items.flatMap { $0.roles ?? [] }.filter { seen.insert($0).inserted }
+        guard !unique.isEmpty, unique.count <= 2 else { return nil }
+        return unique.joined(separator: " & ")
+    }
+
+    private var subtitle: String {
+        guard !items.isEmpty else { return "" }
+        let noun = items.count == 1 ? "title" : "titles"
+        guard let role = roleSummary else { return "\(items.count) \(noun) on your services" }
+        return "\(items.count) \(noun) on your services · \(role)"
     }
 
     @ViewBuilder
     private var content: some View {
         if isLoading {
-            ProgressView("Loading…").tint(.mkAccent)
+            VStack(spacing: 10) {
+                Spacer()
+                ProgressView().tint(.mkAccent)
+                Text("Checking your services…")
+                    .font(.caption).foregroundColor(.mkMuted)
+                Spacer()
+            }
         } else if let err = errorMsg {
-            Text(err).foregroundColor(.mkMuted).padding()
+            emptyish(icon: "wifi.exclamationmark", headline: "Couldn't load titles", detail: err) {
+                MKButton(label: "Retry", icon: "arrow.clockwise") { Task { await load() } }
+                    .frame(maxWidth: 180)
+            }
+        } else if noPlatforms {
+            // No services picked is not an empty filmography, and "nothing of
+            // theirs is on your services" would be the wrong sentence for it.
+            emptyish(
+                icon: "square.stack.3d.up.slash",
+                headline: "No services picked",
+                detail: "Choose the services you subscribe to and this will show what \(title) has on them."
+            ) { EmptyView() }
         } else if items.isEmpty {
-            VStack(spacing: 12) {
-                // A decorative glyph standing in for a missing screenful, not copy — the
-                // sentence beside it is what carries the meaning and scales. Sized to hold
-                // the empty state together rather than to be read.
-                Image(systemName: "film.slash").font(.system(size: 44)).foregroundColor(.mkMuted)
-                Text("No titles found on your streaming services.")
-                    .font(.subheadline).foregroundColor(.mkMuted).multilineTextAlignment(.center)
-            }.padding()
+            emptyish(
+                icon: "film.slash",
+                headline: "Nothing on your services",
+                detail: "None of \(title)'s work is streaming on the services you picked right now."
+            ) {
+                if let onFilterAnalytics { filterButton(onFilterAnalytics).frame(maxWidth: 260) }
+            }
         } else {
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 12)], spacing: 14) {
-                    ForEach(items) { item in
-                        PersonMovieCell(item: item)
+                VStack(alignment: .leading, spacing: 14) {
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption).foregroundColor(.mkMuted)
+                            .padding(.horizontal, 16)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 12)], spacing: 14) {
+                        ForEach(items) { item in
+                            PersonMovieCell(item: item)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    if let onFilterAnalytics {
+                        filterButton(onFilterAnalytics).padding(.horizontal, 16)
                     }
                 }
-                .padding(16)
+                .padding(.vertical, 16)
             }
         }
+    }
+
+    /// The drill-down the analytics row used to perform on its own, kept
+    /// reachable rather than dropped when tapping a name started coming here.
+    private func filterButton(_ action: @escaping () -> Void) -> some View {
+        MKButton(label: "Filter analytics to \(title)", icon: "line.3.horizontal.decrease") {
+            action()
+            dismiss()
+        }
+    }
+
+    private func emptyish<Action: View>(
+        icon: String, headline: String, detail: String,
+        @ViewBuilder action: () -> Action
+    ) -> some View {
+        VStack(spacing: 12) {
+            Spacer()
+            // A decorative glyph standing in for a missing screenful, not copy — the
+            // sentence beside it is what carries the meaning and scales. Sized to hold
+            // the empty state together rather than to be read.
+            Image(systemName: icon)
+                .font(.system(size: 42)).foregroundColor(.mkAccent.opacity(0.7))
+            Text(headline).font(.title3).bold().foregroundColor(.mkText)
+            Text(detail)
+                .font(.subheadline).foregroundColor(.mkMuted)
+                .multilineTextAlignment(.center).padding(.horizontal, 32)
+            action().padding(.top, 4)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @MainActor
     func load() async {
         isLoading = true
+        errorMsg = nil
+        var params: [String: String] = [:]
+        if let role = person.role { params["role"] = role }
         do {
+            let encoded = person.reference
+                .addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? person.reference
             let response: PersonMoviesResponse = try await APIService.shared.get(
-                "/titles/person/\(person.id)", token: app.token
+                "/titles/person/\(encoded)", params: params, token: app.token
             )
             items = response.items
+            resolvedName = response.personName
+            noPlatforms = response.noPlatforms ?? false
+        } catch APIError.unauthorized {
+            app.logout()
         } catch {
-            errorMsg = "Could not load titles."
+            errorMsg = (error as? APIError)?.errorDescription ?? "Could not load titles."
         }
         isLoading = false
     }
 }
 
+/// One title on the person page.
+///
+/// Where it is watchable is the reason this page exists, so it is on the cell
+/// rather than a tap away: a grid of posters that does not say which service
+/// each one is on answers the question the reader had to open the page with.
 private struct PersonMovieCell: View {
     let item: CatalogItem
+
+    /// The first service, plus a count. A title on five services is a fact
+    /// about the title, not five things worth reading at caption size.
+    private var whereToWatch: String? {
+        if let first = item.availableOn?.first {
+            let extra = (item.availableOn?.count ?? 1) - 1
+            return extra > 0 ? "\(first) +\(extra)" : first
+        }
+        if let store = item.purchaseOn?.first {
+            // Rent and buy are different sentences and the storefront carries
+            // which it offers, so say the one that is true.
+            return "\(store.verb) · \(store.name)"
+        }
+        return nil
+    }
+
+    private var isPurchaseOnly: Bool {
+        (item.availableOn?.isEmpty ?? true) && !(item.purchaseOn?.isEmpty ?? true)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             CachedAsyncImage(url: URL(string: item.posterUrl ?? "")) { phase in
                 switch phase {
                 case .success(let img): img.resizable().scaledToFill()
@@ -820,13 +950,36 @@ private struct PersonMovieCell: View {
             }
             .frame(width: 110, height: 160)
             .clipShape(RoundedRectangle(cornerRadius: 10))
+
             Text(item.title)
                 .font(.caption2.weight(.semibold))
                 .foregroundColor(.mkText).lineLimit(2)
                 .frame(width: 110, alignment: .leading)
-            if let year = item.year {
-                Text(String(year)).font(.caption2).foregroundColor(.mkMuted)
+
+            HStack(spacing: 4) {
+                if let year = item.year {
+                    Text(String(year)).font(.caption2).foregroundColor(.mkMuted)
+                }
+                if let role = item.roles?.first {
+                    Text(role)
+                        .font(.caption2).foregroundColor(.mkMuted.opacity(0.75))
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 110, alignment: .leading)
+
+            if let whereToWatch {
+                Text(whereToWatch)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(isPurchaseOnly ? .mkMuted : .mkAccent)
+                    .lineLimit(1)
+                    .frame(width: 110, alignment: .leading)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            [item.title, item.year.map(String.init), whereToWatch]
+                .compactMap { $0 }.joined(separator: ", ")
+        )
     }
 }

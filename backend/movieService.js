@@ -48,6 +48,10 @@ const PREFETCH_DISCOVER_PAGES = 5;
 const SNAPSHOT_DISCOVER_PAGES = 25;
 const SNAPSHOT_LANGUAGE_DISCOVER_PAGES = 3;
 const MAX_SNAPSHOT_ITEMS = 1000;
+// How much of a sweep has to survive before it is worth persisting. Below this
+// the run is treated as an outage and retried, rather than written down as the
+// catalogue and kept.
+const MIN_ENRICH_SUCCESS_RATIO = 0.5;
 
 // OMDB circuit breaker — trips when the daily request limit is hit.
 // Resets automatically at next midnight so hydration resumes the following day.
@@ -749,7 +753,11 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
     };
   }
 
-  const discoveredBatches = await Promise.all(
+  // A wide selection is a thousand-odd requests, and TMDB will refuse some of
+  // them. `Promise.all` would throw the first refusal and take every title that
+  // did arrive down with it, so each page is settled on its own and a page that
+  // failed contributes nothing instead of ending the sweep.
+  const discoverOutcomes = await Promise.allSettled(
     selectedMediaTypes.flatMap((type) =>
       [null, ...((options.restrictLanguages && selectedLanguages.length) ? selectedLanguages : [])].flatMap((languageCode) =>
         Array.from({ length: languageCode ? languagePageCount : pageCount }, (_, index) =>
@@ -764,22 +772,54 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
     )
   );
 
+  const discoveredBatches = discoverOutcomes
+    .filter((outcome) => outcome.status === 'fulfilled')
+    .map((outcome) => outcome.value);
+  const discoverFailures = discoverOutcomes.length - discoveredBatches.length;
+
+  // Every page failing is not a thin catalogue, it is an outage: say so rather
+  // than reporting an empty shelf as the truth about someone's services.
+  if (!discoveredBatches.length && discoverOutcomes.length) {
+    throw discoverOutcomes[0].reason;
+  }
+
   const discoveredItems = dedupeCatalog(discoveredBatches.flat().map((item) => ({
     ...item,
     media_type: item.media_type || (item.title ? 'movie' : 'tv'),
   })));
 
-  const enrichedItems = await mapWithConcurrency(discoveredItems, 5, async (item) => {
-    const details = await fetchTitleDetails(item.media_type, item.id, {
-      includeExternalIds,
-    });
-    const ratings = includeRatings
-      ? await fetchOmdbRatings(details.external_ids?.imdb_id)
-      : buildRatingsPayload({});
-    const availableOn = normalizeProviders(details, providerMapById, region);
+  // Same again per title. One film whose details TMDB declines is one film
+  // missing from the shelf, not an empty shelf.
+  let enrichFailures = 0;
+  const enrichedItems = (await mapWithConcurrency(discoveredItems, 5, async (item) => {
+    try {
+      const details = await fetchTitleDetails(item.media_type, item.id, {
+        includeExternalIds,
+      });
+      const ratings = includeRatings
+        ? await fetchOmdbRatings(details.external_ids?.imdb_id)
+        : buildRatingsPayload({});
+      const availableOn = normalizeProviders(details, providerMapById, region);
 
-    return normalizeCatalogItem(item, details, ratings, availableOn, item.media_type);
-  });
+      return normalizeCatalogItem(item, details, ratings, availableOn, item.media_type);
+    } catch {
+      enrichFailures += 1;
+      return null;
+    }
+  })).filter(Boolean);
+
+  // Losing most of the titles means TMDB stopped answering partway through —
+  // usually the breaker opening mid-sweep, which fails everything after it.
+  // Persisting that as the catalogue would freeze a fraction of it in place,
+  // because a scope that has been written once is no longer cold.
+  if (discoveredItems.length && enrichedItems.length < discoveredItems.length * MIN_ENRICH_SUCCESS_RATIO) {
+    console.warn(
+      `[tmdb] abandoning sweep: only ${enrichedItems.length} of ${discoveredItems.length} titles loaded ` +
+      `(${discoverFailures} discover pages and ${enrichFailures} titles refused)`
+    );
+    // The message reaches the app, so it says what happened rather than how.
+    throw new TmdbUnavailableError('TMDB stopped answering while loading your services. Retrying shortly.');
+  }
 
   const sortedCatalog = sortCatalog(enrichedItems, sortBy);
   const snapshotItems = sortedCatalog.slice(0, Math.min(limit, MAX_SNAPSHOT_ITEMS));
@@ -801,6 +841,8 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
       sortBy,
       region,
       languages: selectedLanguages,
+      discoverFailures,
+      enrichFailures,
       page: snapshotMode ? 1 : page,
       pageSize: snapshotMode ? snapshotItems.length : pageSize,
       platformCount: providerIds.length,
@@ -1026,53 +1068,6 @@ async function searchTitleOnTmdb(name, year) {
   return null;
 }
 
-async function fetchTitlesByPerson(personId, platforms) {
-  const { providerIds, providerMapById } = buildProviderSelection(platforms);
-  if (!providerIds.length) return [];
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  const personData = await fetchTmdb(`/person/${personId}/combined_credits`, {
-    language: 'en-US',
-  });
-
-  const allCredits = (personData.cast || []).filter((credit) => {
-    if (credit.media_type !== 'movie' && credit.media_type !== 'tv') return false;
-    if (!credit.poster_path) return false;
-    const releaseDate = credit.release_date || credit.first_air_date || '';
-    return releaseDate.length >= 10 && releaseDate.slice(0, 10) <= today;
-  });
-
-  // Deduplicate by media_type:id first, then by normalized title
-  const seenIds = new Set();
-  const seenTitles = new Set();
-  const uniqueCredits = allCredits.filter((credit) => {
-    const idKey = `${credit.media_type}:${credit.id}`;
-    const titleKey = (credit.title || credit.name || '').toLowerCase().trim();
-    if (seenIds.has(idKey) || (titleKey && seenTitles.has(titleKey))) return false;
-    seenIds.add(idKey);
-    if (titleKey) seenTitles.add(titleKey);
-    return true;
-  });
-
-  const topCredits = uniqueCredits
-    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-    .slice(0, 24);
-
-  const enriched = await mapWithConcurrency(topCredits, 4, async (item) => {
-    try {
-      const details = await fetchTmdb(`/${item.media_type}/${item.id}`, {
-        append_to_response: 'watch/providers',
-        language: 'en-US',
-      });
-      const providers = normalizeProviders(details, providerMapById);
-      return normalizeCatalogItem(item, details, null, providers, item.media_type);
-    } catch { return null; }
-  });
-
-  return enriched.filter(Boolean);
-}
-
 // Search TMDB for any title by query string.
 // Returns all matching results (up to 20), sorted so platform-available titles
 // come first. Streaming availability is annotated but not used to filter results,
@@ -1121,6 +1116,8 @@ module.exports = {
   fetchOmdbRatings,
   fetchCatalogByPlatforms,
   fetchTitleDetails,
+  fetchTmdb,
+  TMDB_IMAGE_BASE_URL,
   fetchTitleWithCredits,
   isOmdbRateLimited,
   searchTitleOnTmdb,
@@ -1128,6 +1125,10 @@ module.exports = {
   TmdbUnavailableError,
   isTmdbUnavailable,
   resetTmdbBreaker,
+  // Test seam. The response caches are module-level and live ten minutes, so a
+  // suite that reuses a URL across cases otherwise answers the second case from
+  // the first case's fixture.
+  clearApiCaches: () => { tmdbCache.clear(); omdbCache.clear(); },
   isTmdbRefusal,
   includedProviders,
   selectionIncludesPurchase,
@@ -1135,7 +1136,6 @@ module.exports = {
   PURCHASE_MONETIZATION,
   VOD_KEY,
   searchCatalog,
-  fetchTitlesByPerson,
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,
