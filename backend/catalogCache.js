@@ -2,6 +2,8 @@ const {
   fetchCatalogByPlatforms,
   fetchOmdbRatings,
   fetchTitleDetails,
+  fetchTmdb,
+  TMDB_IMAGE_BASE_URL,
   includedProviders,
   selectionIncludesPurchase,
   PURCHASE_MONETIZATION,
@@ -1590,6 +1592,240 @@ function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, regio
   });
 }
 
+// ── One person's work, filtered to what the reader can actually watch ────────
+
+/**
+ * The crew jobs worth answering for, keyed by the lens the analytics page uses.
+ *
+ * A person is asked about in a role: the Directors lens means "what has this
+ * person directed", not "every film they have ever been near". Answering with
+ * their acting cameos would make the Directors lens and the Cast lens give the
+ * same list for anyone who does both, which is most working directors.
+ */
+const PERSON_ROLE_JOBS = {
+  director:        ['Director'],
+  writer:          ['Writer', 'Screenplay', 'Story'],
+  cinematographer: ['Director of Photography'],
+  composer:        ['Original Music Composer', 'Music'],
+};
+
+/** How many credits are worth pricing up against TMDB when the cache misses. */
+const PERSON_LIVE_LOOKUP_BUDGET = 30;
+/** How many credits are considered at all. A long career is mostly bit parts. */
+const PERSON_CREDIT_DEPTH = 120;
+
+/**
+ * Resolve a person reference to a TMDB id.
+ *
+ * The analytics page identifies people by `p:<tmdb id>` where it knows one and
+ * `n:<name>` where it does not — an import resolved before crew ids were kept
+ * leaves the second kind behind. A name has to go back through search, which is
+ * ambiguous by nature, so it is the fallback rather than the path.
+ */
+async function resolvePersonId(reference) {
+  const raw = String(reference || '').trim();
+  if (!raw) return { id: null, name: null };
+
+  const keyed = raw.match(/^([pn]):(.*)$/);
+  const value = keyed ? keyed[2] : raw;
+  const isKeyedName = keyed && keyed[1] === 'n';
+
+  if (!isKeyedName && /^\d+$/.test(value)) return { id: Number(value), name: null };
+  if (!value) return { id: null, name: null };
+
+  const data = await fetchTmdb('/search/person', { query: value, language: 'en-US' });
+  const results = Array.isArray(data.results) ? data.results : [];
+  // Most known-for first: two people share a name far more often than the
+  // better-known one is the wrong answer.
+  const best = results.slice().sort((a, b) => (b.popularity || 0) - (a.popularity || 0))[0];
+  return { id: best?.id || null, name: best?.name || value };
+}
+
+/**
+ * Every credit for a person, in one role or in all of them.
+ *
+ * Both halves of `combined_credits` are read. Reading only `cast` — which is
+ * what this did — meant a director's films were invisible, because directing is
+ * a crew credit: the Directors lens could only ever have answered with the
+ * cameos they happened to appear in.
+ */
+function collectPersonCredits(personData, role) {
+  const today = new Date().toISOString().slice(0, 10);
+  const jobs = PERSON_ROLE_JOBS[role] || null;
+  const actingOnly = role === 'actor' || role === 'cast';
+  // No role, or one we do not recognise, means "everything they worked on".
+  const everything = !jobs && !actingOnly;
+  const wantsActing = everything || actingOnly;
+  const wantsCrew = everything || Boolean(jobs);
+
+  const usable = (credit) => {
+    if (credit.media_type !== 'movie' && credit.media_type !== 'tv') return false;
+    if (!credit.poster_path) return false;
+    const released = credit.release_date || credit.first_air_date || '';
+    // Unreleased work is not something anyone can go and watch tonight.
+    return released.length >= 10 && released.slice(0, 10) <= today;
+  };
+
+  const byKey = new Map();
+  const add = (credit, roleLabel) => {
+    if (!usable(credit)) return;
+    const key = `${credit.media_type}-${credit.id}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      // Directed and wrote the same film: one row, both credits.
+      if (roleLabel && !existing.roles.includes(roleLabel)) existing.roles.push(roleLabel);
+      return;
+    }
+    byKey.set(key, { credit, roles: roleLabel ? [roleLabel] : [] });
+  };
+
+  if (wantsActing) {
+    for (const credit of personData.cast || []) {
+      add(credit, credit.character || 'Actor');
+    }
+  }
+  if (wantsCrew) {
+    for (const credit of personData.crew || []) {
+      // `jobs` null here means no role was asked for, so every crew credit
+      // counts. With a role it is the whitelist, and anything else is somebody
+      // else's job on somebody else's film.
+      if (jobs && !jobs.includes(credit.job)) continue;
+      add(credit, credit.job || credit.department || null);
+    }
+  }
+
+  return [...byKey.values()]
+    .sort((a, b) => (b.credit.popularity || 0) - (a.credit.popularity || 0))
+    .slice(0, PERSON_CREDIT_DEPTH);
+}
+
+/**
+ * What of one person's work the reader can watch on the services they pay for.
+ *
+ * Answered from the reader's own catalog scope first, which already holds
+ * resolved availability for every title in it and costs no request at all. Only
+ * the credits that scope has never heard of — the long tail below the snapshot
+ * — are priced up against TMDB, and only the most popular few of those, because
+ * a prolific career is hundreds of credits and each one is a request.
+ *
+ * Titles the reader cannot watch are left out rather than listed greyed: the
+ * question this answers is "what of theirs is on my services", and a list that
+ * answers it with things that are not is not answering it.
+ */
+async function getPersonTitlesOnPlatforms(
+  db,
+  { person, role = null, platforms = [], languages = [], region = DEFAULT_REGION }
+) {
+  if (!platforms.length) return { items: [], personId: null, personName: null };
+
+  const { id: personId, name: personName } = await resolvePersonId(person);
+  if (!personId) return { items: [], personId: null, personName };
+
+  const [personData, profile] = await Promise.all([
+    fetchTmdb(`/person/${personId}/combined_credits`, { language: 'en-US' }),
+    // A credit does not carry the name of the person who earned it, so an id
+    // arriving without one would leave the page untitled. One cached request.
+    personName
+      ? Promise.resolve(null)
+      : fetchTmdb(`/person/${personId}`, { language: 'en-US' }).catch(() => null),
+  ]);
+  const resolvedName = personName || profile?.name || null;
+
+  const credits = collectPersonCredits(personData, role);
+  if (!credits.length) return { items: [], personId, personName: resolvedName };
+
+  const providerMap = buildProviderLookupMap(platforms);
+  const scopeKey = buildScopeKey(platforms, region, languages);
+  const rolesByKey = new Map(
+    credits.map(({ credit, roles }) => [`${credit.media_type}-${credit.id}`, roles])
+  );
+
+  // 1. Whatever the reader's own catalog already knows, for free.
+  const cached = new Map();
+  const ids = credits.map(({ credit }) => credit.id);
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    const rows = await all(
+      db,
+      `SELECT media_type, tmdb_id, title, year, poster_url, popularity, tmdb_rating,
+              available_on_json, available_on_keys_json, purchase_on_json
+         FROM catalog_cache_entries
+        WHERE scope_key = ? AND tmdb_id IN (${chunk.map(() => '?').join(',')})`,
+      [scopeKey, ...chunk]
+    );
+    for (const row of rows) cached.set(`${row.media_type}-${row.tmdb_id}`, row);
+  }
+
+  const items = [];
+  const parse = (json, fallback) => { try { return JSON.parse(json || ''); } catch { return fallback; } };
+
+  for (const [key, row] of cached) {
+    const availableOn = parse(row.available_on_json, []);
+    const purchaseOn = parse(row.purchase_on_json, []);
+    if (!availableOn.length && !purchaseOn.length) continue;
+    items.push({
+      id: key,
+      mediaType: row.media_type,
+      tmdbId: row.tmdb_id,
+      title: row.title,
+      year: row.year,
+      posterUrl: row.poster_url,
+      popularity: row.popularity,
+      tmdbRating: row.tmdb_rating,
+      availableOn,
+      availableOnKeys: parse(row.available_on_keys_json, []),
+      purchaseOn,
+      roles: rolesByKey.get(key) || [],
+    });
+  }
+
+  // 2. The tail the snapshot never carried, bounded — most popular first, since
+  //    that is the order anyone scans a filmography in anyway.
+  const unknown = credits
+    .filter(({ credit }) => !cached.has(`${credit.media_type}-${credit.id}`))
+    .slice(0, PERSON_LIVE_LOOKUP_BUDGET);
+
+  const fetched = await mapWithConcurrency(unknown, 5, async ({ credit, roles }) => {
+    try {
+      const details = await fetchTitleDetails(credit.media_type, credit.id, {
+        includeExternalIds: false,
+      });
+      const { names, keys, purchaseOffers } = extractAvailability(
+        details['watch/providers'], providerMap, region
+      );
+      if (!names.length && !purchaseOffers.length) return null;
+      return {
+        id: `${credit.media_type}-${credit.id}`,
+        mediaType: credit.media_type,
+        tmdbId: credit.id,
+        title: credit.title || credit.name || '',
+        year: Number((credit.release_date || credit.first_air_date || '').slice(0, 4)) || null,
+        posterUrl: credit.poster_path ? `${TMDB_IMAGE_BASE_URL}${credit.poster_path}` : null,
+        popularity: credit.popularity || null,
+        tmdbRating: credit.vote_average || null,
+        availableOn: names,
+        availableOnKeys: keys,
+        purchaseOn: purchaseOffers,
+        roles,
+      };
+    } catch {
+      // One title TMDB will not answer for is one title missing, not a failed
+      // page — the same rule the catalog sweep follows.
+      return null;
+    }
+  });
+
+  items.push(...fetched.filter(Boolean));
+  items.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+
+  return {
+    items,
+    personId,
+    personName: resolvedName,
+    consideredCredits: credits.length,
+  };
+}
+
 module.exports = {
   AUTO_SYNC_MS,
   ensureCatalogTables,
@@ -1597,6 +1833,9 @@ module.exports = {
   extractAvailability,
   buildProviderLookupMap,
   ensureScopeSynced,
+  getPersonTitlesOnPlatforms,
+  resolvePersonId,
+  collectPersonCredits,
   resetSyncFailures: () => syncFailures.clear(),
   readCachedCatalog,
   buildSortExpression,

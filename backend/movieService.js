@@ -1068,53 +1068,6 @@ async function searchTitleOnTmdb(name, year) {
   return null;
 }
 
-async function fetchTitlesByPerson(personId, platforms) {
-  const { providerIds, providerMapById } = buildProviderSelection(platforms);
-  if (!providerIds.length) return [];
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  const personData = await fetchTmdb(`/person/${personId}/combined_credits`, {
-    language: 'en-US',
-  });
-
-  const allCredits = (personData.cast || []).filter((credit) => {
-    if (credit.media_type !== 'movie' && credit.media_type !== 'tv') return false;
-    if (!credit.poster_path) return false;
-    const releaseDate = credit.release_date || credit.first_air_date || '';
-    return releaseDate.length >= 10 && releaseDate.slice(0, 10) <= today;
-  });
-
-  // Deduplicate by media_type:id first, then by normalized title
-  const seenIds = new Set();
-  const seenTitles = new Set();
-  const uniqueCredits = allCredits.filter((credit) => {
-    const idKey = `${credit.media_type}:${credit.id}`;
-    const titleKey = (credit.title || credit.name || '').toLowerCase().trim();
-    if (seenIds.has(idKey) || (titleKey && seenTitles.has(titleKey))) return false;
-    seenIds.add(idKey);
-    if (titleKey) seenTitles.add(titleKey);
-    return true;
-  });
-
-  const topCredits = uniqueCredits
-    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-    .slice(0, 24);
-
-  const enriched = await mapWithConcurrency(topCredits, 4, async (item) => {
-    try {
-      const details = await fetchTmdb(`/${item.media_type}/${item.id}`, {
-        append_to_response: 'watch/providers',
-        language: 'en-US',
-      });
-      const providers = normalizeProviders(details, providerMapById);
-      return normalizeCatalogItem(item, details, null, providers, item.media_type);
-    } catch { return null; }
-  });
-
-  return enriched.filter(Boolean);
-}
-
 // Search TMDB for any title by query string.
 // Returns all matching results (up to 20), sorted so platform-available titles
 // come first. Streaming availability is annotated but not used to filter results,
@@ -1163,6 +1116,8 @@ module.exports = {
   fetchOmdbRatings,
   fetchCatalogByPlatforms,
   fetchTitleDetails,
+  fetchTmdb,
+  TMDB_IMAGE_BASE_URL,
   fetchTitleWithCredits,
   isOmdbRateLimited,
   searchTitleOnTmdb,
@@ -1181,7 +1136,6 @@ module.exports = {
   PURCHASE_MONETIZATION,
   VOD_KEY,
   searchCatalog,
-  fetchTitlesByPerson,
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,
