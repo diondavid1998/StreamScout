@@ -238,9 +238,7 @@ final class AppState {
         // gone would sit in the array invisibly — absent from the settings
         // screen, still sent on every request. The server ignores keys it does
         // not know, so this is about the app agreeing with what it shows.
-        selectedPlatforms = (defaults.stringArray(forKey: platformsKey) ?? [])
-            .map { renamedPlatformKeys[$0] ?? $0 }
-            .filter { knownPlatformKeys.contains($0) }
+        selectedPlatforms = canonicalPlatformKeys(defaults.stringArray(forKey: platformsKey) ?? [])
         selectedLanguages = defaults.stringArray(forKey: languagesKey) ?? []
         watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])
         watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])
@@ -261,9 +259,14 @@ final class AppState {
         page = isNewUser ? .platforms : .catalog
     }
 
+    /// The one funnel every selection passes through — a tap in Settings, the
+    /// answer to `GET /platforms`, a restore from disk — so it is where the
+    /// keys are canonicalised. Doing it at the call sites instead left the two
+    /// that read from the server writing a renamed key back over the migration.
     func savePlatforms(_ platforms: [String]) {
-        selectedPlatforms = platforms
-        defaults.set(platforms, forKey: platformsKey)
+        let canonical = canonicalPlatformKeys(platforms)
+        selectedPlatforms = canonical
+        defaults.set(canonical, forKey: platformsKey)
     }
 
     func saveLanguages(_ languages: [String]) {

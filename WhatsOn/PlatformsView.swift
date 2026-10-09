@@ -173,7 +173,7 @@ struct PlatformsView: View {
         isLoading = true; errorMsg = nil
         do {
             let resp: PlatformResponse = try await APIService.shared.get("/platforms", token: app.token)
-            selected = Set(resp.platforms)
+            selected = Set(canonicalPlatformKeys(resp.platforms))
             selectedLangs = Set(resp.languages ?? [])
             app.savePlatforms(resp.platforms)
             app.saveLanguages(resp.languages ?? [])
@@ -192,10 +192,12 @@ struct PlatformsView: View {
     @MainActor func save() async {
         guard !selected.isEmpty else { errorMsg = "Select at least one service."; return }
         isSaving = true; errorMsg = nil
-        let platforms = Array(selected)
         let languages = Array(selectedLangs)
-        app.savePlatforms(platforms)
+        app.savePlatforms(Array(selected))
         app.saveLanguages(languages)
+        // Sent as `savePlatforms` canonicalised it, not as the picker held it,
+        // so the device and the server cannot end up holding different keys.
+        let platforms = app.selectedPlatforms
         do {
             _ = try await APIService.shared.put(
                 "/platforms",

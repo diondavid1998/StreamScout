@@ -123,6 +123,53 @@ const PLATFORM_CONFIG = {
     purchase: true,
   },
 };
+/**
+ * Keys this app once used under another name.
+ *
+ * A platform key is not a label. It is persisted in `users.platforms`, it is
+ * part of the catalog scope key, and it is what the service filter matches on —
+ * so renaming the tile without carrying the stored selection across silently
+ * un-picks it, and leaves a key behind that nothing downstream recognises.
+ */
+const RENAMED_PLATFORM_KEYS = {
+  pvod: 'vod',
+};
+
+/**
+ * The canonical form of a stored or submitted service selection.
+ *
+ * Every path that reads a selection goes through this, because an unrecognised
+ * key does not fail loudly — it fails three ways at once, quietly:
+ *
+ *   - `buildProviderSelection` drops it, so TMDB is never asked for the
+ *     providers behind it. Picking VOD under its old name asked for Netflix
+ *     alone and no storefront, so no rent or buy data was ever fetched.
+ *   - `buildScopeKey` keeps it, so the reader lands on a catalog scope nobody
+ *     else shares and that the sync has no reason to fill.
+ *   - the service filter matches it against `available_on_keys_json`, where no
+ *     row can ever carry it.
+ *
+ * The result is a filter that returns nothing and reports no error. A one-off
+ * repair cannot cover this: anything that writes the column later — an older
+ * client, a replayed request — puts the bad key straight back, and the repair
+ * has already marked itself done.
+ *
+ * Unknown keys are dropped rather than kept. The cost is that a client newer
+ * than the server loses a service it knows about until the server catches up;
+ * the alternative is the silent three-way failure above.
+ */
+function normalizePlatformKeys(keys) {
+  if (!Array.isArray(keys)) return [];
+  const out = [];
+  for (const raw of keys) {
+    if (typeof raw !== 'string') continue;
+    const key = RENAMED_PLATFORM_KEYS[raw] || raw;
+    if (!PLATFORM_CONFIG[key]) continue;
+    if (!out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
 const tmdbCache = new Map();
 const omdbCache = new Map();
 
@@ -1116,6 +1163,8 @@ module.exports = {
   fetchOmdbRatings,
   fetchCatalogByPlatforms,
   fetchTitleDetails,
+  normalizePlatformKeys,
+  RENAMED_PLATFORM_KEYS,
   fetchTmdb,
   TMDB_IMAGE_BASE_URL,
   fetchTitleWithCredits,

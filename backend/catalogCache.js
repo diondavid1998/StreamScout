@@ -2,6 +2,7 @@ const {
   fetchCatalogByPlatforms,
   fetchOmdbRatings,
   fetchTitleDetails,
+  normalizePlatformKeys,
   fetchTmdb,
   TMDB_IMAGE_BASE_URL,
   includedProviders,
@@ -170,8 +171,18 @@ function isRateLimitError(error) {
   return /too many requests|rate limit|request limit/i.test(String(error?.message || error));
 }
 
+/**
+ * The name of one catalog scope.
+ *
+ * The platform list is normalised first, not just deduped. A scope is defined
+ * by the services it actually covers, so a key the server cannot cover has no
+ * business in its name: left in, it names a scope that nobody else shares and
+ * that the sync has no reason to fill, and the reader sits in front of a
+ * permanently empty catalog. That is how a tile renamed from `pvod` to `vod`
+ * could go on returning nothing long after the rename was migrated.
+ */
 function buildScopeKey(platforms, region = DEFAULT_REGION, languages = []) {
-  const normalizedPlatforms = [...new Set(platforms)].sort();
+  const normalizedPlatforms = normalizePlatformKeys(platforms).sort();
   const normalizedLanguages = [...new Set((Array.isArray(languages) ? languages : []).filter(Boolean))].sort();
   return `region:${region}|platforms:${normalizedPlatforms.join(',')}|languages:${normalizedLanguages.join(',')}`;
 }

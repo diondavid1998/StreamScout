@@ -309,6 +309,36 @@ final class WhatsOnTests: XCTestCase {
                        "the VOD tile reverted for anyone who had already picked it")
     }
 
+    /// The rename used to be applied only where the selection was read off
+    /// disk at launch. Every other way one arrives — and the one that matters
+    /// is the answer to `GET /platforms`, which both the catalog and the picker
+    /// write straight into the saved selection — put the old key back over it
+    /// moments later. The key is then absent from the settings screen while
+    /// still being sent as the catalog's service filter, where it matches
+    /// nothing and reports no error.
+    func testASelectionArrivingFromTheServerIsAlsoRenamed() {
+        let app = AppState(userDefaults: defaults)
+
+        app.savePlatforms(["netflix", "pvod"])
+
+        XCTAssertEqual(app.selectedPlatforms, ["netflix", "vod"],
+                       "the server's answer reintroduced the pre-rename key")
+        XCTAssertEqual(defaults.stringArray(forKey: "mk_platforms"), ["netflix", "vod"],
+                       "the pre-rename key was written back to disk")
+    }
+
+    /// The picker list shrank from thirty-one services to fifteen. A key for
+    /// one of the sixteen that went is not a cosmetic leftover: it goes into
+    /// the catalog scope key, so it names a scope nobody else shares and the
+    /// sync has no reason to fill.
+    func testARetiredServiceIsDroppedWhereverItArrives() {
+        let app = AppState(userDefaults: defaults)
+
+        app.savePlatforms(["netflix", "a-service-that-retired", "netflix"])
+
+        XCTAssertEqual(app.selectedPlatforms, ["netflix"])
+    }
+
     func testAServiceMonogramStaysLegibleOnItsOwnAccent() {
         // The ink is picked by luminance, so a dark tile must not also get dark
         // text. Checked across every service rather than the one that prompted

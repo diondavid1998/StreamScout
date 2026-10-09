@@ -626,6 +626,23 @@ let renamedPlatformKeys: [String: String] = ["pvod": "vod"]
 /// The keys `allPlatforms` covers, for pruning a stored selection.
 let knownPlatformKeys: Set<String> = Set(allPlatforms.map(\.key))
 
+/// The canonical form of a service selection, whatever it came from.
+///
+/// A key is not a label: it is stored on the device, stored on the server, sent
+/// as the catalog's service filter, and part of the cache scope. A stale one is
+/// not a cosmetic problem — it is absent from the settings screen while still
+/// being sent on every request, and it matches nothing.
+///
+/// Applied wherever a selection enters the app, which has to include the
+/// server's answer. Migrating only the copy read from disk at launch meant the
+/// next `GET /platforms` wrote the old key straight back over it.
+func canonicalPlatformKeys(_ keys: [String]) -> [String] {
+    var seen = Set<String>()
+    return keys
+        .map { renamedPlatformKeys[$0] ?? $0 }
+        .filter { knownPlatformKeys.contains($0) && seen.insert($0).inserted }
+}
+
 // MARK: - Local Notifications
 
 /// A system notification for work that finished while the app was not on screen.
