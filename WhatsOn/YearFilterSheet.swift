@@ -81,5 +81,6 @@ struct YearFilterSheet: View {
                 sliderMax = Double(yearMax) ?? maxYear
             }
         }
+        .themedSheet()
     }
 }

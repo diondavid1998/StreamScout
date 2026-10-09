@@ -683,6 +683,13 @@ struct CatalogView: View {
             }
             movies     = resp.catalog
             meta       = resp.meta
+            // An empty shelf because TMDB would not answer is not an empty
+            // shelf. Adding a service builds its catalog from nothing, and a
+            // refusal partway through used to land as a blank grid that read
+            // like "this service has nothing on it".
+            if resp.catalog.isEmpty, let syncError = resp.meta?.syncError {
+                errorMsg = syncError
+            }
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
             // Keep the offline snapshot fresh — only for the default view, and
             // only when it actually returned titles, so a blank page never

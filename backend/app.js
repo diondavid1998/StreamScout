@@ -15,6 +15,7 @@ const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const {
   ensureScopeSynced,
+  getPersonTitlesOnPlatforms,
   readCachedCatalog,
   getWatchlistItemsWithAvailability,
   hydrateSavedTitleRatings,
@@ -46,7 +47,10 @@ const {
   finaliseWatchlistImport,
 } = require('./lists');
 const { computeAnalytics, parseFilters, invalidateDiary } = require('./analytics');
-const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson, isTmdbUnavailable } = require('./movieService');
+const {
+  searchTitleOnTmdb, searchCatalog, isTmdbUnavailable, TmdbUnavailableError,
+  normalizePlatformKeys,
+} = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -619,10 +623,29 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       if (!row) {
         return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
       }
-      let platforms = [];
+      let stored = [];
       let languages = [];
-      try { platforms = JSON.parse(row.platforms); } catch { platforms = []; }
+      try { stored = JSON.parse(row.platforms); } catch { stored = []; }
       try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+
+      // Answered canonically, because the clients write whatever comes back
+      // straight into their own saved selection — so handing back a key this
+      // server no longer recognises is how a stale one survives a migration.
+      const platforms = normalizePlatformKeys(stored);
+      if (platforms.length !== stored.length || platforms.some((k, i) => k !== stored[i])) {
+        // Healed on read rather than by a one-off repair: a repair marks itself
+        // done, and anything that writes the column afterwards puts the bad key
+        // straight back. This is the path every launch takes.
+        db.run(
+          'UPDATE users SET platforms = ? WHERE id = ?',
+          [JSON.stringify(platforms), req.user.id],
+          (updateErr) => {
+            if (updateErr) {
+              console.warn('[platforms] could not rewrite a stale selection:', updateErr.message);
+            }
+          }
+        );
+      }
       res.json({ platforms, languages });
     });
   });
@@ -636,11 +659,17 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     if (languages !== undefined && !Array.isArray(languages)) {
       return res.status(400).json({ error: 'Languages must be an array' });
     }
+    // Stored canonically. Without this the column is whatever the client sent:
+    // an older build still naming VOD `pvod` wrote a key that no provider list,
+    // no catalog scope and no service filter recognises, and the selection then
+    // looked saved while matching nothing at all.
+    const storedPlatforms = normalizePlatformKeys(platforms);
+
     // UPDATE, not upsert: a token for a deleted account must not recreate it.
     db.run(
       'UPDATE users SET platforms = ?, languages = ? WHERE id = ?',
       [
-        JSON.stringify(platforms),
+        JSON.stringify(storedPlatforms),
         JSON.stringify(Array.isArray(languages) ? languages : []),
         req.user.id,
       ],
@@ -706,20 +735,49 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   });
 
   // ── Person filmography on streaming ──────────────────────────────────────
-  app.get('/titles/person/:personId', authenticateToken, (req, res) => {
-    const personId = parseInt(req.params.personId, 10);
-    if (!personId) return res.status(400).json({ error: 'Invalid personId' });
-    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], async (err, row) => {
-      if (err || !row) return res.status(500).json({ error: 'Database error' });
-      let platforms = [];
-      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
-      try {
-        const items = await fetchTitlesByPerson(personId, platforms);
-        res.json({ items });
-      } catch (e) {
-        res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
+  //
+  // `:person` is a TMDB id, or one of the identity keys the analytics page
+  // uses — `p:<id>` where the import resolved one, `n:<name>` where it did not.
+  // `?role=director` asks for that person's directing work specifically, which
+  // is the difference between the Directors lens answering with what someone
+  // directed and answering with the cameos they turned up in.
+  app.get('/titles/person/:person', catalogLimiter, authenticateToken, async (req, res) => {
+    const person = String(req.params.person || '').trim();
+    if (!person) return res.status(400).json({ error: 'Invalid person' });
+
+    const role = typeof req.query.role === 'string' ? req.query.role.toLowerCase() : null;
+    const region = req.query.region || DEFAULT_REGION;
+
+    let row;
+    try {
+      row = await getRow(db, 'SELECT platforms, languages FROM users WHERE id = ?', [req.user.id]);
+    } catch {
+      return res.status(500).json({ error: 'Database error' });
+    }
+    if (!row) return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
+
+    let platforms = [];
+    let languages = [];
+    try { platforms = normalizePlatformKeys(JSON.parse(row.platforms || '[]')); } catch { platforms = []; }
+    try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+
+    // Nothing selected is not an empty filmography, and saying "not on your
+    // services" when there are no services is the wrong sentence.
+    if (!platforms.length) {
+      return res.json({ items: [], personId: null, personName: null, noPlatforms: true });
+    }
+
+    try {
+      const result = await getPersonTitlesOnPlatforms(db, {
+        person, role, platforms, languages, region,
+      });
+      res.json(result);
+    } catch (e) {
+      if (e instanceof TmdbUnavailableError || isTmdbUnavailable()) {
+        return res.status(503).json({ error: 'TMDB is not answering right now. Try again shortly.' });
       }
-    });
+      res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
+    }
   });
 
   // ── Catalog status ────────────────────────────────────────────────────────
@@ -728,7 +786,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       if (err || !row) return res.status(500).json({ error: 'Database error' });
       let platforms = [];
       let languages = [];
-      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
+      try { platforms = normalizePlatformKeys(JSON.parse(row.platforms || '[]')); } catch { /* ignore */ }
       try { languages = JSON.parse(row.languages || '[]'); } catch { /* ignore */ }
       const scopeKey = buildScopeKey(platforms, DEFAULT_REGION, languages);
       db.get(
@@ -750,7 +808,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
       if (err || !row) return res.status(500).json({ error: 'Database error' });
       let platforms = [], languages = [];
-      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
+      try { platforms = normalizePlatformKeys(JSON.parse(row.platforms || '[]')); } catch { /* ignore */ }
       try { languages = JSON.parse(row.languages || '[]'); } catch { /* ignore */ }
       if (platforms.length === 0) {
         return res.status(400).json({ error: 'No streaming services configured. Add services first.' });
@@ -1509,7 +1567,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
 
       let platforms = [];
       let languages = [];
-      try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
+      try { platforms = normalizePlatformKeys(JSON.parse(row.platforms || '[]')); } catch { platforms = []; }
       try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
 
       const queue = await buildDiscoveryQueue(db, req.user.id, {
@@ -1607,7 +1665,10 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
 
   // ── Movies (catalog) ─────────────────────────────────────────────────────
   app.get('/movies', catalogLimiter, authenticateToken, async (req, res) => {
-    const serviceFiltersFromQuery = parseCsvParam(req.query.serviceFilters);
+    // The app sends its own saved selection here, which may predate a rename or
+    // a trimmed service list. A filter naming a key no cached row can carry
+    // matches nothing and reports no error, so it is canonicalised on the way in.
+    const serviceFiltersFromQuery = normalizePlatformKeys(parseCsvParam(req.query.serviceFilters));
 
     let row;
     try {
@@ -1623,7 +1684,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
 
     let platforms = [];
     let savedLanguages = [];
-    try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
+    try { platforms = normalizePlatformKeys(JSON.parse(row.platforms || '[]')); } catch { platforms = []; }
     try { savedLanguages = JSON.parse(row.languages || '[]'); } catch { savedLanguages = []; }
 
     const scopePlatforms = platforms.length > 0 ? platforms : serviceFiltersFromQuery;

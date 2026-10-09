@@ -260,6 +260,7 @@ private struct ShareCardSheet: View {
                 }
             }
         }
+        .themedSheet()
     }
 }
 
@@ -274,8 +275,26 @@ private struct ShareCardSheet: View {
 ///
 /// Everything except the people, genre and language lenses is computed from the
 /// uploaded CSVs and needs no network, so it renders the moment an import lands.
+/// The lenses that rank people rather than things.
+///
+/// Only these open a person page. A genre or a decade is not somebody, and a
+/// studio is somebody in a sense the filmography endpoint cannot answer for.
+///
+/// A person's lens travels to the server as the role to answer in, because the
+/// same person turns up under more than one: asking the Directors lens about
+/// Clint Eastwood should answer with what he directed, not with the westerns he
+/// starred in. The analytics filter key and the endpoint's role name are one
+/// vocabulary on purpose, so the lens is both without translation.
+let PERSON_LENSES: Set<String> = [
+    "director", "writer", "actor", "cinematographer", "composer",
+]
+
 struct AnalyticsView: View {
     @Environment(AppState.self) private var app
+    // Not `@Environment`: see ThemedSheet. Reading the shared manager cannot
+    // trap, and still registers the dependency that makes a theme change
+    // redraw the charts rather than leaving them on the old palette.
+    @State private var theme = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var analytics: AnalyticsResponse?
@@ -334,11 +353,25 @@ struct AnalyticsView: View {
     @State private var renderedCard: RenderedCard?
     @State private var isRenderingCard = false
 
+    /// The person whose streamable work is on screen. Set by tapping a name in
+    /// one of the people lenses.
+    @State private var openPerson: PersonRef?
+
     /// Above and below the reader's own average. Fixed mid-tones rather than
     /// `.green`/`.orange`, which sit outside every palette and read differently
     /// on a light ground than a dark one.
     private static let over = Color(hex: "#2E9E6B")
     private static let under = Color(hex: "#C4562F")
+
+    /// The palette the charts draw in.
+    ///
+    /// Taken from the manager rather than through the `Color.mk…` tokens. Both
+    /// resolve to the same colour, but a static token is read off a type — it
+    /// leaves nothing attached to *this* view for SwiftUI to invalidate when
+    /// the palette changes, which is why a chart could keep its old accent on a
+    /// page whose text around it had already moved. Reading `theme.current`
+    /// here is the dependency, and every chart below goes through it.
+    private var palette: AppTheme { theme.current }
 
     var body: some View {
         NavigationStack {
@@ -378,8 +411,24 @@ struct AnalyticsView: View {
                 }
             }
         }
+        .themedSheet()
+        // The share card is a bitmap, drawn once in the palette that was current
+        // when the button was pressed. A new palette makes it a picture of the
+        // old one, so it is thrown away rather than shown.
+        .onChange(of: theme.current.id) { renderedCard = nil }
         .sheet(item: $renderedCard) { card in
             ShareCardSheet(card: card)
+        }
+        .sheet(item: $openPerson) { person in
+            PersonMoviesSheet(person: person) {
+                // The drill-down this row used to do on its own, kept reachable
+                // from the page that replaced it.
+                if let lens = person.role, PERSON_LENSES.contains(lens) {
+                    filters[lens] = person.reference
+                    reload()
+                }
+            }
+            .environment(app)
         }
         .sheet(isPresented: $showFilterSheet) {
             if let a = analytics {
@@ -797,7 +846,7 @@ struct AnalyticsView: View {
                         }
                         GeometryReader { geo in
                             Capsule()
-                                .fill(Color.mkAccent.opacity(0.85))
+                                .fill(palette.accent.opacity(0.85))
                                 .frame(width: max(geo.size.width * (Double(bucket.films) / Double(largest)), 3))
                         }
                         .frame(height: 6)
@@ -826,7 +875,7 @@ struct AnalyticsView: View {
                         // the shape of the distribution reads before the numbers.
                         // Quiet bars are keyed off the text colour rather than a
                         // faint muted grey, so they stay legible on every theme.
-                        bucket.rating == rating.mode?.rating ? Color.mkAccent : Color.mkText.opacity(0.26)
+                        bucket.rating == rating.mode?.rating ? palette.accent : palette.text.opacity(0.26)
                     )
                     .cornerRadius(3)
             }
@@ -834,7 +883,7 @@ struct AnalyticsView: View {
             // Whole stars only: ten half-star labels collide at phone width.
             .chartXAxis { AxisMarks(values: .stride(by: 1.0)) }
             .chartYAxis { AxisMarks(position: .leading) { _ in
-                AxisGridLine().foregroundStyle(Color.mkHairline)
+                AxisGridLine().foregroundStyle(palette.hairline)
                 AxisValueLabel()
             } }
             .frame(height: 150)
@@ -852,10 +901,10 @@ struct AnalyticsView: View {
                 sectionHeader("Mean by year watched")
                 Chart(rating.byYear) { year in
                     LineMark(x: .value("Year", year.year), y: .value("Mean", year.meanRating ?? 0))
-                        .foregroundStyle(Color.mkAccent)
+                        .foregroundStyle(palette.accent)
                         .lineStyle(StrokeStyle(lineWidth: 2))
                     PointMark(x: .value("Year", year.year), y: .value("Mean", year.meanRating ?? 0))
-                        .foregroundStyle(Color.mkAccent)
+                        .foregroundStyle(palette.accent)
                         .symbolSize(56)
                 }
                 .chartYScale(domain: 0.0...5.0)
@@ -903,13 +952,13 @@ struct AnalyticsView: View {
                 let peakFilms = eras.decades.map(\.films).max() ?? 0
                 Chart(eras.decades) { decade in
                     BarMark(x: .value("Decade", decade.decade), y: .value("Films", decade.films), width: .fixed(20))
-                        .foregroundStyle(decade.films == peakFilms ? Color.mkAccent : Color.mkText.opacity(0.26))
+                        .foregroundStyle(decade.films == peakFilms ? palette.accent : palette.text.opacity(0.26))
                         .cornerRadius(3)
                 }
                 // Categorical X: labels only, no gridline noise between decades.
                 .chartXAxis { AxisMarks { _ in AxisValueLabel() } }
                 .chartYAxis { AxisMarks(position: .leading) { _ in
-                    AxisGridLine().foregroundStyle(Color.mkHairline)
+                    AxisGridLine().foregroundStyle(palette.hairline)
                     AxisValueLabel()
                 } }
                 .frame(height: 150)
@@ -945,10 +994,21 @@ struct AnalyticsView: View {
         }
     }
 
-    /// One ranked entry. Tapping it narrows the whole page to that subject,
-    /// which is the same thing as adding a filter — so it does exactly that.
+    /// One ranked entry.
+    ///
+    /// A person and a genre are tapped for different reasons. "Wes Anderson,
+    /// 9 films" invites the question of what of his there is to watch tonight,
+    /// so a name opens their work on the reader's services; narrowing the page
+    /// to them is still one tap further in, from a button on that page. A genre
+    /// or a decade has no such page behind it, so it narrows the page as before.
     private func entryRow(_ entry: BreakdownEntry, filterKey: String?, showsDivider: Bool) -> some View {
-        Button {
+        let personRole = filterKey.flatMap { PERSON_LENSES.contains($0) ? $0 : nil }
+
+        return Button {
+            if let role = personRole {
+                openPerson = PersonRef(reference: entry.name, name: entry.label, role: role)
+                return
+            }
             guard let key = filterKey else { return }
             filters[key] = entry.name
             reload()
@@ -976,7 +1036,7 @@ struct AnalyticsView: View {
                             .frame(minWidth: 34, alignment: .trailing)
                     }
                     if filterKey != nil {
-                        Image(systemName: "chevron.right")
+                        Image(systemName: personRole == nil ? "chevron.right" : "play.rectangle")
                             .font(.caption2.weight(.bold))
                             .foregroundColor(.mkMuted.opacity(0.6))
                     }
@@ -989,7 +1049,12 @@ struct AnalyticsView: View {
         .buttonStyle(.plain)
         .disabled(filterKey == nil)
         .accessibilityLabel("\(entry.label), \(entry.films) films")
-        .accessibilityHint(filterKey == nil ? "" : "Filters the page to \(entry.label)")
+        .accessibilityHint(
+            filterKey == nil ? ""
+                : (personRole == nil
+                   ? "Filters the page to \(entry.label)"
+                   : "Shows what \(entry.label) has on your services")
+        )
     }
 
     private func deltaEnds(_ b: AnalyticsBreakdown) -> some View {
@@ -1299,8 +1364,8 @@ struct AnalyticsView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             Chart {
-                RuleMark(x: .value("Median", medianRank)).foregroundStyle(Color.mkHairline)
-                RuleMark(y: .value("Median rating", q.ratingMedian)).foregroundStyle(Color.mkHairline)
+                RuleMark(x: .value("Median", medianRank)).foregroundStyle(palette.hairline)
+                RuleMark(y: .value("Median rating", q.ratingMedian)).foregroundStyle(palette.hairline)
                 ForEach(plotted) { point in
                     PointMark(
                         x: .value("Watched", point.rank),
@@ -1308,10 +1373,10 @@ struct AnalyticsView: View {
                     )
                     .foregroundStyle(
                         point.name == selectedGenre
-                            ? Color.mkAccent
+                            ? palette.accent
                             : (point.meanRating >= q.ratingMedian
-                               ? Color.mkAccent.opacity(0.75)
-                               : Color.mkText.opacity(0.35))
+                               ? palette.accent.opacity(0.75)
+                               : palette.text.opacity(0.35))
                     )
                     .symbolSize(point.name == selectedGenre ? 200 : 90)
                     // Alternating sides halve how many labels can meet, and the
@@ -1324,7 +1389,7 @@ struct AnalyticsView: View {
                     ) {
                         Text(point.name)
                             .font(.caption2.weight(.semibold))
-                            .foregroundColor(point.name == selectedGenre ? .mkAccent : .mkMuted)
+                            .foregroundColor(point.name == selectedGenre ? palette.accent : palette.muted)
                             .lineLimit(1)
                     }
                 }
@@ -1333,11 +1398,11 @@ struct AnalyticsView: View {
             // The x positions are ranks, so the numbers under them would be
             // meaningless. The direction is the part worth saying.
             .chartXAxis {
-                AxisMarks { _ in AxisGridLine().foregroundStyle(Color.mkHairline) }
+                AxisMarks { _ in AxisGridLine().foregroundStyle(palette.hairline) }
             }
             .chartYAxis {
                 AxisMarks(position: .leading) { _ in
-                    AxisGridLine().foregroundStyle(Color.mkHairline)
+                    AxisGridLine().foregroundStyle(palette.hairline)
                     AxisValueLabel()
                 }
             }
@@ -1371,9 +1436,9 @@ struct AnalyticsView: View {
                     y: .value("Genre", point.name)
                 )
                 .foregroundStyle(
-                    point.name == selectedGenre ? Color.mkAccent
+                    point.name == selectedGenre ? palette.accent
                         : (point.meanRating >= q.ratingMedian
-                           ? Color.mkAccent.opacity(0.65) : Color.mkText.opacity(0.3))
+                           ? palette.accent.opacity(0.65) : palette.text.opacity(0.3))
                 )
                 .cornerRadius(3)
                 .annotation(position: point.meanRating >= q.ratingMedian ? .trailing : .leading, spacing: 4) {
@@ -1383,7 +1448,7 @@ struct AnalyticsView: View {
             }
             .chartXAxis {
                 AxisMarks { _ in
-                    AxisGridLine().foregroundStyle(Color.mkHairline)
+                    AxisGridLine().foregroundStyle(palette.hairline)
                     AxisValueLabel()
                 }
             }
@@ -1393,7 +1458,7 @@ struct AnalyticsView: View {
                         if let name = value.as(String.self) {
                             Text(name)
                                 .font(.caption)
-                                .foregroundColor(name == selectedGenre ? .mkAccent : .mkText)
+                                .foregroundColor(name == selectedGenre ? palette.accent : palette.text)
                         }
                     }
                 }
@@ -1918,6 +1983,7 @@ private struct FilterSheet: View {
                 }
             }
         }
+        .themedSheet()
     }
 
     private func label(for key: String, options: [FilterOption]) -> String {

@@ -29,6 +29,35 @@ extension View {
     func glassSurface(radius: CGFloat = 18, interactive: Bool = false) -> some View {
         modifier(GlassSurface(radius: radius, interactive: interactive))
     }
+
+    /// Hands the app's palette across a sheet boundary.
+    ///
+    /// `preferredColorScheme` set on the root window does not reach a sheet:
+    /// a sheet is hosted separately, so its system chrome — pickers, the
+    /// keyboard, scroll indicators, the navigation bar — keeps whichever scheme
+    /// was in force when that host was built. Switching from a light theme to a
+    /// dark one left every sheet drawing dark controls on a near-white page.
+    ///
+    /// It also gives the sheet a tracked dependency on the palette, so the
+    /// colours inside it are re-read when the theme changes rather than staying
+    /// on whatever they resolved to the first time.
+    func themedSheet() -> some View {
+        modifier(ThemedSheet())
+    }
+}
+
+/// Reads the shared manager rather than `@Environment(ThemeManager.self)`,
+/// which traps when the environment has not reached the view — and a sheet is
+/// exactly where that is easiest to get wrong. The manager is `@Observable`, so
+/// reading it here still registers the dependency.
+struct ThemedSheet: ViewModifier {
+    @State private var theme = ThemeManager.shared
+
+    func body(content: Content) -> some View {
+        content
+            .preferredColorScheme(theme.colorScheme)
+            .tint(theme.current.accent)
+    }
 }
 
 struct GlassSurface: ViewModifier {
