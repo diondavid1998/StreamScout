@@ -77,6 +77,16 @@ struct CatalogView: View {
     @State private var showLanguagePicker = false
     @State private var showYearFilter = false
     @State private var genreFilters: Set<String> = []
+    /// Which of the reader's services the catalog is narrowed to. Empty means
+    /// all of them — the behaviour before this filter existed.
+    ///
+    /// Settings decides what the catalog *covers*; this decides what it
+    /// *shows*. Without the second control, ticking VOD widened the pool to
+    /// everything rentable and gave no way to look at it: on a popularity sort
+    /// the rentable titles sat below a page of subscription hits, which reads
+    /// as them not being there at all.
+    @State private var serviceFilters: Set<String> = []
+    @State private var showServicePicker = false
     @State private var languageFilters: Set<String> = []
     @State private var yearMin = ""
     @State private var yearMax = ""
@@ -140,6 +150,11 @@ struct CatalogView: View {
         }
         .sheet(isPresented: $showAnalytics) {
             AnalyticsView().environment(app)
+        }
+        .sheet(isPresented: $showServicePicker) {
+            ServiceFilterSheet(available: app.selectedPlatforms, selected: $serviceFilters) {
+                page = 1; Task { await fetch() }
+            }
         }
         .sheet(isPresented: $showGenrePicker) {
             GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
@@ -431,12 +446,14 @@ struct CatalogView: View {
                     .buttonStyle(ScaleButtonStyle())
                 }
                 if !app.selectedPlatforms.isEmpty {
-                    HStack(spacing: 5) {
-                        Image(systemName: "play.rectangle.on.rectangle").font(.caption2)
-                        Text("\(app.selectedPlatforms.count) services").font(.caption.weight(.medium))
+                    Button { showServicePicker = true } label: {
+                        FilterChip(
+                            label: serviceFilterLabel,
+                            icon: "play.rectangle.on.rectangle",
+                            active: !serviceFilters.isEmpty
+                        )
                     }
-                    .foregroundColor(.mkMuted)
-                    .padding(.horizontal, 11).padding(.vertical, 8)
+                    .buttonStyle(ScaleButtonStyle())
                 }
             }
             .padding(6)
@@ -602,6 +619,22 @@ struct CatalogView: View {
         case "documentary": return "Documentary"; default: return "All Titles"
         }
     }
+    /// Names the narrowing when there is one, counts the services otherwise.
+    ///
+    /// "Rent or Buy" rather than "VOD" when that is the only one left: it is the
+    /// question the filter answers, and the three letters are jargon the rest of
+    /// the catalog never uses.
+    var serviceFilterLabel: String {
+        if serviceFilters.isEmpty { return "\(app.selectedPlatforms.count) services" }
+        if serviceFilters == [vodPlatformKey] { return "Rent or Buy" }
+        if serviceFilters.count == 1,
+           let key = serviceFilters.first,
+           let platform = allPlatforms.first(where: { $0.key == key }) {
+            return platform.name
+        }
+        return "\(serviceFilters.count) services"
+    }
+
     var sortLabel: String {
         switch sortBy {
         case "tmdb": return "TMDb"; case "imdb": return "IMDb"
@@ -631,6 +664,7 @@ struct CatalogView: View {
     /// is the only one a relaunch starts from.
     private var isDefaultFeedView: Bool {
         page == 1 && genreFilters.isEmpty && languageFilters.isEmpty
+            && serviceFilters.isEmpty
             && yearMin.isEmpty && yearMax.isEmpty
             && !hideWatched && !watchlistOnly && !streamingWatchlistOnly
     }
@@ -663,7 +697,14 @@ struct CatalogView: View {
             "sortBy":    sortBy.isEmpty ? "popularity" : sortBy,
             "mediaType": mediaType.isEmpty ? "all" : mediaType
         ]
-        if !app.selectedPlatforms.isEmpty { params["serviceFilters"] = app.selectedPlatforms.joined(separator: ",") }
+        // The narrowed set when the reader has picked one, every service
+        // otherwise. The scope the server syncs is built from the *saved*
+        // selection either way, so narrowing here filters within a catalog that
+        // is already there rather than sending them to a cold one.
+        let services = serviceFilters.isEmpty
+            ? app.selectedPlatforms
+            : app.selectedPlatforms.filter { serviceFilters.contains($0) }
+        if !services.isEmpty { params["serviceFilters"] = services.joined(separator: ",") }
         if !genreFilters.isEmpty          { params["genreFilters"]    = genreFilters.joined(separator: ",") }
         if !languageFilters.isEmpty       { params["languageFilters"] = languageFilters.joined(separator: ",") }
         if !yearMin.isEmpty               { params["yearMin"] = yearMin }
