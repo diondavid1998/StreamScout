@@ -1226,14 +1226,46 @@ async function readCachedCatalog(
   // three times per request. One parameter holds regardless of list size, and
   // watched_items' UNIQUE(user_id, item_id) index serves the lookup.
   if (excludeWatchedForUserId !== null && excludeWatchedForUserId !== undefined) {
+    // "Watched" lives in two tables, because two importers write them. The
+    // Settings import and the detail sheet's toggle fill `watched_items`; the
+    // one-button export import on the Analytics page — the one that takes the
+    // whole folder, and so the one people use — fills `letterboxd_entries` and
+    // nothing else. Reading only the first left an imported history entirely
+    // visible with Hide Watched on. The For You page had already patched this
+    // for itself after the query; doing it here makes every page agree.
+    //
+    // Three separate NOT EXISTS rather than one with ORs, so each can seek its
+    // own index instead of scanning the reader's whole diary once per title.
     filters.push(
       `NOT EXISTS (
          SELECT 1 FROM watched_items w
          WHERE w.user_id = ?
            AND w.item_id = catalog_cache_entries.media_type || '-' || CAST(catalog_cache_entries.tmdb_id AS TEXT)
+       )`,
+      // A diary film resolved to a TMDB id: the id is the evidence.
+      `NOT EXISTS (
+         SELECT 1 FROM letterboxd_entries e
+         WHERE e.user_id = ?
+           AND (e.source IS NULL OR e.source <> 'watchlist')
+           AND e.item_id = catalog_cache_entries.media_type || '-' || CAST(catalog_cache_entries.tmdb_id AS TEXT)
+       )`,
+      // One not resolved yet — resolution runs when the Analytics page asks,
+      // so a fresh import is mostly these. Matched on the film key the import
+      // wrote, the same "name|year" the For You page matches on. Films only:
+      // a Letterboxd diary has nothing else in it. SQLite's lower() folds
+      // ASCII only, so a title with a capital outside it can slip through
+      // until the row is resolved; the id match above then catches it.
+      `NOT EXISTS (
+         SELECT 1 FROM letterboxd_entries e
+         WHERE e.user_id = ?
+           AND (e.source IS NULL OR e.source <> 'watchlist')
+           AND (e.item_id IS NULL OR e.item_id = '')
+           AND catalog_cache_entries.media_type = 'movie'
+           AND e.film_key = lower(trim(catalog_cache_entries.title)) || '|'
+                            || COALESCE(CAST(CAST(catalog_cache_entries.year AS INTEGER) AS TEXT), '')
        )`
     );
-    params.push(excludeWatchedForUserId);
+    params.push(excludeWatchedForUserId, excludeWatchedForUserId, excludeWatchedForUserId);
   }
 
   // Saved-for-later, excluded separately from watched because the two are

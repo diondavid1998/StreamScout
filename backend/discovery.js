@@ -398,8 +398,10 @@ async function buildDiscoveryQueue(db, userId, {
   const alreadySwiped = new Set(swipes.map((s) => s.item_id));
   const suppressed = suppressedValues(swipes);
 
-  // Films the diary says were watched, which the catalog's own watched-items
-  // exclusion knows nothing about — they were imported, not marked here.
+  // Films the diary says were watched. The shared exclusion in
+  // readCachedCatalog covers these now, by resolved id and by film key; this
+  // stays as a backstop because it folds case in JavaScript, which handles
+  // capitals outside ASCII that SQLite's lower() leaves alone.
   const diaryKeys = new Set(diary.map((r) => `${(r.name || '').toLowerCase()}|${r.year || ''}`));
 
   // Required here rather than at the top of the file. `catalogCache` is the
