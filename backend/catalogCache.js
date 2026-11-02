@@ -7,7 +7,8 @@ const {
   TMDB_IMAGE_BASE_URL,
   includedProviders,
   selectionIncludesPurchase,
-  PURCHASE_MONETIZATION,
+  VOD_MONETIZATION,
+  isExcludedVodStore,
   VOD_KEY,
   isOmdbRateLimited,
   PLATFORM_CONFIG,
@@ -53,7 +54,11 @@ const DEFAULT_REGION = 'US';
 // database to no effect — which is why the VOD tier, added later, left this at 4.
 // Bumped when availability semantics change so stale snapshots are dropped:
 // v3 added free and ad-supported tiers alongside flatrate.
-const PROVIDER_CONFIG_VERSION = 4;
+// v5: VOD reads rentals only, and leaves Fandango out. Every cached row was
+// written under rent-and-buy, and nothing here refreshes on a clock, so without
+// this a buy-only title or a Fandango chip would be served until someone
+// pressed Refresh Catalog.
+const PROVIDER_CONFIG_VERSION = 5;
 const syncLocks = new Map();
 // Why a scope last failed to sync, so an empty catalog can say "TMDB would not
 // answer" instead of silently looking like a service with nothing on it. Also
@@ -413,6 +418,10 @@ async function ensureCatalogTables(db) {
   const storedVersion = versionRow ? Number(versionRow.value) : 0;
   if (storedVersion !== PROVIDER_CONFIG_VERSION) {
     await run(db, `DELETE FROM catalog_cache_state`);
+    // The per-user watchlist availability is computed from the same provider
+    // rules, so it is just as out of date. Marked rather than deleted, as the
+    // refresh button does, so a failed re-fetch still has something to show.
+    await run(db, `UPDATE watchlist_streaming_cache SET checked_at = ?`, [REVALIDATE_MARKER]);
     await run(
       db,
       `INSERT OR REPLACE INTO app_settings (key, value) VALUES ('provider_config_version', ?)`,
@@ -1427,7 +1436,8 @@ function extractAvailability(watchProviders, providerMap, region) {
   const keys = [];
   const purchaseOffers = [];
   for (const p of offers) {
-    if (PURCHASE_MONETIZATION.includes(p.tier)) {
+    if (VOD_MONETIZATION.includes(p.tier)) {
+      if (isExcludedVodStore(p)) continue;
       // Named as TMDB gives it, not from the id list: whoever sells it, you can
       // buy it, so a storefront nobody thought to list still reads correctly.
       // Rent and buy are kept apart per store — see normalizeProviders.

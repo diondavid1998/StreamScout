@@ -605,13 +605,15 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
     .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.055, green: 0.063, blue: 0.129)),
     // Not a subscription — a tier. Picking it says "also show me what I could
-    // rent or buy right now", and the card then names the storefronts. Last in
+    // rent right now", and the card then names the storefronts. Last in
     // the list because it is the one entry that is not a service you already
     // pay for.
     //
+    // Rentals only, and never Fandango — the server applies both rules.
+    //
     // VOD, not PVOD: PVOD means the premium window specifically, and nothing in
     // the data distinguishes a twenty-pound new release from a four-pound
-    // catalogue rental. This tile answers "can I rent or buy it right now".
+    // catalogue rental. This tile answers "can I rent it right now".
     .init(id: "vod",         key: "vod",         name: "VOD",                 logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.761, blue: 0.302)),
 ]
 
@@ -625,7 +627,7 @@ let renamedPlatformKeys: [String: String] = ["pvod": "vod"]
 
 /// The rent-or-buy tier's key. Named because it is the one entry that is not a
 /// subscription, so several places have to treat it differently — it is worded
-/// "Rent or Buy" in the catalog's service filter, and it is the only key whose
+/// "Rent" in the catalog's service filter, and it is the only key whose
 /// titles carry `purchaseOn` rather than `availableOn`.
 let vodPlatformKey = "vod"
 

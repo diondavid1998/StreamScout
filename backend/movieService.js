@@ -17,7 +17,7 @@ const DEFAULT_REGION = 'US';
 // but never returned a single title.
 const INCLUDED_MONETIZATION = ['flatrate', 'free', 'ads'];
 
-// The two ways a title costs money on its own.
+// What VOD counts as watchable for money.
 //
 // These used to be excluded outright, on the reasoning that this app answers
 // "what can I already watch", not "what could I buy". That reasoning still
@@ -27,11 +27,31 @@ const INCLUDED_MONETIZATION = ['flatrate', 'free', 'ads'];
 //
 // Named VOD, not PVOD. PVOD means the premium window specifically — a film
 // still in or just out of cinemas, at around twenty pounds, before it reaches
-// any subscription. These two buckets are all of transactional video on demand,
-// a four-pound rental of a 1995 film included, and TMDB carries no price or
-// window to tell those apart with. The question this answers is "can I rent or
-// buy it right now", and VOD is the name of that question.
-const PURCHASE_MONETIZATION = ['rent', 'buy'];
+// any subscription. TMDB carries no price or window to tell those apart from a
+// four-pound rental of a 1995 film, so this cannot be PVOD and does not try.
+//
+// Rent only. The question VOD answers is "what could I watch tonight for the
+// price of a rental", and a title that can only be bought outright does not
+// answer it: listing it put a twenty-pound purchase on the same shelf as a
+// three-pound rental. `buy` is neither requested from TMDB nor read back.
+const VOD_MONETIZATION = ['rent'];
+
+/**
+ * Storefronts left out of VOD altogether, however TMDB lists them.
+ *
+ * Fandango's name is on its cinema-ticket business, and its rental store
+ * ("Fandango at Home", formerly Vudu) reads as that on a card. Excluded by id
+ * and by name: TMDB has listed it under more than one id and spelling, and the
+ * cards name stores as TMDB gives them rather than from the id list, so leaving
+ * id 7 out of the discover query alone would not keep it off a card.
+ */
+const EXCLUDED_VOD_STORE_IDS = new Set([7]);
+const EXCLUDED_VOD_STORE_NAME = /fandango/i;
+
+function isExcludedVodStore(provider) {
+  return EXCLUDED_VOD_STORE_IDS.has(provider?.provider_id)
+    || EXCLUDED_VOD_STORE_NAME.test(provider?.provider_name || '');
+}
 
 // VOD is one entry in the picker but not one storefront, so it gets a key of
 // its own and every store that rents or sells is filed under it.
@@ -113,7 +133,6 @@ const PLATFORM_CONFIG = {
     ids: [
       2,    // Apple TV  (the store — Apple TV+ the subscription is 350)
       3,    // Google Play Movies
-      7,    // Fandango at Home (formerly Vudu)
       10,   // Amazon Video  (the store — Prime Video the subscription is 9)
       68,   // Microsoft Store
       192,  // YouTube
@@ -497,7 +516,7 @@ function selectionIncludesPurchase(providerMapById) {
 /** The monetization types a discover query should ask TMDB for. */
 function monetizationFor(providerMapById) {
   return selectionIncludesPurchase(providerMapById)
-    ? [...INCLUDED_MONETIZATION, ...PURCHASE_MONETIZATION]
+    ? [...INCLUDED_MONETIZATION, ...VOD_MONETIZATION]
     : INCLUDED_MONETIZATION;
 }
 
@@ -577,7 +596,7 @@ function includedProviders(watchProviders, region = DEFAULT_REGION, { includePur
   const forRegion = watchProviders?.results?.[region];
   if (!forRegion) return [];
   const tiers = includePurchase
-    ? [...INCLUDED_MONETIZATION, ...PURCHASE_MONETIZATION]
+    ? [...INCLUDED_MONETIZATION, ...VOD_MONETIZATION]
     : INCLUDED_MONETIZATION;
   return tiers.flatMap((tier) => (forRegion[tier] || []).map((p) => ({ ...p, tier })));
 }
@@ -599,7 +618,8 @@ function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
   const purchaseOffers = [];
 
   for (const provider of includedProviders(details['watch/providers'], region, { includePurchase })) {
-    if (PURCHASE_MONETIZATION.includes(provider.tier)) {
+    if (VOD_MONETIZATION.includes(provider.tier)) {
+      if (isExcludedVodStore(provider)) continue;
       // One store lists a film under rent, under buy, or under both, and those
       // are different offers. Collapsing them to a name alone made a title you
       // can only purchase read as "Rent · Apple TV", which is the kind of small
@@ -1182,7 +1202,8 @@ module.exports = {
   includedProviders,
   selectionIncludesPurchase,
   monetizationFor,
-  PURCHASE_MONETIZATION,
+  VOD_MONETIZATION,
+  isExcludedVodStore,
   VOD_KEY,
   searchCatalog,
   // Exported for unit testing
