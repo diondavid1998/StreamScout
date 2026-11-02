@@ -698,6 +698,28 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   });
 
   // ── Title details (cast, crew, etc.) ─────────────────────────────────────
+  /**
+   * The title sheet's payload, in the shape the app decodes.
+   *
+   * The cache keeps people as `{ id, name }` — the analytics page groups a
+   * history by who someone is, and a name is not an identity. But the app's
+   * `TitleDetails` declares `directors: [String]?`, and a Swift optional only
+   * forgives a missing key: an array of objects throws, and the throw takes the
+   * cast, genres, runtime and tagline down with it. Every sheet said "Could not
+   * load cast & details." from the moment payloads started being cached with ids.
+   *
+   * Translated here rather than in the cache so analytics keeps its ids, and so
+   * builds already on people's phones work without an update. Both shapes are
+   * accepted, because payloads cached before the change are still served.
+   */
+  const toClientDetails = (details) => {
+    if (!details || !Array.isArray(details.directors)) return details;
+    const directors = details.directors
+      .map((d) => (typeof d === 'string' ? d : d?.name))
+      .filter((name) => typeof name === 'string' && name);
+    return { ...details, directors };
+  };
+
   app.get('/titles/:mediaType/:tmdb_id/details', authenticateToken, async (req, res) => {
     const { mediaType } = req.params;
     if (!['movie', 'tv'].includes(mediaType)) {
@@ -728,7 +750,8 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         console.warn('[watchmode] lookup failed:', e.message);
       }
 
-      res.json(watchmode ? { ...details, watchmode } : details);
+      const payload = toClientDetails(details);
+      res.json(watchmode ? { ...payload, watchmode } : payload);
     } catch (e) {
       res.status(500).json({ error: 'Failed to fetch title details', details: e.message });
     }
