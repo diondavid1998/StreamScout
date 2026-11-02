@@ -185,3 +185,116 @@ struct LanguagePickerSheet: View {
         .themedSheet()
     }
 }
+
+// MARK: - Service Filter Sheet
+
+/// Narrow the catalog to some of the services you picked.
+///
+/// The services tile in Settings decides what the catalog *covers*; this decides
+/// what it *shows*. They were the same thing for a long time, and the gap it
+/// left was most obvious with VOD: ticking it widened the pool to everything
+/// rentable, mixed in with everything a subscription already covered, and with
+/// nothing to narrow by — so on a popularity sort the rentable titles sat below
+/// a page of subscription hits and read as absent.
+///
+/// An empty selection means every service, which is the behaviour this replaces.
+struct ServiceFilterSheet: View {
+    /// The services the reader subscribes to, in picker order.
+    let available: [String]
+    @Binding var selected: Set<String>
+    @Environment(\.dismiss) private var dismiss
+    let onApply: () -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
+
+    private var platforms: [StreamingPlatform] {
+        // Ordered by the picker rather than by the stored array, so VOD stays
+        // last here too — it is the one entry that is not a subscription.
+        allPlatforms.filter { available.contains($0.key) }
+    }
+
+    private var summary: String {
+        if selected.isEmpty { return "Showing every service you picked." }
+        if selected == [vodPlatformKey] { return "Showing only what you can rent or buy." }
+        let n = selected.count
+        return "Showing \(n) of your \(platforms.count) service\(platforms.count == 1 ? "" : "s")."
+    }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text(summary)
+                            .font(.subheadline).foregroundColor(.mkMuted)
+                            .padding(.horizontal, 20).padding(.top, 4)
+
+                        GlassEffectContainer {
+                            LazyVGrid(columns: columns, spacing: 10) {
+                                ForEach(platforms) { platform in
+                                    let isOn = selected.contains(platform.key)
+                                    Button {
+                                        withAnimation(.spring(duration: 0.2)) {
+                                            if isOn { selected.remove(platform.key) }
+                                            else    { selected.insert(platform.key) }
+                                        }
+                                    } label: {
+                                        HStack(spacing: 7) {
+                                            ProviderMark(name: platform.name, size: 18)
+                                                .accessibilityHidden(true)
+                                            Text(platform.key == vodPlatformKey ? "Rent or Buy" : platform.name)
+                                                .font(.footnote.weight(.semibold))
+                                                .lineLimit(2).minimumScaleFactor(0.8)
+                                                .multilineTextAlignment(.leading)
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .frame(maxWidth: .infinity, minHeight: 50)
+                                        .foregroundColor(isOn ? .mkText : .mkMuted)
+                                        .glassEffect(
+                                            isOn ? .regular.tint(platform.accentColor) : .regular,
+                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        )
+                                    }
+                                    .buttonStyle(ScaleButtonStyle())
+                                    .accessibilityLabel(
+                                        platform.key == vodPlatformKey ? "Rent or buy" : platform.name
+                                    )
+                                    .accessibilityAddTraits(isOn ? .isSelected : [])
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+
+                        if !selected.isEmpty {
+                            Button(role: .destructive) {
+                                selected.removeAll()
+                            } label: {
+                                Label("Show All Services", systemImage: "xmark.circle")
+                                    .font(.subheadline).foregroundColor(.mkAccent)
+                            }
+                            .frame(maxWidth: .infinity).padding(.top, 4)
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
+            }
+            .navigationTitle("Filter by Service")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }.foregroundColor(.mkMuted)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply") {
+                        onApply()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold).foregroundColor(.mkAccent)
+                }
+            }
+        }
+        .themedSheet()
+    }
+}

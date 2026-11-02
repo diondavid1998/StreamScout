@@ -198,6 +198,18 @@ struct CastMember: Decodable, Identifiable {
     let name: String
     let character: String
     let profileUrl: String?
+
+    enum CodingKeys: String, CodingKey { case id, name, character, profileUrl }
+
+    /// A missing or null character is an uncredited part, not a broken
+    /// member — and a broken member used to throw away the whole cast list.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        character = (try? c.decodeIfPresent(String.self, forKey: .character)) ?? ""
+        profileUrl = try? c.decodeIfPresent(String.self, forKey: .profileUrl)
+    }
 }
 
 /// Watchmode's addition to the title sheet: the pros-and-cons line, who the
@@ -242,6 +254,55 @@ struct TitleDetails: Decodable {
     let directors: [String]?
     let cast: [CastMember]?
     let watchmode: WatchmodeExtras?
+
+    enum CodingKeys: String, CodingKey {
+        case tmdbId, title, overview, tagline, posterUrl, backdropUrl, releaseDate
+        case runtime, numberOfSeasons, genres, directors, cast, watchmode
+    }
+
+    /// Every field on its own, so one the server reshapes costs that field.
+    ///
+    /// Synthesised decoding is all-or-nothing, and that is how this sheet broke:
+    /// the server started sending directors as `{ id, name }` and the
+    /// declaration said `[String]`. A Swift optional forgives a missing key, not
+    /// a mismatched one, so the throw discarded the cast, genres, runtime and
+    /// tagline along with the directors, and the reader got "Could not load cast
+    /// & details." for every title.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tmdbId = try? c.decodeIfPresent(Int.self, forKey: .tmdbId)
+        title = try? c.decodeIfPresent(String.self, forKey: .title)
+        overview = try? c.decodeIfPresent(String.self, forKey: .overview)
+        tagline = try? c.decodeIfPresent(String.self, forKey: .tagline)
+        posterUrl = try? c.decodeIfPresent(String.self, forKey: .posterUrl)
+        backdropUrl = try? c.decodeIfPresent(String.self, forKey: .backdropUrl)
+        releaseDate = try? c.decodeIfPresent(String.self, forKey: .releaseDate)
+        runtime = try? c.decodeIfPresent(Int.self, forKey: .runtime)
+        numberOfSeasons = try? c.decodeIfPresent(Int.self, forKey: .numberOfSeasons)
+        genres = try? c.decodeIfPresent([String].self, forKey: .genres)
+        // Names either way: the server's current answer, or the `{ id, name }`
+        // form a server mid-deploy, or a cached payload, may still send.
+        directors = (try? c.decodeIfPresent([String].self, forKey: .directors))
+            ?? (try? c.decodeIfPresent([NamedPerson].self, forKey: .directors))?.map(\.name)
+        // Member by member, so one malformed entry drops one face.
+        cast = (try? c.decodeIfPresent([FailableDecodable<CastMember>].self, forKey: .cast))?
+            .compactMap(\.value)
+        watchmode = try? c.decodeIfPresent(WatchmodeExtras.self, forKey: .watchmode)
+    }
+}
+
+/// A person as the server stores them — only the name is read here.
+private struct NamedPerson: Decodable {
+    let name: String
+}
+
+/// Decodes an element if it can and records nil if it cannot, so one bad entry
+/// in an array costs that entry instead of the array.
+private struct FailableDecodable<Value: Decodable>: Decodable {
+    let value: Value?
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
+    }
 }
 
 // MARK: - Watched List

@@ -339,6 +339,40 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(app.selectedPlatforms, ["netflix"])
     }
 
+    /// Directors arrive as `{ id, name }` from a cached payload. The model said
+    /// `[String]`, and the mismatch threw — taking the cast, genres and runtime
+    /// with it, so every title sheet read "Could not load cast & details."
+    func testTheTitleSheetDecodesDirectorsSentAsPeople() throws {
+        let json = Data("""
+        {"title":"Fight Club","runtime":139,"genres":["Drama"],
+         "directors":[{"id":7467,"name":"David Fincher"}],
+         "cast":[{"id":819,"name":"Edward Norton","character":"Narrator","profileUrl":null}]}
+        """.utf8)
+
+        let d = try JSONDecoder().decode(TitleDetails.self, from: json)
+
+        XCTAssertEqual(d.directors, ["David Fincher"])
+        XCTAssertEqual(d.cast?.map(\.name), ["Edward Norton"])
+        XCTAssertEqual(d.runtime, 139)
+    }
+
+    /// One field the server reshapes must cost that field, not the sheet.
+    func testOneMalformedFieldDoesNotLoseTheCast() throws {
+        let json = Data("""
+        {"runtime":"two hours","genres":7,
+         "cast":[{"id":819,"name":"Edward Norton","character":null},
+                 {"name":"no id, so not a person we can open"}]}
+        """.utf8)
+
+        let d = try JSONDecoder().decode(TitleDetails.self, from: json)
+
+        XCTAssertNil(d.runtime)
+        XCTAssertNil(d.genres)
+        XCTAssertEqual(d.cast?.map(\.name), ["Edward Norton"],
+                       "a bad member, or an uncredited part, threw away the whole cast")
+        XCTAssertEqual(d.cast?.first?.character, "")
+    }
+
     func testAServiceMonogramStaysLegibleOnItsOwnAccent() {
         // The ink is picked by luminance, so a dark tile must not also get dark
         // text. Checked across every service rather than the one that prompted

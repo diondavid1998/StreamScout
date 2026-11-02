@@ -623,6 +623,12 @@ let allPlatforms: [StreamingPlatform] = [
 /// server runs the matching one-off migration on its own copy.
 let renamedPlatformKeys: [String: String] = ["pvod": "vod"]
 
+/// The rent-or-buy tier's key. Named because it is the one entry that is not a
+/// subscription, so several places have to treat it differently — it is worded
+/// "Rent or Buy" in the catalog's service filter, and it is the only key whose
+/// titles carry `purchaseOn` rather than `availableOn`.
+let vodPlatformKey = "vod"
+
 /// The keys `allPlatforms` covers, for pruning a stored selection.
 let knownPlatformKeys: Set<String> = Set(allPlatforms.map(\.key))
 

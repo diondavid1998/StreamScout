@@ -220,6 +220,10 @@ async function ensureAnalyticsTables(db) {
 
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_user ON letterboxd_entries(user_id)');
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_film ON letterboxd_entries(user_id, film_key)');
+  // Hide Watched asks this table "has this reader seen movie-550?" once per
+  // title in a catalog page, and the diary can run to five figures. Without the
+  // index each of those is a scan of the reader's whole history.
+  await run(db, 'CREATE INDEX IF NOT EXISTS idx_lbx_entries_item ON letterboxd_entries(user_id, item_id)');
 
   // One-off repair, and it has to be genuinely one-off: clearing on every boot
   // would put the films TMDB really has nothing for back in the queue each
