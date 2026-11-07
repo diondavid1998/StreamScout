@@ -93,7 +93,7 @@ struct PlatformsView: View {
                         // turns this on without knowing that will wonder why
                         // their catalog suddenly holds everything.
                         if selected.contains("vod") {
-                            Text("VOD adds films you can rent or buy right now — from Apple TV, Amazon, Fandango at Home and the rest. They are labelled separately from what your subscriptions already cover.")
+                            Text("VOD adds films you can rent right now — from Apple TV, Amazon, Google Play and the rest. They are labelled separately from what your subscriptions already cover.")
                                 .font(.caption)
                                 .foregroundColor(.mkMuted)
                                 .multilineTextAlignment(.leading)

@@ -88,6 +88,26 @@ describe('backfillScopeIdentifiers', () => {
     expect(fetchTitleDetails).toHaveBeenCalledTimes(1);
   });
 
+  it('copies ratings the shared cache already holds, without asking OMDB', async () => {
+    // The catalog sweep no longer fetches IMDb ids, so they arrive here, and
+    // ratings can only follow an id. The sweep used to copy shared ratings the
+    // moment it wrote a row; skipping that step now would send every title in
+    // a deep catalog to OMDB — about a thousand a day on the free tier — for
+    // ratings another scope already paid for.
+    await insertEntry(db, { mediaType: 'movie', tmdbId: 550 });
+    await run(db, `INSERT INTO title_ratings (imdb_id, rating_imdb, rating_imdb_num, rating_rt, rating_rt_num,
+                     rating_meta, rating_meta_num, fetched_at)
+                   VALUES ('tt0137523', '8.8/10', 8.8, '79%', 79, '66/100', 66, ?)`, [new Date().toISOString()]);
+    fetchTitleDetails.mockResolvedValue({ external_ids: { imdb_id: 'tt0137523' } });
+    const { fetchOmdbRatings } = require('../../movieService');
+
+    await backfillScopeIdentifiers(db, SCOPE);
+
+    const [row] = await all(db, 'SELECT rating_imdb, rating_rt, rating_meta FROM catalog_cache_entries WHERE tmdb_id = 550');
+    expect(row).toEqual({ rating_imdb: '8.8/10', rating_rt: '79%', rating_meta: '66/100' });
+    expect(fetchOmdbRatings).not.toHaveBeenCalled();
+  });
+
   it('still stores a real IMDb ID when TMDB has one', async () => {
     await insertEntry(db, { tmdbId: 111 });
     fetchTitleDetails.mockResolvedValue({ external_ids: { imdb_id: 'tt0000111' } });

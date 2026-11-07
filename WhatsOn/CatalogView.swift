@@ -621,12 +621,12 @@ struct CatalogView: View {
     }
     /// Names the narrowing when there is one, counts the services otherwise.
     ///
-    /// "Rent or Buy" rather than "VOD" when that is the only one left: it is the
+    /// "Rent" rather than "VOD" when that is the only one left: it is the
     /// question the filter answers, and the three letters are jargon the rest of
     /// the catalog never uses.
     var serviceFilterLabel: String {
         if serviceFilters.isEmpty { return "\(app.selectedPlatforms.count) services" }
-        if serviceFilters == [vodPlatformKey] { return "Rent or Buy" }
+        if serviceFilters == [vodPlatformKey] { return "Rent" }
         if serviceFilters.count == 1,
            let key = serviceFilters.first,
            let platform = allPlatforms.first(where: { $0.key == key }) {
