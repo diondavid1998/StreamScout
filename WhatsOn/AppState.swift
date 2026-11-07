@@ -92,6 +92,14 @@ final class AppState {
     /// server moves a show out of the watchlist when it lands here.
     var currentlyWatchingIds: Set<String> = []
     var selectedThemeId: String = AppTheme.defaultTheme.id
+    /// Whether the catalog leaves out what the reader has already seen.
+    ///
+    /// On unless they turn it off, and remembered either way. A watched history
+    /// only grows — nothing in it becomes unwatched — so the films in it are the
+    /// ones the catalog has least reason to show, and for a reader with a long
+    /// Letterboxd diary they are most of what any popularity-ranked list opens
+    /// with. Off used to be the default, and it reset on every launch.
+    var hideWatched: Bool = true
 
     /// The banner currently on screen, if any. One at a time: a stack of them
     /// over a phone screen is worse than the silence it replaced.
@@ -219,6 +227,7 @@ final class AppState {
     private let watchlistKey  = "mk_watchlist_ids"
     private let currentKey    = "mk_currently_watching_ids"
     private let themeKey      = "mk_theme_id"
+    private let hideWatchedKey = "mk_hide_watched"
     private let defaults: UserDefaults
 
     init(userDefaults: UserDefaults = .standard) {
@@ -243,6 +252,9 @@ final class AppState {
         watchedIds = Set(defaults.stringArray(forKey: watchedKey) ?? [])
         watchlistIds = Set(defaults.stringArray(forKey: watchlistKey) ?? [])
         currentlyWatchingIds = Set(defaults.stringArray(forKey: currentKey) ?? [])
+
+        // Absent means never chosen, which is the default: on.
+        hideWatched = defaults.object(forKey: hideWatchedKey) as? Bool ?? true
 
         let theme = AppTheme.theme(with: defaults.string(forKey: themeKey) ?? AppTheme.defaultTheme.id)
         selectedThemeId = theme.id
@@ -320,6 +332,11 @@ final class AppState {
     func replaceCurrentlyWatchingIds(_ ids: [String]) {
         currentlyWatchingIds = Set(ids)
         defaults.set(ids, forKey: currentKey)
+    }
+
+    func saveHideWatched(_ hide: Bool) {
+        hideWatched = hide
+        defaults.set(hide, forKey: hideWatchedKey)
     }
 
     func saveTheme(_ id: String) {

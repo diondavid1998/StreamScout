@@ -373,6 +373,31 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(d.cast?.first?.character, "")
     }
 
+    /// A watched history only grows, so the films in it are the ones the
+    /// catalog has least reason to show. Hiding them is the starting point.
+    func testHideWatchedIsOnForSomeoneWhoNeverChose() {
+        let app = AppState(userDefaults: defaults)
+        XCTAssertTrue(app.hideWatched)
+    }
+
+    /// It used to reset to off on every launch, so turning it on did not stick
+    /// — and neither, now, must turning it off.
+    func testTurningHideWatchedOffIsRememberedAcrossLaunches() {
+        AppState(userDefaults: defaults).saveHideWatched(false)
+
+        let relaunched = AppState(userDefaults: defaults)
+
+        XCTAssertFalse(relaunched.hideWatched, "showing watched films reverted on relaunch")
+    }
+
+    func testTurningHideWatchedBackOnIsRemembered() {
+        let app = AppState(userDefaults: defaults)
+        app.saveHideWatched(false)
+        app.saveHideWatched(true)
+
+        XCTAssertTrue(AppState(userDefaults: defaults).hideWatched)
+    }
+
     func testAServiceMonogramStaysLegibleOnItsOwnAccent() {
         // The ink is picked by luminance, so a dark tile must not also get dark
         // text. Checked across every service rather than the one that prompted

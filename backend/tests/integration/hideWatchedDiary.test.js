@@ -113,6 +113,16 @@ describe('Hide Watched and the imported diary', () => {
     expect(await titles({})).toHaveLength(FILMS.length);
   });
 
+  test('an explicit "false" shows everything, and so does no value at all', async () => {
+    // The app now always says which it wants, because hiding is on by default
+    // there and "false" is how the reader turns it off. No value must keep
+    // meaning off: builds already installed send nothing when it is off, and
+    // a server default of on would leave them no way to show watched films.
+    expect(await titles({ hideWatched: 'false' })).toHaveLength(FILMS.length);
+    expect(await titles({})).toHaveLength(FILMS.length);
+    expect(await titles({ hideWatched: 'true' })).toHaveLength(3);
+  });
+
   test('another reader\'s diary hides nothing of yours', async () => {
     // The exclusion is keyed on the reader. A shared catalog scope must not
     // carry one person's history into someone else's view.
