@@ -56,22 +56,60 @@ function isExcludedVodStore(provider) {
 // VOD is one entry in the picker but not one storefront, so it gets a key of
 // its own and every store that rents or sells is filed under it.
 const VOD_KEY = 'vod';
-const DISCOVER_PAGE_COUNT = 1;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 // Hard ceiling on each in-memory response cache. A full snapshot sync touches
 // ~1,000 titles, so this holds a couple of syncs' worth of hot keys without
 // letting the process grow unbounded across daily refreshes.
 const MAX_CACHE_ENTRIES = 2500;
 const DOCUMENTARY_GENRE_ID = 99;
-const DEFAULT_PAGE_SIZE = 24;
-const PREFETCH_DISCOVER_PAGES = 5;
-const SNAPSHOT_DISCOVER_PAGES = 25;
 const SNAPSHOT_LANGUAGE_DISCOVER_PAGES = 3;
-const MAX_SNAPSHOT_ITEMS = 1000;
+/**
+ * How deep the catalog goes, per service.
+ *
+ * The catalog used to be one popularity-ranked sweep across the union of every
+ * service picked, 25 pages per media type: at most 500 films and 500 shows,
+ * shared between all of them. Adding a service did not make it bigger — the
+ * services split the same thousand slots — and because rental stores carry
+ * nearly every film, picking VOD turned those slots into the most popular films
+ * anywhere. Those are the films a regular watcher has already seen, so with
+ * Hide Watched on, a dozen services came down to a few dozen titles.
+ *
+ * Each service is now swept on its own, to this many pages of twenty per media
+ * type, so each one contributes its own depth and a small service is not
+ * crowded out by a big one.
+ */
+const SNAPSHOT_PAGES_PER_SERVICE = 30;
+/** A safety ceiling on one scope's rows, far above what the sweep produces. */
+const MAX_SNAPSHOT_ITEMS = 20000;
+/** Discover requests in flight at once during a sweep. */
+const SNAPSHOT_DISCOVER_CONCURRENCY = 6;
 // How much of a sweep has to survive before it is worth persisting. Below this
 // the run is treated as an outage and retried, rather than written down as the
 // catalogue and kept.
-const MIN_ENRICH_SUCCESS_RATIO = 0.5;
+const MIN_SWEEP_SUCCESS_RATIO = 0.5;
+
+/**
+ * TMDB's genre ids, named.
+ *
+ * Discover returns ids and the catalog stores names — the genre filter matches
+ * on them. The names used to come from a details request per title, which was
+ * the whole cost of a sweep; these lists have not changed in years, and an id
+ * missing from them is dropped rather than guessed at.
+ */
+const GENRE_NAMES = {
+  movie: {
+    28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+    99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History',
+    27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance',
+    878: 'Science Fiction', 10770: 'TV Movie', 53: 'Thriller', 10752: 'War', 37: 'Western',
+  },
+  tv: {
+    10759: 'Action & Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+    99: 'Documentary', 18: 'Drama', 10751: 'Family', 10762: 'Kids', 9648: 'Mystery',
+    10763: 'News', 10764: 'Reality', 10765: 'Sci-Fi & Fantasy', 10766: 'Soap',
+    10767: 'Talk', 10768: 'War & Politics', 37: 'Western',
+  },
+};
 
 // OMDB circuit breaker — trips when the daily request limit is hit.
 // Resets automatically at next midnight so hydration resumes the following day.
@@ -140,6 +178,15 @@ const PLATFORM_CONFIG = {
     name: 'VOD',
     // What marks this entry as the purchase tier everywhere else in the code.
     purchase: true,
+    // Each store is swept on its own, so the catalog knows which one rents a
+    // title without asking TMDB about every title. Named as TMDB names them.
+    storeNames: {
+      2: 'Apple TV',
+      3: 'Google Play Movies',
+      10: 'Amazon Video',
+      68: 'Microsoft Store',
+      192: 'YouTube',
+    },
   },
 };
 /**
@@ -537,7 +584,7 @@ function buildProviderSelection(platformKeys) {
   return { providerIds, providerMapById };
 }
 
-async function discoverTitles(
+async function discoverPage(
   mediaType, providerIds, page, region = DEFAULT_REGION, extraParams = {},
   monetization = INCLUDED_MONETIZATION
 ) {
@@ -549,14 +596,16 @@ async function discoverTitles(
     sort_by: 'popularity.desc',
     watch_region: region,
     // TMDB matches a title when any one of these providers offers it under any
-    // one of these types, so widening the list is a union, not an intersection:
-    // adding the stores cannot drop a subscription title someone already had.
+    // one of these types — which, swept per service, is exactly "on this one".
     with_watch_monetization_types: monetization.join('|'),
     with_watch_providers: providerIds.join('|'),
     ...extraParams,
   });
 
-  return Array.isArray(data.results) ? data.results : [];
+  return {
+    results: Array.isArray(data.results) ? data.results : [],
+    totalPages: Number(data.total_pages) || 1,
+  };
 }
 
 async function fetchTitleDetails(mediaType, tmdbId, { includeExternalIds = true } = {}) {
@@ -760,163 +809,179 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
-async function fetchCatalogByPlatforms(platforms, options = {}) {
-  if (!platforms || platforms.length === 0) {
-    return {
-      items: [],
-      meta: {
-        mediaType: options.mediaType || 'all',
-        sortBy: options.sortBy || 'popularity',
-        region: options.region || DEFAULT_REGION,
-        platformCount: 0,
-      },
-    };
+/**
+ * One sweep per service: which provider ids to ask about, under which tiers,
+ * and what a title found by it is available as.
+ *
+ * VOD is not one storefront, so each rental store gets a sweep of its own —
+ * that is what lets a card name the store without a request per title.
+ */
+function catalogSweeps(platforms) {
+  const sweeps = [];
+  for (const key of normalizePlatformKeys(platforms)) {
+    const config = PLATFORM_CONFIG[key];
+    if (config.purchase) {
+      for (const id of config.ids) {
+        const storeName = config.storeNames?.[id];
+        if (!storeName) continue;
+        sweeps.push({ key, storeName, providerIds: [id], monetization: VOD_MONETIZATION });
+      }
+    } else {
+      sweeps.push({
+        key, name: config.name, providerIds: config.ids || [config.id],
+        monetization: INCLUDED_MONETIZATION,
+      });
+    }
   }
+  return sweeps;
+}
 
+function genreNamesFor(mediaType, genreIds) {
+  const names = GENRE_NAMES[mediaType] || {};
+  return (genreIds || []).map((id) => names[id]).filter(Boolean).map((name) => ({ name }));
+}
+
+/**
+ * The catalog for a set of services, as one snapshot to persist.
+ *
+ * Each service is swept separately, so each contributes its own depth — see
+ * SNAPSHOT_PAGES_PER_SERVICE for what the single union sweep before it lost.
+ * And because a title returned by Netflix's own sweep is on Netflix, where it
+ * streams is known from the sweep itself. The details request per title that
+ * the union sweep needed to find that out — the whole cost of a sweep, and the
+ * reason it was capped at a thousand titles — is gone. IMDb ids, which only the
+ * details carry, are filled in afterwards by the identifier backfill.
+ *
+ * What it gives up: a title swept up by Netflix but found by Hulu's sweep only
+ * past Hulu's depth lists Netflix alone. Never a service it is not on, and the
+ * title is in the catalog, which before it often was not.
+ */
+async function fetchCatalogByPlatforms(platforms, options = {}) {
   const mediaType = options.mediaType || 'all';
   const sortBy = options.sortBy || 'popularity';
   const region = options.region || DEFAULT_REGION;
-  const limit = Math.min(Math.max(Number(options.limit) || DEFAULT_PAGE_SIZE, 1), 2000);
-  const page = Math.max(Number(options.page) || 1, 1);
-  const snapshotMode = Boolean(options.snapshotMode);
-  const includeRatings = options.includeRatings !== false;
-  const includeExternalIds = options.includeExternalIds !== false;
-  const pageCount = Math.min(
-    Math.max(
-      Number(options.pageCount) ||
-        (snapshotMode ? SNAPSHOT_DISCOVER_PAGES : Math.max(PREFETCH_DISCOVER_PAGES, page + 1)),
-      DISCOVER_PAGE_COUNT
-    ),
-    50
-  );
-  const selectedMediaTypes = mediaType === 'all' || mediaType === 'documentary' ? ['movie', 'tv'] : [mediaType];
-  const { providerIds, providerMapById } = buildProviderSelection(platforms);
-  const selectedLanguages = Array.isArray(options.languages)
+  const pageCount = Math.min(Math.max(Number(options.pageCount) || SNAPSHOT_PAGES_PER_SERVICE, 1), 500);
+  const languages = options.restrictLanguages && Array.isArray(options.languages)
     ? [...new Set(options.languages.filter(Boolean))]
     : [];
-  const extraDiscoverParams = mediaType === 'documentary' ? { with_genres: DOCUMENTARY_GENRE_ID } : {};
-  const requestedLanguagePageCount = options.languagePageCount != null
-    ? Number(options.languagePageCount)
-    : (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1);
   const languagePageCount = Math.min(
-    pageCount,
-    Math.max(
-      Number.isFinite(requestedLanguagePageCount)
-        ? requestedLanguagePageCount
-        : (snapshotMode ? SNAPSHOT_LANGUAGE_DISCOVER_PAGES : 1),
-      1
-    )
+    Math.max(Number(options.languagePageCount) || SNAPSHOT_LANGUAGE_DISCOVER_PAGES, 1),
+    pageCount
   );
+  const types = mediaType === 'all' || mediaType === 'documentary' ? ['movie', 'tv'] : [mediaType];
+  const extraParams = mediaType === 'documentary' ? { with_genres: DOCUMENTARY_GENRE_ID } : {};
+  const sweeps = catalogSweeps(platforms || []);
 
-  if (!providerIds.length) {
-    return {
-      items: [],
-      meta: {
-        mediaType,
-        sortBy,
-        region,
-        platformCount: 0,
-      },
-    };
+  const emptyMeta = { mediaType, sortBy, region, platformCount: 0 };
+  if (!sweeps.length) return { items: [], meta: emptyMeta };
+
+  // Every sweep, for every media type, once in general and once per language
+  // the reader asked for — a language pass is how a Tamil film too obscure for
+  // the general ranking still reaches someone who reads Tamil.
+  const passes = [];
+  for (const sweep of sweeps) {
+    for (const type of types) {
+      for (const language of [null, ...languages]) {
+        passes.push({ sweep, type, language, depth: language ? languagePageCount : pageCount });
+      }
+    }
   }
 
-  // A wide selection is a thousand-odd requests, and TMDB will refuse some of
-  // them. `Promise.all` would throw the first refusal and take every title that
-  // did arrive down with it, so each page is settled on its own and a page that
-  // failed contributes nothing instead of ending the sweep.
-  const discoverOutcomes = await Promise.allSettled(
-    selectedMediaTypes.flatMap((type) =>
-      [null, ...((options.restrictLanguages && selectedLanguages.length) ? selectedLanguages : [])].flatMap((languageCode) =>
-        Array.from({ length: languageCode ? languagePageCount : pageCount }, (_, index) =>
-          discoverTitles(type, providerIds, index + 1, region, {
-            ...extraDiscoverParams,
-            ...(languageCode ? { with_original_language: languageCode } : {}),
-          }, monetizationFor(providerMapById)).then((results) =>
-            results.map((item) => ({ ...item, media_type: type }))
-          )
-        )
-      )
-    )
-  );
-
-  const discoveredBatches = discoverOutcomes
-    .filter((outcome) => outcome.status === 'fulfilled')
-    .map((outcome) => outcome.value);
-  const discoverFailures = discoverOutcomes.length - discoveredBatches.length;
-
-  // Every page failing is not a thin catalogue, it is an outage: say so rather
-  // than reporting an empty shelf as the truth about someone's services.
-  if (!discoveredBatches.length && discoverOutcomes.length) {
-    throw discoverOutcomes[0].reason;
-  }
-
-  const discoveredItems = dedupeCatalog(discoveredBatches.flat().map((item) => ({
-    ...item,
-    media_type: item.media_type || (item.title ? 'movie' : 'tv'),
-  })));
-
-  // Same again per title. One film whose details TMDB declines is one film
-  // missing from the shelf, not an empty shelf.
-  let enrichFailures = 0;
-  const enrichedItems = (await mapWithConcurrency(discoveredItems, 5, async (item) => {
+  let calls = 0;
+  let failures = 0;
+  const fetchPage = async (pass, page) => {
+    calls += 1;
     try {
-      const details = await fetchTitleDetails(item.media_type, item.id, {
-        includeExternalIds,
-      });
-      const ratings = includeRatings
-        ? await fetchOmdbRatings(details.external_ids?.imdb_id)
-        : buildRatingsPayload({});
-      const availableOn = normalizeProviders(details, providerMapById, region);
-
-      return normalizeCatalogItem(item, details, ratings, availableOn, item.media_type);
+      return await discoverPage(pass.type, pass.sweep.providerIds, page, region, {
+        ...extraParams,
+        ...(pass.language ? { with_original_language: pass.language } : {}),
+      }, pass.sweep.monetization);
     } catch {
-      enrichFailures += 1;
+      // One refused page is one page of titles missing, not a failed sweep.
+      failures += 1;
       return null;
     }
-  })).filter(Boolean);
+  };
 
-  // Losing most of the titles means TMDB stopped answering partway through —
-  // usually the breaker opening mid-sweep, which fails everything after it.
-  // Persisting that as the catalogue would freeze a fraction of it in place,
-  // because a scope that has been written once is no longer cold.
-  if (discoveredItems.length && enrichedItems.length < discoveredItems.length * MIN_ENRICH_SUCCESS_RATIO) {
-    console.warn(
-      `[tmdb] abandoning sweep: only ${enrichedItems.length} of ${discoveredItems.length} titles loaded ` +
-      `(${discoverFailures} discover pages and ${enrichFailures} titles refused)`
-    );
-    // The message reaches the app, so it says what happened rather than how.
+  // Page one of every pass first: it says how deep that pass goes, so a small
+  // service costs a few requests rather than thirty.
+  const firstPages = await mapWithConcurrency(passes, SNAPSHOT_DISCOVER_CONCURRENCY, (pass) => fetchPage(pass, 1));
+
+  // A general pass whose first page failed would leave that service out of the
+  // catalog altogether — and persisting it would delete every title the last
+  // sweep found for it, because a sync removes what it did not see. That is an
+  // outage to retry, not a catalog to keep.
+  if (passes.some((pass, i) => !pass.language && !firstPages[i])) {
+    console.warn(`[tmdb] abandoning sweep: a service's first page could not be loaded (${failures} of ${calls} refused)`);
     throw new TmdbUnavailableError('TMDB stopped answering while loading your services. Retrying shortly.');
   }
 
-  const sortedCatalog = sortCatalog(enrichedItems, sortBy);
-  const snapshotItems = sortedCatalog.slice(0, Math.min(limit, MAX_SNAPSHOT_ITEMS));
-  const pageSize = Math.min(limit, DEFAULT_PAGE_SIZE);
-  const offset = (page - 1) * pageSize;
-  const fetchedPageLooksFull = discoveredBatches.some((batch) => batch.length >= 20);
-  const pagedItems = sortedCatalog.slice(offset, offset + pageSize);
-  const totalPages = Math.max(
-    1,
-    Math.ceil(sortedCatalog.length / pageSize),
-    fetchedPageLooksFull ? page + 1 : 0
+  const laterPages = [];
+  passes.forEach((pass, i) => {
+    const last = Math.min(pass.depth, firstPages[i]?.totalPages || 1);
+    for (let page = 2; page <= last; page += 1) laterPages.push({ pass, page });
+  });
+  const laterResults = await mapWithConcurrency(
+    laterPages, SNAPSHOT_DISCOVER_CONCURRENCY, ({ pass, page }) => fetchPage(pass, page)
   );
-  const hasMore = sortedCatalog.length > offset + pageSize || fetchedPageLooksFull;
+
+  if (failures > calls * (1 - MIN_SWEEP_SUCCESS_RATIO)) {
+    console.warn(`[tmdb] abandoning sweep: ${failures} of ${calls} discover pages refused`);
+    throw new TmdbUnavailableError('TMDB stopped answering while loading your services. Retrying shortly.');
+  }
+
+  // One entry per title, collecting every sweep that found it.
+  const byId = new Map();
+  const absorb = (pass, data) => {
+    for (const raw of data?.results || []) {
+      const id = `${pass.type}-${raw.id}`;
+      let entry = byId.get(id);
+      if (!entry) {
+        entry = { raw, type: pass.type, services: [], stores: [] };
+        byId.set(id, entry);
+      }
+      const { sweep } = pass;
+      if (sweep.storeName) {
+        if (!entry.stores.includes(sweep.storeName)) entry.stores.push(sweep.storeName);
+      } else if (!entry.services.includes(sweep.key)) {
+        entry.services.push(sweep.key);
+      }
+    }
+  };
+  passes.forEach((pass, i) => absorb(pass, firstPages[i]));
+  laterPages.forEach(({ pass }, i) => absorb(pass, laterResults[i]));
+
+  const items = [...byId.values()].map(({ raw, type, services, stores }) => {
+    const providers = {
+      names: services.map((key) => PLATFORM_CONFIG[key].name),
+      keys: stores.length ? [...services, VOD_KEY] : [...services],
+      // Rent is the only tier VOD sweeps for, so it is the only one claimed.
+      purchaseOffers: stores.map((name) => ({ name, tiers: ['rent'] })),
+    };
+    return normalizeCatalogItem(
+      raw, { genres: genreNamesFor(type, raw.genre_ids) }, buildRatingsPayload({}), providers, type
+    );
+  });
+
+  const snapshotItems = sortCatalog(items, sortBy).slice(0, MAX_SNAPSHOT_ITEMS);
 
   return {
-    items: snapshotMode ? snapshotItems : pagedItems,
+    items: snapshotItems,
     meta: {
       mediaType,
       sortBy,
       region,
-      languages: selectedLanguages,
-      discoverFailures,
-      enrichFailures,
-      page: snapshotMode ? 1 : page,
-      pageSize: snapshotMode ? snapshotItems.length : pageSize,
-      platformCount: providerIds.length,
-      resultCount: snapshotMode ? snapshotItems.length : sortedCatalog.length,
-      visibleCount: snapshotMode ? snapshotItems.length : pagedItems.length,
-      totalPages: snapshotMode ? 1 : totalPages,
-      hasMore: snapshotMode ? false : hasMore,
+      languages,
+      discoverCalls: calls,
+      discoverFailures: failures,
+      enrichFailures: 0,
+      page: 1,
+      pageSize: snapshotItems.length,
+      platformCount: sweeps.length,
+      resultCount: snapshotItems.length,
+      visibleCount: snapshotItems.length,
+      totalPages: 1,
+      hasMore: false,
       lastUpdatedAt: new Date().toISOString(),
       ratingSources: ['TMDb', 'IMDb', 'Rotten Tomatoes', 'Metacritic'],
       unavailableSources: ['Letterboxd'],

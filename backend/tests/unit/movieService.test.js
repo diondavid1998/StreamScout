@@ -167,7 +167,9 @@ describe('sortCatalog', () => {
           return {
             ok: true,
             status: 200,
-            text: async () => JSON.stringify({ results }),
+            // TMDB always says how deep a list goes, and the sweep stops there,
+            // so a small service costs a few requests rather than thirty.
+            text: async () => JSON.stringify({ results, total_pages: language ? 1 : 2 }),
           };
         }
 
@@ -212,9 +214,6 @@ describe('sortCatalog', () => {
         mediaType: 'movie',
         sortBy: 'popularity',
         region: 'US',
-        includeRatings: false,
-        includeExternalIds: true,
-        snapshotMode: true,
         pageCount: 2,
         languages: ['ta', 'hi'],
         restrictLanguages: true,

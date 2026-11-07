@@ -42,6 +42,9 @@ const AUTO_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
 // failed re-fetch must still have something to fall back on — dropping the row
 // would make the title disappear from the streaming view until TMDB recovered.
 const REVALIDATE_MARKER = '1970-01-01T00:00:00.000Z';
+// first_seen_at for a title already there when a scope was first swept, so
+// that Just Added lists what arrived since and not the whole back catalogue.
+const BASELINE_FIRST_SEEN = '1970-01-01T00:00:00.000Z';
 const DEFAULT_REGION = 'US';
 // Ratings rarely change — keep them indefinitely once fetched.
 // They are only re-fetched when a manual full refresh explicitly requests it.
@@ -79,9 +82,11 @@ const HYDRATION_CONCURRENCY = 8;
 // IMDb ID to give. Distinguishes "resolved, nothing found" from "not yet asked"
 // (NULL), so the backfill can never re-select the same unresolvable row forever.
 const NO_IMDB_ID = '';
-// Upper bound on backfill batches per scope — a healthy drain of a full
-// MAX_SNAPSHOT_ITEMS scope takes ~25.
-const MAX_BACKFILL_ITERATIONS = 200;
+// Upper bound on backfill batches per scope. The sweep no longer fetches IMDb
+// ids, so the backfill now resolves every new title rather than a stray few,
+// and a deep scope runs to several thousand rows. 500 batches of
+// HYDRATION_BATCH_SIZE drains twenty thousand — the sweep's own ceiling.
+const MAX_BACKFILL_ITERATIONS = 500;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -501,19 +506,16 @@ async function syncScope(
   }
 
   const syncPromise = (async () => {
+    // Depth per service comes from SNAPSHOT_PAGES_PER_SERVICE. Ratings and IMDb
+    // ids are not fetched here: the sweep no longer asks TMDB about each title,
+    // and the identifier backfill and rating hydration fill both in afterwards.
     const catalog = await fetchCatalogByPlatforms(platforms, {
       mediaType: 'all',
       sortBy: 'popularity',
-      limit: 1000,
-      page: 1,
-      pageCount: 25,
       languagePageCount: 3,
       languages,
       restrictLanguages: Array.isArray(languages) && languages.length > 0,
       region,
-      includeRatings: false,   // always skip inline OMDB — background hydration handles ratings
-      includeExternalIds: true,
-      snapshotMode: true,
     });
 
     // A sweep can finish having lost titles without that being an outage — but
@@ -528,6 +530,18 @@ async function syncScope(
     }
 
     const syncStartTime = new Date().toISOString();
+
+    // "Just Added" means new to the service since the last look, so a title can
+    // only be stamped as arriving by a sync that had a last look to compare
+    // with. A scope's first sync — or its first after a provider config change,
+    // which clears the state rows — is a baseline: everything in it was already
+    // there. Stamping those with today put several thousand long-available
+    // titles at the top of Just Added the moment the catalog was swept deeper.
+    // The baseline stamp sorts last, and COALESCE keeps it on later syncs.
+    const hadBaseline = Boolean(
+      await get(db, 'SELECT 1 AS present FROM catalog_cache_state WHERE scope_key = ?', [scopeKey])
+    );
+    const firstSeenStamp = hadBaseline ? syncStartTime : BASELINE_FIRST_SEEN;
 
     await enqueueWrite(async () => {
       await run(db, 'BEGIN IMMEDIATE TRANSACTION');
@@ -594,7 +608,7 @@ async function syncScope(
               JSON.stringify(item.availableOnKeys || []),
               JSON.stringify(item.purchaseOn || []),
               syncStartTime,
-              syncStartTime, // first_seen_at — COALESCE keeps original on re-sync
+              firstSeenStamp, // first_seen_at — COALESCE keeps original on re-sync
             ]
           );
         }
@@ -1083,6 +1097,14 @@ async function backfillScopeIdentifiers(db, scopeKey) {
         }
       });
 
+      // Ratings another scope already paid for, copied before any OMDB request.
+      // The sweep used to fetch IMDb ids up front and do this straight away;
+      // with ids arriving here instead, skipping it would send every title to
+      // OMDB — about a thousand a day on the free tier — for ratings the
+      // shared cache already holds.
+      await populateRatingsFromCache(db, scopeKey).catch((err) => {
+        console.warn(`populateRatingsFromCache failed after backfill for ${scopeKey}: ${err.message}`);
+      });
       hydrateScopeRatings(db, scopeKey).catch((error) => {
         console.error('Deferred rating hydration failed after identifier backfill', scopeKey, error);
       });
@@ -1462,6 +1484,64 @@ function extractAvailability(watchProviders, providerMap, region) {
   return { names, keys, purchaseOffers };
 }
 
+/** How many watchlist titles are looked up on TMDB at once. */
+const WATCHLIST_LOOKUP_CONCURRENCY = 5;
+
+/**
+ * Look one saved title up on TMDB and cache where it streams. Returns the
+ * fresh cache row, or the stale one if the lookup failed, or null if there was
+ * never one.
+ */
+async function refreshWatchlistAvailability(db, userId, entry, providerMap, region, nowIso) {
+  const { row, mediaType, tmdbId, cached } = entry;
+  try {
+    const details = await fetchTitleDetails(mediaType, tmdbId, { includeExternalIds: true });
+    if (!details) return cached;
+    const available = extractAvailability(details['watch/providers'], providerMap, region);
+    const vals = [
+      userId,
+      row.item_id,
+      details.title || details.name || row.title || 'Unknown',
+      details.poster_path
+        ? `https://image.tmdb.org/t/p/w500${details.poster_path}`
+        : (row.poster_url || null),
+      details.overview || null,
+      details.release_date || details.first_air_date || null,
+      (details.release_date || details.first_air_date || '').slice(0, 4) || null,
+      details.vote_average || null,
+      details.vote_count || null,
+      details.popularity || null,
+      details.original_language || null,
+      JSON.stringify((details.genres || []).map((g) => g.name)),
+      details.external_ids?.imdb_id || null,
+      JSON.stringify(available.names),
+      JSON.stringify(available.keys),
+      JSON.stringify(available.purchaseOffers || []),
+      nowIso,
+    ];
+    await run(db,
+      `INSERT OR REPLACE INTO watchlist_streaming_cache
+         (user_id, item_id, title, poster_url, overview, release_date, year,
+          tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id,
+          available_on_json, available_on_keys_json, purchase_on_json, checked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      vals
+    );
+    return {
+      title: vals[2], poster_url: vals[3], overview: vals[4],
+      release_date: vals[5], year: vals[6], tmdb_rating: vals[7],
+      tmdb_vote_count: vals[8], popularity: vals[9], original_language: vals[10],
+      genres_json: vals[11], imdb_id: vals[12],
+      available_on_json: vals[13], available_on_keys_json: vals[14],
+      purchase_on_json: vals[15],
+    };
+  } catch (e) {
+    console.error(`[watchlist-streaming] Failed to fetch ${row.item_id}:`, e.message);
+    // Stale data, where there is some, beats none.
+    return cached;
+  }
+}
+
 /**
  * For each item in `watchlistRows`, fetch current streaming availability from
  * TMDB (with 24-hour per-user cache in `watchlist_streaming_cache`) and return
@@ -1505,70 +1585,60 @@ async function getWatchlistItemsWithAvailability(
   const nowIso = new Date().toISOString();
   const result = [];
 
+  // Read every cached answer first, then look up the stale ones several at a
+  // time. One at a time, a long watchlist's first load outlasted the app's
+  // thirty-second timeout, so it failed before it could show anything.
+  const entries = [];
   for (const row of watchlistRows) {
     const m = row.item_id.match(/^(movie|tv)-(\d+)$/);
     if (!m) continue;
-    const [, mediaType, tmdbIdStr] = m;
-    const tmdbId = parseInt(tmdbIdStr, 10);
-
-    let cached = await get(db,
+    const cached = await get(db,
       'SELECT * FROM watchlist_streaming_cache WHERE user_id = ? AND item_id = ?',
       [userId, row.item_id]
     );
+    entries.push({ row, mediaType: m[1], tmdbId: parseInt(m[2], 10), cached });
+  }
 
-    if (!isAvailabilityFresh(cached)) {
-      try {
-        const details = await fetchTitleDetails(mediaType, tmdbId, { includeExternalIds: true });
-        if (!details) {
-          if (!cached) continue;
-        } else {
-          const available = extractAvailability(details['watch/providers'], providerMap, region);
-          const vals = [
-            userId,
-            row.item_id,
-            details.title || details.name || row.title || 'Unknown',
-            details.poster_path
-              ? `https://image.tmdb.org/t/p/w500${details.poster_path}`
-              : (row.poster_url || null),
-            details.overview || null,
-            details.release_date || details.first_air_date || null,
-            (details.release_date || details.first_air_date || '').slice(0, 4) || null,
-            details.vote_average || null,
-            details.vote_count || null,
-            details.popularity || null,
-            details.original_language || null,
-            JSON.stringify((details.genres || []).map((g) => g.name)),
-            details.external_ids?.imdb_id || null,
-            JSON.stringify(available.names),
-            JSON.stringify(available.keys),
-            JSON.stringify(available.purchaseOffers || []),
-            nowIso,
-          ];
-          await run(db,
-            `INSERT OR REPLACE INTO watchlist_streaming_cache
-               (user_id, item_id, title, poster_url, overview, release_date, year,
-                tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id,
-                available_on_json, available_on_keys_json, purchase_on_json, checked_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            vals
-          );
-          cached = {
-            title: vals[2], poster_url: vals[3], overview: vals[4],
-            release_date: vals[5], year: vals[6], tmdb_rating: vals[7],
-            tmdb_vote_count: vals[8], popularity: vals[9], original_language: vals[10],
-            genres_json: vals[11], imdb_id: vals[12],
-            available_on_json: vals[13], available_on_keys_json: vals[14],
-            purchase_on_json: vals[15],
-          };
-        }
-      } catch (e) {
-        console.error(`[watchlist-streaming] Failed to fetch ${row.item_id}:`, e.message);
-        if (!cached) continue;
-        // fall through and use stale cached data
-      }
+  await mapWithConcurrency(
+    entries.filter((entry) => !isAvailabilityFresh(entry.cached)),
+    WATCHLIST_LOOKUP_CONCURRENCY,
+    async (entry) => {
+      entry.cached = await refreshWatchlistAvailability(db, userId, entry, providerMap, region, nowIso);
     }
+  );
 
-    if (!cached) continue;
+  for (const { row, mediaType, tmdbId, cached } of entries) {
+    if (!cached) {
+      // TMDB could not be asked and nothing is cached. This used to drop the
+      // film — from From Watchlist too, which is meant to mirror the whole list,
+      // and three refusals open the breaker, so one bad moment took out the
+      // rest of it. The film is still saved; it is the availability that is
+      // unknown, so it is returned as saved and flagged, and each view decides.
+      result.push({
+        id: row.item_id,
+        tmdbId,
+        mediaType,
+        addedAt: row.added_at || null,
+        title: row.title || 'Unknown',
+        overview: null,
+        releaseDate: null,
+        year: null,
+        posterUrl: row.poster_url || null,
+        backdropPath: null,
+        tmdbRating: null,
+        tmdbVoteCount: null,
+        popularity: null,
+        originalLanguage: null,
+        genres: [],
+        imdbId: null,
+        _imdbIdForRatings: null,
+        availableOn: [],
+        availableOnKeys: [],
+        purchaseOn: [],
+        availabilityUnknown: true,
+      });
+      continue;
+    }
 
     const availableKeys = JSON.parse(cached.available_on_keys_json || '[]');
     if (streamingOnly && !availableKeys.some((k) => platformSet.has(k))) continue;
@@ -1639,10 +1709,12 @@ async function getWatchlistItemsWithAvailability(
 }
 
 /** "Streaming watchlist" view — watchlist items available on the user's platforms. */
-function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, region) {
-  return getWatchlistItemsWithAvailability(db, userId, watchlistRows, platforms, region, {
+async function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, region) {
+  // Streaming titles only, so a title whose availability is unknown is not one.
+  const items = await getWatchlistItemsWithAvailability(db, userId, watchlistRows, platforms, region, {
     streamingOnly: true,
   });
+  return items.filter((item) => !item.availabilityUnknown);
 }
 
 // ── One person's work, filtered to what the reader can actually watch ────────
