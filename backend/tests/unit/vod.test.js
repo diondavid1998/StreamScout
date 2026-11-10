@@ -93,22 +93,68 @@ describe('a user who has not picked VOD', () => {
 describe('a user who picked VOD', () => {
   const selection = buildProviderSelection(['netflix', 'vod']);
 
-  it('widens the discover query to rent and buy', () => {
+  it('widens the discover query to rentals, and not to purchases', () => {
+    // A title that can only be bought outright is not what "VOD" is asked for:
+    // it put a twenty-pound purchase beside a three-pound rental.
     expect(monetizationFor(selection.providerMapById))
-      .toEqual(['flatrate', 'free', 'ads', 'rent', 'buy']);
+      .toEqual(['flatrate', 'free', 'ads', 'rent']);
   });
 
-  it('names the storefronts, and keeps them out of the subscription list', () => {
+  it('names the rental stores, and keeps them out of the subscription list', () => {
     const providers = normalizeProviders(DETAILS, selection.providerMapById);
     // What a subscription covers is unchanged…
     expect(providers.names).toEqual(['Netflix']);
-    // …and where to buy it is its own answer, each store once.
-    expect(providers.purchaseOffers.map((o) => o.name))
-      .toEqual(['Apple TV', 'Amazon Video', 'Fandango At Home']);
-    // Apple TV was listed under both rent and buy; it is one store, two terms.
-    expect(providers.purchaseOffers[0].tiers.sort()).toEqual(['buy', 'rent']);
-    expect(providers.purchaseOffers[1].tiers).toEqual(['rent']);
-    expect(providers.purchaseOffers[2].tiers).toEqual(['buy']);
+    // …and where to rent it is its own answer. Apple TV's buy listing and
+    // Fandango's buy-only one are not offers this tile makes.
+    expect(providers.purchaseOffers).toEqual([
+      { name: 'Apple TV', tiers: ['rent'] },
+      { name: 'Amazon Video', tiers: ['rent'] },
+    ]);
+  });
+
+  it('leaves out a title that can only be bought', () => {
+    const buyOnly = {
+      'watch/providers': {
+        results: { US: { buy: [{ provider_id: 2, provider_name: 'Apple TV' }] } },
+      },
+    };
+    const providers = normalizeProviders(buyOnly, selection.providerMapById);
+    expect(providers.purchaseOffers).toEqual([]);
+    // No VOD key either, or the Rent filter would list it with nothing on it.
+    expect(providers.keys).toEqual([]);
+    // And it must not fall through into the subscription list: Apple TV's
+    // store id is in VOD's own id list, so a buy offer that slipped past the
+    // tier check would be filed as a subscription called "VOD".
+    expect(providers.names).toEqual([]);
+  });
+
+  it('leaves Fandango off a card even when TMDB lists it to rent', () => {
+    const fandango = {
+      'watch/providers': {
+        results: { US: { rent: [
+          { provider_id: 7, provider_name: 'Fandango At Home' },
+          // Matched on the name too: TMDB has listed it under another id.
+          { provider_id: 123456, provider_name: 'Fandango at Home Free' },
+          { provider_id: 3, provider_name: 'Google Play Movies' },
+        ] } },
+      },
+    };
+    const providers = normalizeProviders(fandango, selection.providerMapById);
+    expect(providers.purchaseOffers.map((o) => o.name)).toEqual(['Google Play Movies']);
+  });
+
+  it('does not ask TMDB about Fandango at all', () => {
+    expect(PLATFORM_CONFIG.vod.ids).not.toContain(7);
+  });
+
+  it('a title rentable only from Fandango is not a VOD title', () => {
+    const onlyFandango = {
+      'watch/providers': {
+        results: { US: { rent: [{ provider_id: 7, provider_name: 'Fandango At Home' }] } },
+      },
+    };
+    const providers = normalizeProviders(onlyFandango, selection.providerMapById);
+    expect(providers.keys).toEqual([]);
   });
 
   it('files every store under one key, so the filter chip is one chip', () => {
@@ -187,9 +233,27 @@ describe('availability in the watchlist view', () => {
     const map = buildProviderLookupMap(['netflix', 'vod']);
     const available = extractAvailability(DETAILS['watch/providers'], map, 'US');
     expect(available.names).toEqual(['Netflix']);
-    expect(available.purchaseOffers.map((o) => o.name))
-      .toEqual(['Apple TV', 'Amazon Video', 'Fandango At Home']);
+    // The watchlist view applies the same rules: rentals only, no Fandango.
+    expect(available.purchaseOffers).toEqual([
+      { name: 'Apple TV', tiers: ['rent'] },
+      { name: 'Amazon Video', tiers: ['rent'] },
+    ]);
     expect(available.keys).toEqual(['netflix', VOD_KEY]);
+  });
+
+  it('leaves Fandango off the watchlist view too, when it is listed to rent', () => {
+    // The watchlist view reads offers through its own function, so the rule
+    // has to hold there separately — a fixture with Fandango only under `buy`
+    // would pass on the tier rule alone and prove nothing about this one.
+    const map = buildProviderLookupMap(['vod']);
+    const fandango = {
+      results: { US: { rent: [
+        { provider_id: 7, provider_name: 'Fandango At Home' },
+        { provider_id: 2, provider_name: 'Apple TV' },
+      ] } },
+    };
+    const available = extractAvailability(fandango, map, 'US');
+    expect(available.purchaseOffers).toEqual([{ name: 'Apple TV', tiers: ['rent'] }]);
   });
 
   it('agrees with the catalog about the same title', () => {

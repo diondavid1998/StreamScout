@@ -1778,8 +1778,26 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
           db, req.user.id, watchlistDetailRows, scopePlatforms, region, { streamingOnly }
         );
 
+        // A saved title TMDB could not be asked about. From Watchlist keeps it —
+        // it is still saved — but the streaming view cannot claim it streams,
+        // so it is left out there and counted, so the app can say so.
+        let uncheckedCount = 0;
+        if (streamingOnly) {
+          uncheckedCount = items.filter((item) => item.availabilityUnknown).length;
+          items = items.filter((item) => !item.availabilityUnknown);
+        }
+
         // In-memory filters
-        if (serviceFiltersFromQuery.length) {
+        //
+        // The service filter narrows only when it narrows. The app sends the
+        // reader's whole selection as the service filter on every request, so
+        // applying that here turned From Watchlist — the view meant to mirror
+        // the entire list — into a second Streaming Watchlist: every saved film
+        // not on one of their services was hidden, and a long watchlist read as
+        // a short one. A filter naming every service they have is no filter.
+        const narrowsServices = serviceFiltersFromQuery.length > 0
+          && scopePlatforms.some((k) => !serviceFiltersFromQuery.includes(k));
+        if (serviceFiltersFromQuery.length && (streamingOnly || narrowsServices)) {
           items = items.filter((item) =>
             item.availableOnKeys.some((k) => serviceFiltersFromQuery.includes(k))
           );
@@ -1830,6 +1848,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
             hasMore: currentPage < totalPages,
             cacheMode: 'watchlist',
             streamingOnly,
+            uncheckedCount,
           },
         });
       } catch (e) {

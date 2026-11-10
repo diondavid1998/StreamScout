@@ -215,7 +215,7 @@ struct ServiceFilterSheet: View {
 
     private var summary: String {
         if selected.isEmpty { return "Showing every service you picked." }
-        if selected == [vodPlatformKey] { return "Showing only what you can rent or buy." }
+        if selected == [vodPlatformKey] { return "Showing only what you can rent." }
         let n = selected.count
         return "Showing \(n) of your \(platforms.count) service\(platforms.count == 1 ? "" : "s")."
     }
@@ -243,7 +243,7 @@ struct ServiceFilterSheet: View {
                                         HStack(spacing: 7) {
                                             ProviderMark(name: platform.name, size: 18)
                                                 .accessibilityHidden(true)
-                                            Text(platform.key == vodPlatformKey ? "Rent or Buy" : platform.name)
+                                            Text(platform.key == vodPlatformKey ? "Rent" : platform.name)
                                                 .font(.footnote.weight(.semibold))
                                                 .lineLimit(2).minimumScaleFactor(0.8)
                                                 .multilineTextAlignment(.leading)
@@ -259,7 +259,7 @@ struct ServiceFilterSheet: View {
                                     }
                                     .buttonStyle(ScaleButtonStyle())
                                     .accessibilityLabel(
-                                        platform.key == vodPlatformKey ? "Rent or buy" : platform.name
+                                        platform.key == vodPlatformKey ? "Rent" : platform.name
                                     )
                                     .accessibilityAddTraits(isOn ? .isSelected : [])
                                 }

@@ -90,7 +90,8 @@ struct CatalogView: View {
     @State private var languageFilters: Set<String> = []
     @State private var yearMin = ""
     @State private var yearMax = ""
-    @State private var hideWatched = false
+    /// Lives on AppState so it is remembered across launches. On by default.
+    private var hideWatched: Bool { app.hideWatched }
     @State private var watchlistOnly = false
     /// Narrows the watchlist view to titles currently streaming on the user's
     /// services. Mutually exclusive with `watchlistOnly`.
@@ -409,17 +410,20 @@ struct CatalogView: View {
                     )
                 }
                 .buttonStyle(ScaleButtonStyle())
-                if !app.watchedIds.isEmpty {
-                    Button {
-                        hideWatched.toggle(); page = 1; Task { await fetch() }
-                    } label: {
-                        FilterChip(
-                            label: hideWatched ? "Hiding Watched" : "Hide Watched",
-                            icon: "eye.slash", active: hideWatched, showsChevron: false
-                        )
-                    }
-                    .buttonStyle(ScaleButtonStyle())
+                // Always shown. It used to appear only when the phone's own
+                // watched list was non-empty, which a history imported from
+                // Letterboxd never fills — and with hiding now on by default,
+                // a missing chip would hide watched films with no way to show
+                // them again.
+                Button {
+                    app.saveHideWatched(!hideWatched); page = 1; Task { await fetch() }
+                } label: {
+                    FilterChip(
+                        label: hideWatched ? "Hiding Watched" : "Showing Watched",
+                        icon: hideWatched ? "eye.slash" : "eye", active: hideWatched, showsChevron: false
+                    )
                 }
+                .buttonStyle(ScaleButtonStyle())
                 Button {
                     watchlistOnly.toggle()
                     // The two watchlist views are alternatives, not layers.
@@ -621,12 +625,12 @@ struct CatalogView: View {
     }
     /// Names the narrowing when there is one, counts the services otherwise.
     ///
-    /// "Rent or Buy" rather than "VOD" when that is the only one left: it is the
+    /// "Rent" rather than "VOD" when that is the only one left: it is the
     /// question the filter answers, and the three letters are jargon the rest of
     /// the catalog never uses.
     var serviceFilterLabel: String {
         if serviceFilters.isEmpty { return "\(app.selectedPlatforms.count) services" }
-        if serviceFilters == [vodPlatformKey] { return "Rent or Buy" }
+        if serviceFilters == [vodPlatformKey] { return "Rent" }
         if serviceFilters.count == 1,
            let key = serviceFilters.first,
            let platform = allPlatforms.first(where: { $0.key == key }) {
@@ -662,19 +666,24 @@ struct CatalogView: View {
     /// The plain first-page feed a cold launch lands on — no filters, no
     /// watchlist scoping. Only this view is snapshotted for offline, because it
     /// is the only one a relaunch starts from.
+    ///
+    /// Hide Watched is not a filter here but part of what the feed *is*: it is
+    /// remembered and on by default, so it is what a relaunch starts from. As a
+    /// disqualifier it would have stopped the snapshot ever being saved.
     private var isDefaultFeedView: Bool {
         page == 1 && genreFilters.isEmpty && languageFilters.isEmpty
             && serviceFilters.isEmpty
             && yearMin.isEmpty && yearMax.isEmpty
-            && !hideWatched && !watchlistOnly && !streamingWatchlistOnly
+            && !watchlistOnly && !streamingWatchlistOnly
     }
 
     /// Which default view a snapshot belongs to. The feed is specific to the
-    /// user's services, sort and media type, so a snapshot captured under one
-    /// set must never seed another.
+    /// user's services, sort, media type and whether watched titles are hidden,
+    /// so a snapshot captured under one set must never seed another — a feed
+    /// showing everything must not open on one that left the watched films out.
     private var feedSignature: String {
         let platforms = app.selectedPlatforms.sorted().joined(separator: ",")
-        return "\(platforms)|\(sortBy.isEmpty ? "popularity" : sortBy)|\(mediaType.isEmpty ? "all" : mediaType)"
+        return "\(platforms)|\(sortBy.isEmpty ? "popularity" : sortBy)|\(mediaType.isEmpty ? "all" : mediaType)|\(hideWatched ? "unseen" : "all")"
     }
 
     /// Put the last snapshot on screen immediately, before the network answers
@@ -709,7 +718,13 @@ struct CatalogView: View {
         if !languageFilters.isEmpty       { params["languageFilters"] = languageFilters.joined(separator: ",") }
         if !yearMin.isEmpty               { params["yearMin"] = yearMin }
         if !yearMax.isEmpty               { params["yearMax"] = yearMax }
-        if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "true" }
+        // Said explicitly either way. It used to be sent only when the phone's
+        // own watched list was non-empty — but a history imported from
+        // Letterboxd lives on the server, so a phone that had never marked
+        // anything watched sent no filter at all, chip on or not. The server
+        // knows the whole history and treats an absent value as off, so an
+        // explicit "false" is what lets the reader turn it off.
+        params["hideWatched"] = hideWatched ? "true" : "false"
         if watchlistOnly || streamingWatchlistOnly {
             params["watchlistOnly"] = "true"
             if streamingWatchlistOnly { params["streamingOnly"] = "true" }
